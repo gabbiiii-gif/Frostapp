@@ -5794,20 +5794,29 @@ function CadastroModule({ user, addToast }) {
     loadClients();
   }, [clientForm, editing, loadClients, addToast]);
 
+  /* Exclusão de cliente — remove também OS, transações, tickets e agendamentos vinculados */
   const handleDeleteClient = useCallback((row) => {
-    const os = DB.list("erp:os:").filter((o) => o.clienteId === row.id);
-    const tx = DB.list("erp:finance:").filter((t) => t.clienteId === row.id);
-    if (os.length > 0 || tx.length > 0) {
-      addToast(`Este cliente possui ${os.length} OS e ${tx.length} transações vinculadas. Exclua os vínculos primeiro.`, "warning");
-      return;
-    }
     setConfirmDelete(row);
-  }, [addToast]);
+  }, []);
 
   const confirmDeleteClientAction = useCallback(() => {
     if (confirmDelete) {
+      // Remove OS vinculadas
+      const os = DB.list("erp:os:").filter((o) => o.clienteId === confirmDelete.id);
+      os.forEach((o) => DB.delete("erp:os:" + o.id));
+      // Remove transações vinculadas
+      const tx = DB.list("erp:finance:").filter((t) => t.clienteId === confirmDelete.id);
+      tx.forEach((t) => DB.delete("erp:finance:" + t.id));
+      // Remove tickets vinculados
+      const tk = DB.list("erp:ticket:").filter((t) => t.clienteId === confirmDelete.id);
+      tk.forEach((t) => DB.delete("erp:ticket:" + t.id));
+      // Remove agendamentos vinculados
+      const ag = DB.list("erp:schedule:").filter((s) => s.clienteId === confirmDelete.id);
+      ag.forEach((s) => DB.delete("erp:schedule:" + s.id));
+      // Remove o cliente
       DB.delete("erp:client:" + confirmDelete.id);
-      addToast("Cliente excluído.", "success");
+      const removed = os.length + tx.length + tk.length + ag.length;
+      addToast(`Cliente e ${removed} registro(s) vinculado(s) excluídos.`, "success");
       setConfirmDelete(null);
       setDetailView(null);
       loadClients();
@@ -6438,7 +6447,7 @@ function CadastroModule({ user, addToast }) {
       {/* Confirm Delete */}
       {confirmDelete && (
         <ConfirmDialog
-          message={`Excluir "${confirmDelete.nome || ""}"? Esta ação não pode ser desfeita.`}
+          message={activeTab === "clientes" ? `Excluir "${confirmDelete.nome || ""}" e todos os registros vinculados (OS, transações, tickets, agendamentos)? Esta ação não pode ser desfeita.` : `Excluir "${confirmDelete.nome || ""}"? Esta ação não pode ser desfeita.`}
           onConfirm={activeTab === "clientes" ? confirmDeleteClientAction : confirmDeleteEmployeeAction}
           onCancel={() => setConfirmDelete(null)}
         />
