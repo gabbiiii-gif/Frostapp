@@ -7017,7 +7017,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [toasts, setToasts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [splashVisible, setSplashVisible] = useState(true);
+  const [splashVisible, setSplashVisible] = useState(false);
   const [splashFading, setSplashFading] = useState(false);
   const [splashProgress, setSplashProgress] = useState(0);
   const [splashMessage, setSplashMessage] = useState("Inicializando sistema...");
