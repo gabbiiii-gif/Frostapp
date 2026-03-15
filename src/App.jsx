@@ -5,6 +5,7 @@ import {
   ResponsiveContainer, Cell
 } from "recharts";
 import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase } from "./supabase.js";
+import Aurora from "./Aurora.jsx";
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────────
 
@@ -1052,9 +1053,17 @@ function LoginScreen({ onLogin }) {
   }, [email, password, onLogin]);
 
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
-      <div className="w-full max-w-md animate-slideIn">
-        <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-8">
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4" style={{ position: 'relative', overflow: 'hidden' }}>
+      {/* Aurora animated background */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+        <Aurora
+          colorStops={["#4e487f", "#433a5f", "#5227FF"]}
+          amplitude={1}
+          blend={0.43}
+        />
+      </div>
+      <div className="w-full max-w-md animate-slideIn" style={{ position: 'relative', zIndex: 1 }}>
+        <div className="bg-gray-800/80 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-700 p-8">
           <div className="text-center mb-8">
             <div className="text-6xl mb-3">❄️</div>
             <h2 className="text-2xl font-bold text-white">FrostERP</h2>
