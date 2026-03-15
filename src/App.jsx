@@ -7029,8 +7029,6 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [splashVisible, setSplashVisible] = useState(true);
   const [splashFading, setSplashFading] = useState(false);
-  const [splashProgress, setSplashProgress] = useState(0);
-  const [splashMessage, setSplashMessage] = useState("Inicializando sistema...");
   const [data, setData] = useState({
     clients: [], employees: [], inventory: [], services: [], schedule: [],
     finance: [], invoices: [], bills: [], tickets: [], banking: [], pdv: [], messages: [], config: {},
@@ -7042,35 +7040,13 @@ export default function App() {
   const [showNotifications, setShowNotifications] = useState(false);
   const searchRef = useRef(null);
 
-  // ─── Init with Splash Screen ───
+  // ─── Init com Splash de 3 segundos ───
   useEffect(() => {
-    let progress = 0;
-    const progressInterval = setInterval(() => {
-      progress += 1;
-      if (progress >= 100) {
-        progress = 100;
-        setSplashProgress(progress);
-        setSplashMessage("Pronto!");
-        clearInterval(progressInterval);
-      } else {
-        setSplashProgress(progress);
-
-        // Change message based on progress
-        if (progress < 10) setSplashMessage("Inicializando sistema...");
-        else if (progress < 25) setSplashMessage("Verificando banco de dados...");
-        else if (progress < 40) setSplashMessage("Carregando módulos...");
-        else if (progress < 55) setSplashMessage("Configurando permissões...");
-        else if (progress < 70) setSplashMessage("Carregando dados...");
-        else if (progress < 85) setSplashMessage("Preparando interface...");
-        else if (progress < 99) setSplashMessage("Quase pronto...");
-      }
-    }, 10);
-
-    // Fade after 1 second for faster deployment
+    // Splash de 3s com fade-out
     setTimeout(() => {
       setSplashFading(true);
       setTimeout(() => setSplashVisible(false), 600);
-    }, 1000);
+    }, 3000);
 
     // Real init — hydrate from Supabase, then load
     hydrateFromSupabase().then(() => {
@@ -7089,7 +7065,6 @@ export default function App() {
       setLoading(false);
     });
 
-    return () => clearInterval(progressInterval);
   }, []);
 
   // ─── Load All Data ───
@@ -7283,87 +7258,13 @@ export default function App() {
           transition: "opacity 0.6s ease-out",
         }}
       >
-        <StyleSheet />
-        <div className="text-center" style={{ animation: "fadeIn 0.8s ease-out" }}>
-          {/* Animated snowflake logo */}
-          <div className="relative mb-8 inline-block">
-            <div
-              className="text-8xl"
-              style={{
-                animation: "spin 4s linear infinite",
-                filter: "drop-shadow(0 0 30px rgba(59, 130, 246, 0.5))",
-              }}
-            >
-              ❄️
-            </div>
-            <div
-              className="absolute inset-0 text-8xl"
-              style={{
-                animation: "spin 4s linear infinite reverse",
-                opacity: 0.15,
-                filter: "blur(8px)",
-              }}
-            >
-              ❄️
-            </div>
-          </div>
-
-          {/* Marca com animação BlurText */}
-          <BlurText
-            text="FrostERP"
-            delay={200}
-            animateBy="words"
-            direction="top"
-            className="text-5xl font-bold mb-2 text-white"
-          />
-          <p className="text-gray-500 text-sm mb-10 tracking-widest uppercase">
-            Sistema de Gestão Integrada
-          </p>
-
-          {/* Progress bar */}
-          <div className="w-72 mx-auto">
-            <div className="h-1.5 bg-gray-800 rounded-full overflow-hidden mb-4">
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${splashProgress}%`,
-                  background: "linear-gradient(90deg, #3b82f6, #06b6d4)",
-                  transition: "width 0.4s ease-out",
-                  boxShadow: "0 0 12px rgba(6, 182, 212, 0.4)",
-                }}
-              />
-            </div>
-            <p className="text-gray-500 text-xs tracking-wide">{splashMessage}</p>
-            <p className="text-gray-700 text-xs mt-1">{splashProgress}%</p>
-          </div>
-
-          {/* Skip button */}
-          <button
-            onClick={() => setSplashVisible(false)}
-            className="mt-6 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors"
-          >
-            Pular Carregamento
-          </button>
-
-          {/* Decorative particles */}
-          <div className="absolute inset-0 pointer-events-none overflow-hidden">
-            {[...Array(6)].map((_, i) => (
-              <div
-                key={i}
-                className="absolute text-blue-500/10"
-                style={{
-                  fontSize: `${12 + i * 4}px`,
-                  left: `${15 + i * 14}%`,
-                  top: `${20 + (i % 3) * 25}%`,
-                  animation: `floatParticle ${3 + i * 0.5}s ease-in-out infinite`,
-                  animationDelay: `${i * 0.3}s`,
-                }}
-              >
-                ❄
-              </div>
-            ))}
-          </div>
-        </div>
+        <BlurText
+          text="FrostERP"
+          delay={200}
+          animateBy="words"
+          direction="top"
+          className="text-5xl font-bold text-white"
+        />
       </div>
     );
   }
