@@ -7054,13 +7054,13 @@ export default function App() {
         else if (progress < 85) setSplashMessage("Preparando interface...");
         else if (progress < 99) setSplashMessage("Quase pronto...");
       }
-    }, 24);
+    }, 10);
 
-    // Fade after 2.4 seconds
+    // Fade after 1 second for faster deployment
     setTimeout(() => {
       setSplashFading(true);
       setTimeout(() => setSplashVisible(false), 600);
-    }, 2400);
+    }, 1000);
 
     // Real init — hydrate from Supabase, then load
     hydrateFromSupabase().then(() => {
@@ -7331,6 +7331,14 @@ export default function App() {
             <p className="text-gray-500 text-xs tracking-wide">{splashMessage}</p>
             <p className="text-gray-700 text-xs mt-1">{splashProgress}%</p>
           </div>
+
+          {/* Skip button */}
+          <button
+            onClick={() => setSplashVisible(false)}
+            className="mt-6 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded-lg transition-colors"
+          >
+            Pular Carregamento
+          </button>
 
           {/* Decorative particles */}
           <div className="absolute inset-0 pointer-events-none overflow-hidden">
