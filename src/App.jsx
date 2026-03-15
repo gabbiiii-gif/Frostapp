@@ -1282,7 +1282,7 @@ function Dashboard({ user, dateFilter, onNavigate }) {
           title="Serviços Realizados"
           value={servicosRealizados}
           icon="🔧"
-          onClick={() => onNavigate("os")}
+          onClick={() => onNavigate("processos")}
         />
         <KPICard
           title="Agendamentos Hoje"
@@ -1300,7 +1300,7 @@ function Dashboard({ user, dateFilter, onNavigate }) {
           title="Tickets Abertos"
           value={ticketsAbertos}
           icon="🎫"
-          onClick={() => onNavigate("tickets")}
+          onClick={() => onNavigate("webdesk")}
         />
       </div>
 
@@ -6952,51 +6952,6 @@ function SettingsModule({ user, addToast, reloadData }) {
         </div>
       </div>
 
-      {/* Backup & Restore */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
-        <h3 className="text-lg font-semibold text-white mb-4">Backup e Restauração</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {/* Export */}
-          <div className="bg-gray-700/50 rounded-lg p-4 border border-gray-600">
-            <div className="text-3xl mb-2">💾</div>
-            <h4 className="text-white font-medium mb-1">Exportar Backup</h4>
-            <p className="text-gray-400 text-xs mb-3">Baixar todos os dados em formato JSON</p>
-            <button onClick={handleExport} className="w-full px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
-              Exportar Backup
-            </button>
-          </div>
-
-          {/* Import */}
-          <div className="bg-gray-700/50 rounded-lg p-4 border border-gray-600">
-            <div className="text-3xl mb-2">📂</div>
-            <h4 className="text-white font-medium mb-1">Importar Backup</h4>
-            <p className="text-gray-400 text-xs mb-3">Restaurar dados a partir de um arquivo JSON</p>
-            <input
-              type="file"
-              accept=".json"
-              ref={fileInputRef}
-              onChange={handleFileSelect}
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full px-4 py-2 text-sm rounded-lg bg-cyan-600 text-white hover:bg-cyan-700 transition"
-            >
-              Selecionar Arquivo
-            </button>
-          </div>
-
-          {/* Reset */}
-          <div className="bg-gray-700/50 rounded-lg p-4 border border-gray-600">
-            <div className="text-3xl mb-2">🔄</div>
-            <h4 className="text-white font-medium mb-1">Limpar Sistema</h4>
-            <p className="text-gray-400 text-xs mb-3">Apagar todos os dados e reiniciar do zero</p>
-            <button onClick={handleResetDemo} className="w-full px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 transition">
-              Apagar Tudo
-            </button>
-          </div>
-        </div>
-      </div>
 
       {/* System Info */}
       <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
