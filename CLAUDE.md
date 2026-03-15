@@ -62,3 +62,9 @@ The app UI is entirely in **Brazilian Portuguese** (pt-BR). All labels, categori
 - Font: DM Sans, loaded from Google Fonts in `index.html`.
 - The `StyleSheet` component injects global CSS including print media queries and animations — check there for styling that isn't Tailwind.
 - The `DataTable` component is reused across all modules and supports sorting, filtering, pagination, and inline actions.
+
+## Regras Obrigatórias do Projeto
+
+1. **Deploy contínuo** — Toda e qualquer alteração no código deve ser commitada no Git e deployada na Vercel. Nunca deixar mudanças apenas locais.
+2. **Comentários nos pontos importantes (em PT-BR)** — Comentar todos os pontos mais importantes do código (funções principais, lógica de negócio, integrações, decisões arquiteturais) para facilitar manutenção e entendimento. Todos os comentários devem ser escritos em Português Brasileiro (pt-BR).
+3. **Sistema integrado PC + Mobile** — O sistema deve funcionar integrado ao PC e como um app mobile responsivo. Todas as telas e componentes devem ser responsivos e adaptados para desktop e dispositivos móveis.
