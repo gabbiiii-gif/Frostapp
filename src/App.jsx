@@ -7034,23 +7034,31 @@ export default function App() {
 
   // ─── Init with Splash Screen ───
   useEffect(() => {
-    const steps = [
-      { msg: "Inicializando sistema...", pct: 10 },
-      { msg: "Verificando banco de dados...", pct: 25 },
-      { msg: "Carregando módulos...", pct: 40 },
-      { msg: "Configurando permissões...", pct: 55 },
-      { msg: "Carregando dados...", pct: 70 },
-      { msg: "Preparando interface...", pct: 85 },
-      { msg: "Quase pronto...", pct: 95 },
-    ];
-    let step = 0;
-    const interval = setInterval(() => {
-      if (step < steps.length) {
-        setSplashMessage(steps[step].msg);
-        setSplashProgress(steps[step].pct);
-        step++;
+    let progress = 0;
+    const progressInterval = setInterval(() => {
+      progress += 1;
+      if (progress >= 100) {
+        progress = 100;
+        setSplashProgress(progress);
+        setSplashMessage("Pronto!");
+        clearInterval(progressInterval);
+        setTimeout(() => {
+          setSplashFading(true);
+          setTimeout(() => setSplashVisible(false), 600);
+        }, 0); // Start fade immediately when 100%
+      } else {
+        setSplashProgress(progress);
+
+        // Change message based on progress
+        if (progress < 10) setSplashMessage("Inicializando sistema...");
+        else if (progress < 25) setSplashMessage("Verificando banco de dados...");
+        else if (progress < 40) setSplashMessage("Carregando módulos...");
+        else if (progress < 55) setSplashMessage("Configurando permissões...");
+        else if (progress < 70) setSplashMessage("Carregando dados...");
+        else if (progress < 85) setSplashMessage("Preparando interface...");
+        else if (progress < 99) setSplashMessage("Quase pronto...");
       }
-    }, 350);
+    }, 24);
 
     // Real init — hydrate from Supabase, then load
     hydrateFromSupabase().then(() => {
@@ -7067,17 +7075,9 @@ export default function App() {
       }
       loadAllData();
       setLoading(false);
-      setSplashProgress(100);
-      setSplashMessage("Pronto!");
-      clearInterval(interval);
-
-      setTimeout(() => {
-        setSplashFading(true);
-        setTimeout(() => setSplashVisible(false), 600);
-      }, 400);
     });
 
-    return () => clearInterval(interval);
+    return () => clearInterval(progressInterval);
   }, []);
 
   // ─── Load All Data ───
@@ -7363,7 +7363,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen bg-gray-900 text-gray-100 font-['DM_Sans']">
+    <div className="flex h-screen bg-gray-900 text-gray-100 font-['DM_Sans'] fade-in">
       <StyleSheet />
 
       {/* Sidebar */}
