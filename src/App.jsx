@@ -7042,10 +7042,6 @@ export default function App() {
         setSplashProgress(progress);
         setSplashMessage("Pronto!");
         clearInterval(progressInterval);
-        setTimeout(() => {
-          setSplashFading(true);
-          setTimeout(() => setSplashVisible(false), 600);
-        }, 0); // Start fade immediately when 100%
       } else {
         setSplashProgress(progress);
 
@@ -7059,6 +7055,12 @@ export default function App() {
         else if (progress < 99) setSplashMessage("Quase pronto...");
       }
     }, 24);
+
+    // Fade after 2.4 seconds
+    setTimeout(() => {
+      setSplashFading(true);
+      setTimeout(() => setSplashVisible(false), 600);
+    }, 2400);
 
     // Real init — hydrate from Supabase, then load
     hydrateFromSupabase().then(() => {
