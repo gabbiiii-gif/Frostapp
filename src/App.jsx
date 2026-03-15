@@ -478,6 +478,7 @@ function seedDatabase() {
   const tickets = [
     {
       id: genId(), numero: "TK-001", titulo: "Ar condicionado fazendo barulho estranho",
+      assunto: "Barulho na unidade externa",
       descricao: "Cliente relata que o equipamento instalado há 2 semanas começou a fazer um barulho de vibração na unidade externa.",
       clienteId: clientIds[0], clienteNome: clients[0].nome,
       prioridade: "media", status: "aberto", categoria: "Reclamação",
@@ -491,6 +492,7 @@ function seedDatabase() {
     },
     {
       id: genId(), numero: "TK-002", titulo: "Solicitar orçamento para sistema VRF",
+      assunto: "Orçamento sistema VRF 200m²",
       descricao: "Empresa solicita orçamento para instalação de sistema VRF em escritório de 200m² com 8 evaporadoras.",
       clienteId: clientIds[3], clienteNome: clients[3].nome,
       prioridade: "alta", status: "aberto", categoria: "Orçamento",
@@ -879,6 +881,8 @@ function DateFilterBar({ dateFilter, setDateFilter }) {
             type="date"
             value={dateFilter.startDate || ""}
             onChange={(e) => setDateFilter({ ...dateFilter, startDate: e.target.value })}
+            aria-label="Data inicial"
+            name="startDate"
             className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
           />
           <span className="text-gray-400">até</span>
@@ -886,6 +890,8 @@ function DateFilterBar({ dateFilter, setDateFilter }) {
             type="date"
             value={dateFilter.endDate || ""}
             onChange={(e) => setDateFilter({ ...dateFilter, endDate: e.target.value })}
+            aria-label="Data final"
+            name="endDate"
             className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
           />
         </div>
@@ -933,23 +939,48 @@ function SearchInput({ value, onChange, placeholder = "Buscar..." }) {
   );
 }
 
-function ConfirmDialog({ message, onConfirm, onCancel }) {
+/* Diálogo de confirmação com suporte a digitação obrigatória para ações destrutivas */
+function ConfirmDialog({ message, onConfirm, onCancel, requireType = null }) {
+  const [typed, setTyped] = useState("");
+  const confirmed = requireType ? typed === requireType : true;
+
   return (
     <div
       className="fixed inset-0 z-[55] flex items-center justify-center p-4 animate-fadeIn"
       style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="Confirmação"
     >
       <div className="bg-gray-800 rounded-xl shadow-2xl border border-gray-700 p-6 max-w-sm w-full animate-slideIn">
         <div className="flex items-center gap-3 mb-4">
-          <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center text-red-400 text-xl">⚠</div>
+          <div className="w-10 h-10 rounded-full bg-red-500/20 flex items-center justify-center text-red-400 text-xl" aria-hidden="true">⚠</div>
           <h3 className="text-white font-semibold">Confirmar</h3>
         </div>
-        <p className="text-gray-300 text-sm mb-6">{message}</p>
+        <p className="text-gray-300 text-sm mb-4">{message}</p>
+        {requireType && (
+          <div className="mb-4">
+            <p className="text-gray-400 text-xs mb-2">Digite <strong className="text-red-400">{requireType}</strong> para confirmar:</p>
+            <input
+              type="text"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value)}
+              placeholder={requireType}
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-500 focus:outline-none focus:border-red-500 transition"
+              autoFocus
+              aria-label={`Digite ${requireType} para confirmar`}
+            />
+          </div>
+        )}
         <div className="flex justify-end gap-3">
           <button onClick={onCancel} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition">
             Cancelar
           </button>
-          <button onClick={onConfirm} className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 transition">
+          <button
+            onClick={onConfirm}
+            disabled={!confirmed}
+            className="px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 transition disabled:opacity-40 disabled:cursor-not-allowed"
+          >
             Confirmar
           </button>
         </div>
@@ -1026,7 +1057,7 @@ function LoginScreen({ onLogin }) {
         <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-8">
           <div className="text-center mb-8">
             <div className="text-6xl mb-3">❄️</div>
-            <h1 className="text-2xl font-bold text-white">FrostERP</h1>
+            <h2 className="text-2xl font-bold text-white">FrostERP</h2>
             <p className="text-gray-400 text-sm mt-1">Sistema de Gestão Integrada</p>
           </div>
 
@@ -1234,7 +1265,7 @@ function Dashboard({ user, dateFilter, onNavigate }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Dashboard</h1>
+          <h2 className="text-2xl font-bold text-white">Dashboard</h2>
           <p className="text-gray-400 text-sm mt-1">Bem-vindo, {user.nome.split(" ")[0]}!</p>
         </div>
       </div>
@@ -1443,7 +1474,7 @@ function PrintableFinanceReport({ transactions, dateFilter }) {
   return (
     <div className="print-only print-report">
       <div style={{ textAlign: "center", marginBottom: "20px" }}>
-        <h1 style={{ fontSize: "18px", fontWeight: "bold" }}>FrostERP Refrigeração</h1>
+        <h2 style={{ fontSize: "18px", fontWeight: "bold" }}>FrostERP Refrigeração</h2>
         <h2 style={{ fontSize: "14px", color: "#555" }}>Relatório Financeiro</h2>
         <p style={{ fontSize: "11px", color: "#888" }}>Gerado em: {formatDateTime(new Date().toISOString())}</p>
       </div>
@@ -1678,7 +1709,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
 
       <div className="flex items-center justify-between no-print">
         <div>
-          <h1 className="text-2xl font-bold text-white">Financeiro</h1>
+          <h2 className="text-2xl font-bold text-white">Financeiro</h2>
           <p className="text-gray-400 text-sm mt-1">Gestão de receitas e despesas</p>
         </div>
         <div className="flex gap-2">
@@ -2131,7 +2162,7 @@ function InventoryModule({ user, addToast }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Estoque</h1>
+          <h2 className="text-2xl font-bold text-white">Estoque</h2>
           <p className="text-gray-400 text-sm mt-1">Gestão de inventário e movimentações</p>
         </div>
         {!isReadOnly && (
@@ -2453,7 +2484,7 @@ function PrintableInvoice({ invoice, config }) {
   return (
     <div className="print-only print-report">
       <div style={{ textAlign: "center", marginBottom: "20px", borderBottom: "2px solid #333", paddingBottom: "15px" }}>
-        <h1 style={{ fontSize: "18px", fontWeight: "bold" }}>{config?.nomeEmpresa || "FrostERP Refrigeração"}</h1>
+        <h2 style={{ fontSize: "18px", fontWeight: "bold" }}>{config?.nomeEmpresa || "FrostERP Refrigeração"}</h2>
         <p style={{ fontSize: "11px", color: "#666" }}>CNPJ: {config?.cnpj || "—"} | Tel: {config?.telefone || "—"}</p>
         <p style={{ fontSize: "11px", color: "#666" }}>{config?.endereco || "—"}</p>
       </div>
@@ -2972,7 +3003,7 @@ function InvoiceModule({ user, dateFilter, addToast, clients }) {
 
       <div className="flex items-center justify-between no-print">
         <div>
-          <h1 className="text-2xl font-bold text-white">Faturamento</h1>
+          <h2 className="text-2xl font-bold text-white">Faturamento</h2>
           <p className="text-gray-400 text-sm mt-1">Notas fiscais e boletos</p>
         </div>
         <div className="flex gap-2">
@@ -3466,7 +3497,7 @@ function PDVModule({ user, addToast, inventory, reloadData }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Ponto de Venda</h1>
+          <h2 className="text-2xl font-bold text-white">Ponto de Venda</h2>
           <p className="text-gray-400 text-sm mt-1">PDV - Vendas rápidas</p>
         </div>
       </div>
@@ -3859,7 +3890,7 @@ function WebdeskModule({ user, dateFilter, addToast, clients }) {
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           </button>
           <div className="flex-1">
-            <h1 className="text-xl font-bold text-white">{selectedTicket.numero} - {selectedTicket.assunto}</h1>
+            <h2 className="text-xl font-bold text-white">{selectedTicket.numero} - {selectedTicket.assunto}</h2>
             <p className="text-gray-400 text-sm">{selectedTicket.clienteNome} | {selectedTicket.categoria} | Aberto em {formatDateTime(selectedTicket.dataAbertura)}</p>
           </div>
           <div className="flex items-center gap-2">
@@ -3955,7 +3986,7 @@ function WebdeskModule({ user, dateFilter, addToast, clients }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Webdesk</h1>
+          <h2 className="text-2xl font-bold text-white">Webdesk</h2>
           <p className="text-gray-400 text-sm mt-1">Central de atendimento e tickets</p>
         </div>
         <button onClick={openCreate} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-2">
@@ -4336,7 +4367,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Ordens de Serviço</h1>
+          <h2 className="text-2xl font-bold text-white">Ordens de Serviço</h2>
           <p className="text-gray-400 text-sm mt-1">Gestão de processos e OS</p>
         </div>
         <div className="flex gap-2">
@@ -4905,7 +4936,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Agenda</h1>
+          <h2 className="text-2xl font-bold text-white">Agenda</h2>
           <p className="text-gray-400 text-sm mt-1">Agendamentos e calendário</p>
         </div>
         <div className="flex gap-2">
@@ -5426,7 +5457,7 @@ function BankingModule({ user, dateFilter, addToast }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Conciliação Bancária</h1>
+          <h2 className="text-2xl font-bold text-white">Conciliação Bancária</h2>
           <p className="text-gray-400 text-sm mt-1">Compare extratos bancários com lançamentos internos</p>
         </div>
         <div className="flex gap-2">
@@ -5920,7 +5951,7 @@ function CadastroModule({ user, addToast }) {
           >
             ← Voltar
           </button>
-          <h1 className="text-2xl font-bold text-white">{detailView.nome}</h1>
+          <h2 className="text-2xl font-bold text-white">{detailView.nome}</h2>
           <StatusBadge status={detailView.status || "ativo"} />
         </div>
 
@@ -6056,7 +6087,7 @@ function CadastroModule({ user, addToast }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Cadastros</h1>
+          <h2 className="text-2xl font-bold text-white">Cadastros</h2>
           <p className="text-gray-400 text-sm mt-1">Gerencie clientes e funcionários</p>
         </div>
         <button
@@ -6524,7 +6555,7 @@ function MessageCenter({ user, addToast }) {
           >
             ← Voltar
           </button>
-          <h1 className="text-2xl font-bold text-white">Detalhes da Mensagem</h1>
+          <h2 className="text-2xl font-bold text-white">Detalhes da Mensagem</h2>
         </div>
 
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 space-y-4">
@@ -6567,7 +6598,7 @@ function MessageCenter({ user, addToast }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-white">Central de Mensagens</h1>
+          <h2 className="text-2xl font-bold text-white">Central de Mensagens</h2>
           <p className="text-gray-400 text-sm mt-1">Histórico de mensagens enviadas</p>
         </div>
       </div>
@@ -6840,7 +6871,7 @@ function SettingsModule({ user, addToast, reloadData }) {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-white">Configurações</h1>
+        <h2 className="text-2xl font-bold text-white">Configurações</h2>
         <p className="text-gray-400 text-sm mt-1">Gerencie as configurações do sistema</p>
       </div>
 
@@ -7002,7 +7033,8 @@ function SettingsModule({ user, addToast, reloadData }) {
       {/* Reset Confirm Step 2 */}
       {confirmResetFinal && (
         <ConfirmDialog
-          message="ÚLTIMA CONFIRMAÇÃO: Todos os dados serão perdidos permanentemente. Deseja continuar?"
+          message="ÚLTIMA CONFIRMAÇÃO: Todos os dados serão perdidos permanentemente."
+          requireType="APAGAR"
           onConfirm={executeResetDemo}
           onCancel={() => setConfirmResetFinal(false)}
         />
@@ -7300,8 +7332,8 @@ export default function App() {
             </div>
           </div>
 
-          {/* Brand */}
-          <h1
+          {/* Marca — usa div em vez de h1 para evitar múltiplos h1 na página */}
+          <div
             className="text-5xl font-bold mb-2"
             style={{
               background: "linear-gradient(135deg, #3b82f6, #06b6d4, #3b82f6)",
@@ -7312,7 +7344,7 @@ export default function App() {
             }}
           >
             FrostERP
-          </h1>
+          </div>
           <p className="text-gray-500 text-sm mb-10 tracking-widest uppercase">
             Sistema de Gestão Integrada
           </p>
@@ -7381,7 +7413,7 @@ export default function App() {
           <span className="text-2xl">❄️</span>
           {!sidebarCollapsed && (
             <div>
-              <h1 className="text-lg font-bold text-white">FrostERP</h1>
+              <span className="text-lg font-bold text-white">FrostERP</span>
               <p className="text-xs text-gray-400">Gestão Integrada</p>
             </div>
           )}
@@ -7399,13 +7431,16 @@ export default function App() {
         </button>
 
         {/* Nav Items */}
-        <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1">
+        <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-1" aria-label="Menu principal">
           {navItems.map((item) => (
             <button
               key={item.id}
               onClick={() => {
                 setActiveModule(item.id);
                 setSidebarOpen(false);
+                setGlobalSearch("");
+                setGlobalSearchResults([]);
+                setShowSearchResults(false);
               }}
               title={sidebarCollapsed ? item.label : undefined}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${
@@ -7438,28 +7473,31 @@ export default function App() {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <header className="bg-gray-800 border-b border-gray-700 px-4 lg:px-6 py-3">
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap">
             {/* Hamburger (mobile) */}
             <button
               onClick={() => setSidebarOpen(true)}
               className="lg:hidden p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition"
+              aria-label="Abrir menu"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
 
-            {/* Breadcrumb */}
-            <div className="hidden md:flex items-center gap-2 text-sm">
-              <span className="text-gray-400">FrostERP</span>
-              <span className="text-gray-600">›</span>
-              <span className="text-white font-medium">{activeModuleLabel}</span>
+            {/* Breadcrumb — trunca em telas menores para não quebrar o header */}
+            <div className="hidden md:flex items-center gap-2 text-sm min-w-0 flex-shrink-0">
+              <span className="text-gray-400 flex-shrink-0">FrostERP</span>
+              <span className="text-gray-600 flex-shrink-0">›</span>
+              <span className="text-white font-medium truncate max-w-[180px]">{activeModuleLabel}</span>
             </div>
 
-            {/* Date Filter */}
-            <div className="hidden xl:block ml-4">
-              <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
-            </div>
+            {/* Filtro de data — só aparece em páginas que usam período */}
+            {["dashboard", "financeiro", "notas", "webdesk", "processos", "agenda", "conciliacao"].includes(activeModule) && (
+              <div className="hidden xl:block ml-4">
+                <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
+              </div>
+            )}
 
             {/* Spacer */}
             <div className="flex-1" />
@@ -7476,6 +7514,9 @@ export default function App() {
                   onChange={(e) => setGlobalSearch(e.target.value)}
                   onFocus={() => { if (globalSearchResults.length > 0) setShowSearchResults(true); }}
                   placeholder="Buscar..."
+                  aria-label="Busca global"
+                  name="globalSearch"
+                  id="globalSearch"
                   className="w-48 lg:w-64 bg-gray-700 border border-gray-600 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
                 />
               </div>
@@ -7526,6 +7567,7 @@ export default function App() {
               <button
                 onClick={() => setShowNotifications(!showNotifications)}
                 className="relative p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition"
+                aria-label="Notificações"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -7587,14 +7629,16 @@ export default function App() {
             </button>
           </div>
 
-          {/* Mobile Date Filter */}
-          <div className="xl:hidden mt-3">
-            <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
-          </div>
+          {/* Filtro de data mobile — só aparece em páginas que usam período */}
+          {["dashboard", "financeiro", "notas", "webdesk", "processos", "agenda", "conciliacao"].includes(activeModule) && (
+            <div className="xl:hidden mt-3">
+              <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
+            </div>
+          )}
         </header>
 
         {/* Content Area */}
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">
           {activeModule === "dashboard" && (
             <Dashboard user={user} dateFilter={dateFilter} onNavigate={setActiveModule} />
           )}
