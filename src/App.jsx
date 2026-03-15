@@ -6786,7 +6786,7 @@ function SettingsModule({ user, addToast, reloadData }) {
     loadConfig();
   }, [pendingImportData, addToast, reloadData, loadConfig]);
 
-  // ─── Limpar Sistema (apaga tudo sem recarregar dados demo) ───
+  // ─── Restaurar dados de demonstração (apaga tudo e recarrega dados demo) ───
   const handleResetDemo = useCallback(() => {
     setConfirmReset(true);
   }, []);
@@ -6811,18 +6811,12 @@ function SettingsModule({ user, addToast, reloadData }) {
     DB.delete("erp:seeded");
     DB.delete("erp:lastBackup");
 
-    // Cria apenas o usuário admin padrão (sem dados demo)
-    const adminUser = {
-      id: genId(), email: "biel.atm11@gmail.com", nome: "Gabriel Admin",
-      password: hashPassword("gabb0089"), role: "admin",
-      avatar: "CA", createdAt: new Date().toISOString(), status: "ativo",
-    };
-    DB.set("erp:user:" + adminUser.id, adminUser);
-    DB.set("erp:seeded", true);
+    // Recarrega dados de demonstração
+    seedDatabase();
     uploadAllToSupabase();
 
     setConfirmResetFinal(false);
-    addToast("Todos os dados foram apagados. Sistema limpo.", "success");
+    addToast("Dados de demonstração restaurados.", "success");
     if (reloadData) reloadData();
     loadConfig();
   }, [addToast, reloadData, loadConfig]);
@@ -6949,10 +6943,10 @@ function SettingsModule({ user, addToast, reloadData }) {
           {/* Reset */}
           <div className="bg-gray-700/50 rounded-lg p-4 border border-gray-600">
             <div className="text-3xl mb-2">🔄</div>
-            <h4 className="text-white font-medium mb-1">Limpar Sistema</h4>
-            <p className="text-gray-400 text-xs mb-3">Apagar todos os dados e reiniciar do zero</p>
+            <h4 className="text-white font-medium mb-1">Restaurar Demonstração</h4>
+            <p className="text-gray-400 text-xs mb-3">Apagar tudo e recarregar dados demo</p>
             <button onClick={handleResetDemo} className="w-full px-4 py-2 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700 transition">
-              Apagar Tudo
+              Restaurar Demo
             </button>
           </div>
         </div>
@@ -6993,7 +6987,7 @@ function SettingsModule({ user, addToast, reloadData }) {
       {/* Reset Confirm Step 1 */}
       {confirmReset && (
         <ConfirmDialog
-          message="Apagar todos os dados do sistema? Esta ação não pode ser desfeita."
+          message="Restaurar dados de demonstração? Todos os dados atuais serão APAGADOS."
           onConfirm={handleResetDemoConfirm}
           onCancel={() => setConfirmReset(false)}
         />
@@ -7058,16 +7052,10 @@ export default function App() {
 
     // Real init — hydrate from Supabase, then load
     hydrateFromSupabase().then(() => {
-      // Inicialização: cria apenas o usuário admin se não houver nenhum usuário cadastrado (sem dados demo)
+      // Inicialização: carrega dados demo se não houver usuários cadastrados
       const users = DB.list("erp:user:");
       if (users.length === 0) {
-        const adminUser = {
-          id: genId(), email: "biel.atm11@gmail.com", nome: "Gabriel Admin",
-          password: hashPassword("gabb0089"), role: "admin",
-          avatar: "CA", createdAt: new Date().toISOString(), status: "ativo",
-        };
-        DB.set("erp:user:" + adminUser.id, adminUser);
-        DB.set("erp:seeded", true);
+        seedDatabase();
         uploadAllToSupabase();
       }
       loadAllData();
