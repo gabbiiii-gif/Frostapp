@@ -6,6 +6,7 @@ import {
 } from "recharts";
 import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
+import BlurText from "./BlurText.jsx";
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────────
 
@@ -7307,19 +7308,14 @@ export default function App() {
             </div>
           </div>
 
-          {/* Marca — usa div em vez de h1 para evitar múltiplos h1 na página */}
-          <div
-            className="text-5xl font-bold mb-2"
-            style={{
-              background: "linear-gradient(135deg, #3b82f6, #06b6d4, #3b82f6)",
-              backgroundSize: "200% auto",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              animation: "gradientShift 3s ease infinite",
-            }}
-          >
-            FrostERP
-          </div>
+          {/* Marca com animação BlurText */}
+          <BlurText
+            text="FrostERP"
+            delay={200}
+            animateBy="words"
+            direction="top"
+            className="text-5xl font-bold mb-2 text-white"
+          />
           <p className="text-gray-500 text-sm mb-10 tracking-widest uppercase">
             Sistema de Gestão Integrada
           </p>
