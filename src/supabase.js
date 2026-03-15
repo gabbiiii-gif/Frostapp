@@ -3,10 +3,14 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// Cria o cliente Supabase apenas se as variáveis de ambiente estiverem disponíveis
+export const supabase = (supabaseUrl && supabaseKey)
+  ? createClient(supabaseUrl, supabaseKey)
+  : null;
 
 // Hydrate localStorage from Supabase on startup
 export async function hydrateFromSupabase() {
+  if (!supabase) return;
   try {
     const { data, error } = await supabase
       .from('kv_store')
@@ -30,6 +34,7 @@ export async function hydrateFromSupabase() {
 
 // Upload all local data to Supabase
 export async function uploadAllToSupabase() {
+  if (!supabase) return;
   try {
     const rows = [];
     for (let i = 0; i < window.storage.length; i++) {
@@ -59,6 +64,7 @@ export async function uploadAllToSupabase() {
 
 // Fire-and-forget sync a single key to Supabase
 export function syncToSupabase(key, value) {
+  if (!supabase) return;
   supabase
     .from('kv_store')
     .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
@@ -69,6 +75,7 @@ export function syncToSupabase(key, value) {
 
 // Fire-and-forget delete a key from Supabase
 export function deleteFromSupabase(key) {
+  if (!supabase) return;
   supabase
     .from('kv_store')
     .delete()
