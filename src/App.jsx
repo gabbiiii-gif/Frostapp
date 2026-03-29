@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, Cell
 } from "recharts";
-import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase } from "./supabase.js";
+import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 
@@ -7071,6 +7071,12 @@ export default function App() {
       setLoading(false);
     });
 
+    // Realtime: escuta mudanças de outros aparelhos e atualiza dados automaticamente
+    const unsubscribe = subscribeToChanges(() => {
+      loadAllData();
+    });
+
+    return () => unsubscribe();
   }, []);
 
   // ─── Load All Data ───

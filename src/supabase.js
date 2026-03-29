@@ -8,7 +8,16 @@ export const supabase = (supabaseUrl && supabaseKey)
   ? createClient(supabaseUrl, supabaseKey)
   : null;
 
-// Hydrate localStorage from Supabase on startup
+// Chaves que contêm dados sensíveis e não devem ser sincronizadas ao Supabase
+const SENSITIVE_PREFIXES = ['erp:user:'];
+
+function isSensitive(key) {
+  return SENSITIVE_PREFIXES.some(prefix => key.startsWith(prefix));
+}
+
+// ─── Hydrate: Supabase é a fonte de verdade ───────────────────────────────────
+// Substitui TODOS os dados locais erp: pelos dados do Supabase (exceto sensíveis).
+// Isso garante que exclusões feitas em outro aparelho sejam refletidas aqui.
 export async function hydrateFromSupabase() {
   if (!supabase) return;
   try {
@@ -21,18 +30,36 @@ export async function hydrateFromSupabase() {
       return;
     }
 
+    // Conjunto de chaves que existem no Supabase
+    const remoteKeys = new Set((data || []).map(row => row.key));
+
+    // 1) Remover chaves locais que não existem mais no Supabase (foram deletadas em outro aparelho)
+    const keysToRemove = [];
+    for (let i = 0; i < window.storage.length; i++) {
+      const key = window.storage.key(i);
+      if (!key || !key.startsWith('erp:')) continue;
+      if (isSensitive(key)) continue; // Não mexer em dados locais de usuário
+      if (key === 'erp:seeded' || key === 'erp:config' || key === 'erp:lastBackup') continue;
+      if (!remoteKeys.has(key)) {
+        keysToRemove.push(key);
+      }
+    }
+    keysToRemove.forEach(key => window.storage.removeItem(key));
+
+    // 2) Adicionar/atualizar chaves do Supabase no local
     if (data && data.length > 0) {
       data.forEach((row) => {
         window.storage.setItem(row.key, JSON.stringify(row.value));
       });
-      console.log(`Hydrated ${data.length} keys from Supabase`);
     }
+
+    console.log(`Sync completo: ${(data || []).length} chaves do Supabase, ${keysToRemove.length} removidas localmente`);
   } catch (err) {
     console.warn('Supabase connection failed, using local data:', err.message);
   }
 }
 
-// Upload all local data to Supabase
+// ─── Upload: envia tudo do local para o Supabase ─────────────────────────────
 export async function uploadAllToSupabase() {
   if (!supabase) return;
   try {
@@ -40,8 +67,7 @@ export async function uploadAllToSupabase() {
     for (let i = 0; i < window.storage.length; i++) {
       const key = window.storage.key(i);
       if (!key || !key.startsWith('erp:')) continue;
-      // Não enviar dados sensíveis (senhas de usuários)
-      if (SENSITIVE_PREFIXES.some(prefix => key.startsWith(prefix))) continue;
+      if (isSensitive(key)) continue;
       const raw = window.storage.getItem(key);
       if (raw === null) continue;
       try {
@@ -50,7 +76,7 @@ export async function uploadAllToSupabase() {
     }
     if (rows.length === 0) return;
 
-    // Upsert in batches of 500
+    // Upsert em lotes de 500
     for (let i = 0; i < rows.length; i += 500) {
       const batch = rows.slice(i, i + 500);
       const { error } = await supabase
@@ -64,14 +90,10 @@ export async function uploadAllToSupabase() {
   }
 }
 
-// Chaves que contêm dados sensíveis e não devem ser sincronizadas ao Supabase
-const SENSITIVE_PREFIXES = ['erp:user:'];
-
-// Fire-and-forget sync a single key to Supabase
+// ─── Sync unitário: salva uma chave no Supabase ──────────────────────────────
 export function syncToSupabase(key, value) {
   if (!supabase) return;
-  // Não sincronizar dados sensíveis (senhas de usuários)
-  if (SENSITIVE_PREFIXES.some(prefix => key.startsWith(prefix))) return;
+  if (isSensitive(key)) return;
   supabase
     .from('kv_store')
     .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
@@ -80,7 +102,7 @@ export function syncToSupabase(key, value) {
     });
 }
 
-// Fire-and-forget delete a key from Supabase
+// ─── Delete: remove uma chave do Supabase ─────────────────────────────────────
 export function deleteFromSupabase(key) {
   if (!supabase) return;
   supabase
@@ -90,4 +112,44 @@ export function deleteFromSupabase(key) {
     .then(({ error }) => {
       if (error) console.warn('Delete sync error:', key, error.message);
     });
+}
+
+// ─── Realtime: escuta mudanças no Supabase e atualiza o local ─────────────────
+// Retorna função de cleanup para desinscrever
+export function subscribeToChanges(onDataChanged) {
+  if (!supabase) return () => {};
+
+  const channel = supabase
+    .channel('kv_store_changes')
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'kv_store' },
+      (payload) => {
+        const { eventType, new: newRow, old: oldRow } = payload;
+
+        if (eventType === 'INSERT' || eventType === 'UPDATE') {
+          // Outra aba/aparelho criou ou atualizou um registro
+          if (newRow && newRow.key) {
+            window.storage.setItem(newRow.key, JSON.stringify(newRow.value));
+            if (onDataChanged) onDataChanged();
+          }
+        } else if (eventType === 'DELETE') {
+          // Outra aba/aparelho deletou um registro
+          if (oldRow && oldRow.key) {
+            window.storage.removeItem(oldRow.key);
+            if (onDataChanged) onDataChanged();
+          }
+        }
+      }
+    )
+    .subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('Realtime sync ativo — mudanças de outros aparelhos serão refletidas automaticamente');
+      }
+    });
+
+  // Retorna cleanup
+  return () => {
+    supabase.removeChannel(channel);
+  };
 }
