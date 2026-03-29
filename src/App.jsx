@@ -206,12 +206,28 @@ function filterByDate(items, dateField, dateFilter) {
   });
 }
 
+// Hash de senha com salt — substitui btoa inseguro
 function hashPassword(pwd) {
-  return btoa(pwd);
+  let hash = 0;
+  const salt = "frostErpSalt2024";
+  const salted = salt + pwd + salt;
+  for (let i = 0; i < salted.length; i++) {
+    const char = salted.charCodeAt(i);
+    hash = ((hash << 5) - hash + char) | 0;
+  }
+  let result = "";
+  let h = hash;
+  for (let i = 0; i < 8; i++) {
+    h = ((h * 2654435761) >>> 0);
+    result += h.toString(16).padStart(8, "0");
+  }
+  return result;
 }
 
 function checkPassword(plain, hashed) {
-  return btoa(plain) === hashed;
+  // Compatibilidade com senhas antigas em base64
+  if (hashed === btoa(plain)) return true;
+  return hashPassword(plain) === hashed;
 }
 
 function getNextNumber(prefix, items) {
@@ -257,23 +273,23 @@ function seedDatabase() {
   // Users
   const users = [
     {
-      id: genId(), email: "biel.atm11@gmail.com", nome: "Gabriel Admin",
-      password: hashPassword("gabb0089"), role: "admin",
-      avatar: "CA", createdAt: new Date().toISOString(), status: "ativo",
+      id: genId(), email: "admin@frosterp.com.br", nome: "Administrador",
+      password: hashPassword("admin@frost2024"), role: "admin",
+      avatar: "AD", createdAt: new Date().toISOString(), status: "ativo",
     },
     {
       id: genId(), email: "gerente@frosterp.com.br", nome: "Fernanda Gestora",
-      password: hashPassword("gerente123"), role: "gerente",
+      password: hashPassword("gerente@frost2024"), role: "gerente",
       avatar: "FG", createdAt: new Date().toISOString(), status: "ativo",
     },
     {
       id: genId(), email: "tecnico@frosterp.com.br", nome: "Ricardo Técnico",
-      password: hashPassword("tecnico123"), role: "tecnico",
+      password: hashPassword("tecnico@frost2024"), role: "tecnico",
       avatar: "RT", createdAt: new Date().toISOString(), status: "ativo",
     },
     {
       id: genId(), email: "atendente@frosterp.com.br", nome: "Juliana Atendente",
-      password: hashPassword("atend123"), role: "atendente",
+      password: hashPassword("atend@frost2024"), role: "atendente",
       avatar: "JA", createdAt: new Date().toISOString(), status: "ativo",
     },
   ];
@@ -1122,7 +1138,7 @@ function LoginScreen({ onLogin }) {
 
           <div className="mt-6 pt-6 border-t border-gray-700">
             <p className="text-gray-500 text-xs text-center">
-              Admin: biel.atm11@gmail.com / gabb0089
+              FrostERP &copy; {new Date().getFullYear()}
             </p>
           </div>
         </div>
@@ -4171,7 +4187,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
   const tecnicos = useMemo(() => (employees || []).filter((e) => e.tipo === "tecnico" && e.status === "ativo"), [employees]);
 
   const loadOrders = useCallback(() => {
-    setOrders(DB.list("erp:services:"));
+    setOrders(DB.list("erp:os:"));
   }, []);
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
@@ -4263,7 +4279,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         valor,
         updatedAt: new Date().toISOString(),
       };
-      DB.set("erp:services:" + updated.id, updated);
+      DB.set("erp:os:" + updated.id, updated);
       addToast("OS atualizada.", "success");
     } else {
       const numero = getNextNumber("OS", orders);
@@ -4288,7 +4304,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         itensUtilizados: [],
         createdAt: new Date().toISOString(),
       };
-      DB.set("erp:services:" + newOS.id, newOS);
+      DB.set("erp:os:" + newOS.id, newOS);
       addToast(MSG_TEMPLATES.os_criada(numero), "success");
     }
 
@@ -4302,7 +4318,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
   const confirmDeleteAction = useCallback(() => {
     if (confirmDelete) {
-      DB.delete("erp:services:" + confirmDelete.id);
+      DB.delete("erp:os:" + confirmDelete.id);
       addToast("OS excluída.", "success");
       setConfirmDelete(null);
       loadOrders();
@@ -4314,7 +4330,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     if (newStatus === "finalizado") {
       updated.dataConclusao = new Date().toISOString();
     }
-    DB.set("erp:services:" + updated.id, updated);
+    DB.set("erp:os:" + updated.id, updated);
     addToast(`OS ${os.numero} → ${STATUS_LABELS_OS[newStatus]}`, "success");
     loadOrders();
   }, [loadOrders, addToast]);
@@ -4342,7 +4358,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     });
 
     const updated = { ...os, status: "faturado", updatedAt: new Date().toISOString() };
-    DB.set("erp:services:" + updated.id, updated);
+    DB.set("erp:os:" + updated.id, updated);
 
     addToast(`OS ${os.numero} faturada. Receita de ${formatCurrency(os.valor)} registrada.`, "success");
     loadOrders();
@@ -6683,7 +6699,7 @@ function SettingsModule({ user, addToast, reloadData }) {
 
     // Count total records
     const prefixes = [
-      "erp:client:", "erp:employee:", "erp:inventory:", "erp:os:", "erp:services:",
+      "erp:client:", "erp:employee:", "erp:inventory:", "erp:os:",
       "erp:schedule:", "erp:finance:", "erp:invoice:", "erp:boleto:", "erp:ticket:",
       "erp:banking:", "erp:pdv:", "erp:message:", "erp:user:",
     ];
@@ -6717,13 +6733,12 @@ function SettingsModule({ user, addToast, reloadData }) {
       clients: DB.list("erp:client:"),
       employees: DB.list("erp:employee:"),
       inventory: DB.list("erp:inventory:"),
-      services: DB.list("erp:services:"),
+      services: DB.list("erp:os:"),
       schedule: DB.list("erp:schedule:"),
       finance: DB.list("erp:finance:"),
       invoices: DB.list("erp:invoice:"),
       bills: DB.list("erp:boleto:"),
       tickets: DB.list("erp:ticket:"),
-      processes: DB.list("erp:os:"),
       banking: DB.list("erp:banking:"),
       pdv: DB.list("erp:pdv:"),
       messages: DB.list("erp:message:"),
@@ -6795,7 +6810,7 @@ function SettingsModule({ user, addToast, reloadData }) {
 
     // Clear all DB prefixes
     const prefixes = [
-      "erp:client:", "erp:employee:", "erp:inventory:", "erp:os:", "erp:services:",
+      "erp:client:", "erp:employee:", "erp:inventory:", "erp:os:",
       "erp:schedule:", "erp:finance:", "erp:invoice:", "erp:boleto:", "erp:ticket:",
       "erp:banking:", "erp:pdv:", "erp:message:", "erp:user:",
     ];
@@ -6814,7 +6829,7 @@ function SettingsModule({ user, addToast, reloadData }) {
     importList(data.clients, "erp:client:");
     importList(data.employees, "erp:employee:");
     importList(data.inventory, "erp:inventory:");
-    importList(data.services, "erp:services:");
+    importList(data.services || data.processes, "erp:os:");
     importList(data.schedule, "erp:schedule:");
     importList(data.finance, "erp:finance:");
     importList(data.invoices, "erp:invoice:");
@@ -6849,7 +6864,7 @@ function SettingsModule({ user, addToast, reloadData }) {
   const executeResetDemo = useCallback(() => {
     // Clear all data
     const prefixes = [
-      "erp:client:", "erp:employee:", "erp:inventory:", "erp:os:", "erp:services:",
+      "erp:client:", "erp:employee:", "erp:inventory:", "erp:os:",
       "erp:schedule:", "erp:finance:", "erp:invoice:", "erp:boleto:", "erp:ticket:",
       "erp:banking:", "erp:pdv:", "erp:message:", "erp:user:",
     ];
@@ -6863,9 +6878,9 @@ function SettingsModule({ user, addToast, reloadData }) {
 
     // Cria apenas o usuário admin padrão (sem dados demo)
     const adminUser = {
-      id: genId(), email: "biel.atm11@gmail.com", nome: "Gabriel Admin",
-      password: hashPassword("gabb0089"), role: "admin",
-      avatar: "CA", createdAt: new Date().toISOString(), status: "ativo",
+      id: genId(), email: "admin@frosterp.com.br", nome: "Administrador",
+      password: hashPassword("admin@frost2024"), role: "admin",
+      avatar: "AD", createdAt: new Date().toISOString(), status: "ativo",
     };
     DB.set("erp:user:" + adminUser.id, adminUser);
     DB.set("erp:seeded", true);
@@ -7050,17 +7065,8 @@ export default function App() {
 
     // Real init — hydrate from Supabase, then load
     hydrateFromSupabase().then(() => {
-      // Inicialização: cria apenas o usuário admin padrão se não houver nenhum usuário
-      const users = DB.list("erp:user:");
-      if (users.length === 0) {
-        const adminUser = {
-          id: genId(), email: "biel.atm11@gmail.com", nome: "Gabriel Admin",
-          password: hashPassword("gabb0089"), role: "admin",
-          avatar: "CA", createdAt: new Date().toISOString(), status: "ativo",
-        };
-        DB.set("erp:user:" + adminUser.id, adminUser);
-        DB.set("erp:seeded", true);
-      }
+      // Inicialização: popula dados demo se for o primeiro acesso
+      seedDatabase();
       loadAllData();
       setLoading(false);
     });
@@ -7073,7 +7079,7 @@ export default function App() {
       clients: DB.list("erp:client:"),
       employees: DB.list("erp:employee:"),
       inventory: DB.list("erp:inventory:"),
-      services: DB.list("erp:services:"),
+      services: DB.list("erp:os:"),
       schedule: DB.list("erp:schedule:"),
       finance: DB.list("erp:finance:"),
       invoices: DB.list("erp:invoice:"),

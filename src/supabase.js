@@ -40,6 +40,8 @@ export async function uploadAllToSupabase() {
     for (let i = 0; i < window.storage.length; i++) {
       const key = window.storage.key(i);
       if (!key || !key.startsWith('erp:')) continue;
+      // Não enviar dados sensíveis (senhas de usuários)
+      if (SENSITIVE_PREFIXES.some(prefix => key.startsWith(prefix))) continue;
       const raw = window.storage.getItem(key);
       if (raw === null) continue;
       try {
@@ -62,9 +64,14 @@ export async function uploadAllToSupabase() {
   }
 }
 
+// Chaves que contêm dados sensíveis e não devem ser sincronizadas ao Supabase
+const SENSITIVE_PREFIXES = ['erp:user:'];
+
 // Fire-and-forget sync a single key to Supabase
 export function syncToSupabase(key, value) {
   if (!supabase) return;
+  // Não sincronizar dados sensíveis (senhas de usuários)
+  if (SENSITIVE_PREFIXES.some(prefix => key.startsWith(prefix))) return;
   supabase
     .from('kv_store')
     .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
