@@ -7635,8 +7635,8 @@ export default function App() {
   const [splashVisible, setSplashVisible] = useState(true);
   const [splashFading, setSplashFading] = useState(false);
   const [data, setData] = useState({
-    clients: [], employees: [], inventory: [], services: [], schedule: [],
-    finance: [], invoices: [], bills: [], tickets: [], banking: [], pdv: [], messages: [], config: {},
+    clients: [], employees: [], services: [], schedule: [],
+    finance: [], banking: [], config: {},
   });
   const [notifications, setNotifications] = useState([]);
   const [globalSearch, setGlobalSearch] = useState("");
@@ -7675,16 +7675,10 @@ export default function App() {
     setData({
       clients: DB.list("erp:client:"),
       employees: DB.list("erp:employee:"),
-      inventory: DB.list("erp:inventory:"),
       services: DB.list("erp:os:"),
       schedule: DB.list("erp:schedule:"),
       finance: DB.list("erp:finance:"),
-      invoices: DB.list("erp:invoice:"),
-      bills: DB.list("erp:boleto:"),
-      tickets: DB.list("erp:ticket:"),
       banking: DB.list("erp:banking:"),
-      pdv: DB.list("erp:pdv:"),
-      messages: DB.list("erp:message:"),
       config: DB.get("erp:config") || {},
     });
   }, []);
@@ -7703,18 +7697,7 @@ export default function App() {
   // ─── Compute Notifications ───
   const computedNotifications = useMemo(() => {
     const alerts = [];
-    // Low stock
-    data.inventory.forEach((item) => {
-      if (item.quantidade <= item.quantidadeMinima) {
-        alerts.push({
-          id: "stock-" + item.id,
-          type: "warning",
-          message: `Estoque baixo: ${item.nome} (${item.quantidade} ${item.unidade || "un"})`,
-          module: "estoque",
-        });
-      }
-    });
-    // Overdue bills
+    // Contas vencidas
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     data.finance
@@ -7729,17 +7712,6 @@ export default function App() {
             module: "financeiro",
           });
         }
-      });
-    // Pending tickets
-    data.tickets
-      .filter((t) => t.status === "aberto" && t.prioridade === "alta")
-      .forEach((t) => {
-        alerts.push({
-          id: "ticket-" + t.id,
-          type: "info",
-          message: `Ticket urgente: ${t.titulo}`,
-          module: "webdesk",
-        });
       });
     return alerts;
   }, [data]);
@@ -7768,19 +7740,9 @@ export default function App() {
       results.push({ type: "OS", label: o.numero + " - " + (o.clienteNome || ""), sub: o.tipo, module: "processos", id: o.id });
     });
 
-    // Search invoices
-    data.invoices.filter((i) => (i.numero || "").toLowerCase().includes(s) || (i.clienteNome || "").toLowerCase().includes(s)).slice(0, 5).forEach((i) => {
-      results.push({ type: "NF", label: i.numero + " - " + (i.clienteNome || ""), sub: formatCurrency(i.valorTotal), module: "notas", id: i.id });
-    });
-
     // Search finance
     data.finance.filter((t) => (t.descricao || "").toLowerCase().includes(s) || (t.numero || "").toLowerCase().includes(s)).slice(0, 5).forEach((t) => {
       results.push({ type: "Financeiro", label: t.numero + " - " + t.descricao, sub: formatCurrency(t.valor), module: "financeiro", id: t.id });
-    });
-
-    // Search inventory
-    data.inventory.filter((i) => (i.nome || "").toLowerCase().includes(s) || (i.sku || "").toLowerCase().includes(s)).slice(0, 3).forEach((i) => {
-      results.push({ type: "Estoque", label: i.nome, sub: `Qtd: ${i.quantidade}`, module: "estoque", id: i.id });
     });
 
     setGlobalSearchResults(results);
@@ -7806,15 +7768,10 @@ export default function App() {
     const items = [
       { id: "dashboard", label: "Dashboard", icon: "📊", module: "dashboard" },
       { id: "financeiro", label: "Financeiro", icon: "💰", module: "financeiro" },
-      { id: "estoque", label: "Estoque", icon: "📦", module: "estoque" },
-      { id: "notas", label: "Notas e Boletos", icon: "📄", module: "notas" },
-      { id: "pdv", label: "PDV", icon: "🛒", module: "pdv" },
-      { id: "webdesk", label: "Webdesk", icon: "🎫", module: "webdesk" },
       { id: "processos", label: "Ordens de Serviço", icon: "🔧", module: "processos" },
       { id: "agenda", label: "Agenda", icon: "📅", module: "agenda" },
       { id: "conciliacao", label: "Conciliação Bancária", icon: "🏦", module: "conciliacao" },
       { id: "cadastro", label: "Cadastros", icon: "👥", module: "cadastro" },
-      { id: "mensagens", label: "Mensagens", icon: "💬", module: "mensagens" },
       { id: "config", label: "Configurações", icon: "⚙️", module: "config" },
     ];
 
@@ -7974,7 +7931,7 @@ export default function App() {
             </div>
 
             {/* Filtro de data — só aparece em páginas que usam período */}
-            {["dashboard", "financeiro", "notas", "webdesk", "processos", "agenda", "conciliacao"].includes(activeModule) && (
+            {["dashboard", "financeiro", "processos", "agenda", "conciliacao"].includes(activeModule) && (
               <div className="hidden xl:block ml-4">
                 <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
               </div>
@@ -8111,7 +8068,7 @@ export default function App() {
           </div>
 
           {/* Filtro de data mobile — só aparece em páginas que usam período */}
-          {["dashboard", "financeiro", "notas", "webdesk", "processos", "agenda", "conciliacao"].includes(activeModule) && (
+          {["dashboard", "financeiro", "processos", "agenda", "conciliacao"].includes(activeModule) && (
             <div className="xl:hidden mt-3">
               <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
             </div>
@@ -8126,19 +8083,7 @@ export default function App() {
           {activeModule === "financeiro" && (
             <FinanceModule user={user} dateFilter={dateFilter} addToast={addToast} />
           )}
-          {activeModule === "estoque" && (
-            <InventoryModule user={user} addToast={addToast} />
-          )}
-          {activeModule === "notas" && (
-            <InvoiceModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} />
-          )}
-          {activeModule === "pdv" && (
-            <PDVModule user={user} addToast={addToast} inventory={data.inventory} reloadData={loadAllData} />
-          )}
-          {activeModule === "webdesk" && (
-            <WebdeskModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} />
-          )}
-          {activeModule === "processos" && (
+{activeModule === "processos" && (
             <ProcessModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} />
           )}
           {activeModule === "agenda" && (
@@ -8150,10 +8095,7 @@ export default function App() {
           {activeModule === "cadastro" && (
             <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
           )}
-          {activeModule === "mensagens" && (
-            <MessageCenter user={user} addToast={addToast} />
-          )}
-          {activeModule === "config" && (
+{activeModule === "config" && (
             <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} />
           )}
         </main>
