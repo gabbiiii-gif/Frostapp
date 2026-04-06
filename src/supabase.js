@@ -8,6 +8,15 @@ export const supabase = (supabaseUrl && supabaseKey)
   ? createClient(supabaseUrl, supabaseKey)
   : null;
 
+// Diagnóstico: mostra no console se o Supabase está ativo ou não
+if (supabase) {
+  console.log('%c[FrostERP] Supabase CONECTADO ✅', 'color: #22c55e; font-weight: bold');
+} else {
+  console.warn('[FrostERP] Supabase DESCONECTADO ❌ — variáveis de ambiente não encontradas. Rodando apenas local.');
+  console.warn('VITE_SUPABASE_URL:', supabaseUrl ? '✅ presente' : '❌ ausente');
+  console.warn('VITE_SUPABASE_ANON_KEY:', supabaseKey ? '✅ presente' : '❌ ausente');
+}
+
 // Chaves que contêm dados sensíveis e não devem ser sincronizadas ao Supabase
 const SENSITIVE_PREFIXES = ['erp:user:'];
 
