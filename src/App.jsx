@@ -1094,9 +1094,12 @@ function LoginScreen({ onLogin }) {
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
+              <label htmlFor="login-email" className="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
               <input
+                id="login-email"
+                name="email"
                 type="email"
+                autoComplete="email"
                 value={email}
                 onChange={(e) => { setEmail(e.target.value); setError(""); }}
                 placeholder="seu@email.com.br"
@@ -1106,9 +1109,12 @@ function LoginScreen({ onLogin }) {
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Senha</label>
+              <label htmlFor="login-password" className="block text-sm font-medium text-gray-300 mb-1.5">Senha</label>
               <input
+                id="login-password"
+                name="password"
                 type="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); setError(""); }}
                 placeholder="••••••••"
