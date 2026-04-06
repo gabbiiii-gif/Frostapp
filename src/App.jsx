@@ -7636,7 +7636,7 @@ export default function App() {
   const [splashFading, setSplashFading] = useState(false);
   const [data, setData] = useState({
     clients: [], employees: [], services: [], schedule: [],
-    finance: [], banking: [], config: {},
+    finance: [], config: {},
   });
   const [notifications, setNotifications] = useState([]);
   const [globalSearch, setGlobalSearch] = useState("");
@@ -7678,7 +7678,6 @@ export default function App() {
       services: DB.list("erp:os:"),
       schedule: DB.list("erp:schedule:"),
       finance: DB.list("erp:finance:"),
-      banking: DB.list("erp:banking:"),
       config: DB.get("erp:config") || {},
     });
   }, []);
@@ -7770,7 +7769,6 @@ export default function App() {
       { id: "financeiro", label: "Financeiro", icon: "💰", module: "financeiro" },
       { id: "processos", label: "Ordens de Serviço", icon: "🔧", module: "processos" },
       { id: "agenda", label: "Agenda", icon: "📅", module: "agenda" },
-      { id: "conciliacao", label: "Conciliação Bancária", icon: "🏦", module: "conciliacao" },
       { id: "cadastro", label: "Cadastros", icon: "👥", module: "cadastro" },
       { id: "config", label: "Configurações", icon: "⚙️", module: "config" },
     ];
@@ -7931,7 +7929,7 @@ export default function App() {
             </div>
 
             {/* Filtro de data — só aparece em páginas que usam período */}
-            {["dashboard", "financeiro", "processos", "agenda", "conciliacao"].includes(activeModule) && (
+            {["dashboard", "financeiro", "processos", "agenda"].includes(activeModule) && (
               <div className="hidden xl:block ml-4">
                 <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
               </div>
@@ -8068,7 +8066,7 @@ export default function App() {
           </div>
 
           {/* Filtro de data mobile — só aparece em páginas que usam período */}
-          {["dashboard", "financeiro", "processos", "agenda", "conciliacao"].includes(activeModule) && (
+          {["dashboard", "financeiro", "processos", "agenda"].includes(activeModule) && (
             <div className="xl:hidden mt-3">
               <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
             </div>
@@ -8088,9 +8086,6 @@ export default function App() {
           )}
           {activeModule === "agenda" && (
             <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} />
-          )}
-          {activeModule === "conciliacao" && (
-            <BankingModule user={user} dateFilter={dateFilter} addToast={addToast} />
           )}
           {activeModule === "cadastro" && (
             <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
