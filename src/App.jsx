@@ -140,8 +140,13 @@ function formatCurrency(value) {
 function formatDate(dateStr) {
   if (!dateStr) return "—";
   try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString("pt-BR");
+    // Extrai apenas a parte da data (YYYY-MM-DD) para evitar conversão de fuso horário
+    const datePart = String(dateStr).slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+      const [y, m, d] = datePart.split("-");
+      return `${d}/${m}/${y}`;
+    }
+    return new Date(dateStr).toLocaleDateString("pt-BR");
   } catch {
     return dateStr;
   }
@@ -741,7 +746,7 @@ function DataTable({ columns, data, onEdit, onDelete, actions, pagination = true
   const [page, setPage] = useState(1);
   const perPage = 10;
 
-  useEffect(() => { setPage(1); }, [data.length]);
+  useEffect(() => { setPage(1); }, [data]);
 
   const handleSort = useCallback((key) => {
     if (sortKey === key) {
@@ -1172,7 +1177,8 @@ function Dashboard({ user, dateFilter, onNavigate }) {
 
   const { transactions, serviceOrders, schedule, inventory, tickets } = data;
 
-  const now = new Date();
+  // useMemo garante que 'now' não quebre o cache dos memos que dependem dele
+  const now = useMemo(() => new Date(), []);
   const currentMonth = now.getMonth();
   const currentYear = now.getFullYear();
 
@@ -2122,9 +2128,9 @@ function InventoryModule({ user, addToast }) {
       data: new Date().toISOString(),
     };
 
-    const movements = DB.get("erp:inventory:movements:" + item.id) || [];
+    const movements = DB.get("erp:movement:" + item.id) || [];
     movements.push(movement);
-    DB.set("erp:inventory:movements:" + item.id, movements);
+    DB.set("erp:movement:" + item.id, movements);
 
     const updated = { ...item, quantidade: newQty, updatedAt: new Date().toISOString() };
     DB.set("erp:inventory:" + item.id, updated);
@@ -2140,7 +2146,7 @@ function InventoryModule({ user, addToast }) {
   }, [movementModal, movementForm, user, loadItems, addToast]);
 
   const openHistory = useCallback((item) => {
-    const movements = DB.get("erp:inventory:movements:" + item.id) || [];
+    const movements = DB.get("erp:movement:" + item.id) || [];
     setHistoryModal({ item, movements });
   }, []);
 
@@ -3456,7 +3462,7 @@ function PDVModule({ user, addToast, inventory, reloadData }) {
         DB.set("erp:inventory:" + item.id, updated);
 
         // Record movement
-        const movements = DB.get("erp:inventory:movements:" + item.id) || [];
+        const movements = DB.get("erp:movement:" + item.id) || [];
         movements.push({
           id: genId(),
           itemId: item.id,
@@ -3469,7 +3475,7 @@ function PDVModule({ user, addToast, inventory, reloadData }) {
           usuario: user.nome,
           data: new Date().toISOString(),
         });
-        DB.set("erp:inventory:movements:" + item.id, movements);
+        DB.set("erp:movement:" + item.id, movements);
       }
     });
 
@@ -4155,6 +4161,309 @@ function WebdeskModule({ user, dateFilter, addToast, clients }) {
   );
 }
 
+// ─── GERADOR DE DOCUMENTOS HTML ─────────────────────────────────────────────
+
+// Abre documento HTML em nova aba do navegador
+function openHTMLDoc(html) {
+  const w = window.open("", "_blank");
+  if (!w) { alert("Permita popups para gerar documentos."); return; }
+  w.document.write(html);
+  w.document.close();
+}
+
+// Estilos CSS compartilhados para todos os documentos
+function _docStyles(accentColor = "#3b82f6") {
+  return `
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f4f8;color:#1a202c;font-size:14px}
+    .page{max-width:820px;margin:24px auto;background:#fff;padding:48px;box-shadow:0 4px 24px rgba(0,0,0,.12);border-radius:10px}
+    .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px;padding-bottom:24px;border-bottom:3px solid ${accentColor}}
+    .logo-area .company{font-size:22px;font-weight:700;color:#1e3a5f}
+    .logo-area .tagline{font-size:12px;color:#718096;margin-top:2px}
+    .logo-area .contact{font-size:11px;color:#a0aec0;margin-top:8px;line-height:1.6}
+    .doc-badge{text-align:right}
+    .doc-badge .doc-type{font-size:26px;font-weight:800;color:${accentColor};letter-spacing:-0.5px}
+    .doc-badge .doc-num{background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;color:#1d4ed8;margin-top:8px;display:inline-block}
+    .doc-badge .doc-date{font-size:11px;color:#a0aec0;margin-top:6px}
+    .section{margin-bottom:28px}
+    .section-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:${accentColor};margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid #e2e8f0}
+    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .info-item label{font-size:10px;color:#a0aec0;display:block;margin-bottom:3px;text-transform:uppercase;letter-spacing:.05em}
+    .info-item span{font-size:14px;color:#2d3748;font-weight:500}
+    table{width:100%;border-collapse:collapse}
+    thead tr{background:${accentColor};color:#fff}
+    th{padding:10px 14px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
+    td{padding:10px 14px;font-size:13px;color:#4a5568;border-bottom:1px solid #edf2f7}
+    tr:last-child td{border-bottom:none}
+    tr:nth-child(even) td{background:#f7fafc}
+    .total-section{margin-top:16px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden}
+    .total-row{display:flex;justify-content:space-between;padding:10px 16px;font-size:13px;color:#4a5568;border-bottom:1px solid #e2e8f0}
+    .total-row:last-child{border-bottom:none}
+    .total-row.grand{background:${accentColor};color:#fff;font-size:16px;font-weight:700}
+    .obs-box{background:#f7fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;font-size:12px;color:#718096;line-height:1.6}
+    .signatures{display:grid;grid-template-columns:1fr 1fr;gap:48px;margin-top:48px;padding-top:24px;border-top:1px solid #e2e8f0}
+    .sig-line{border-top:1px solid #2d3748;padding-top:8px;text-align:center;font-size:11px;color:#718096;margin-top:48px}
+    .terms{margin-top:24px;background:#f7fafc;border-radius:8px;padding:16px;font-size:11px;color:#718096;line-height:1.7}
+    .terms strong{display:block;margin-bottom:4px;color:#4a5568;font-size:11px}
+    .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+    .badge-blue{background:#eff6ff;color:#1d4ed8}
+    .badge-green{background:#f0fdf4;color:#166534}
+    .badge-yellow{background:#fffbeb;color:#92400e}
+    .print-btn{position:fixed;bottom:24px;right:24px;background:${accentColor};color:#fff;border:none;padding:12px 28px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:700;box-shadow:0 4px 16px rgba(59,130,246,.4);transition:.2s}
+    .print-btn:hover{filter:brightness(1.1)}
+    .watermark{font-size:10px;color:#cbd5e0;text-align:center;margin-top:32px;padding-top:16px;border-top:1px solid #f0f4f8}
+    @media print{body{background:#fff}.page{box-shadow:none;margin:0;border-radius:0;padding:32px}.print-btn{display:none}}
+  `;
+}
+
+function _docHeader(config, docType, numero, dataStr) {
+  const emp = config.nomeEmpresa || "FrostERP Refrigeração";
+  const cnpj = config.cnpj ? `CNPJ: ${config.cnpj}` : "";
+  const tel = config.telefone ? `Tel: ${config.telefone}` : "";
+  const email = config.email ? `Email: ${config.email}` : "";
+  const end = config.endereco || "";
+  return `
+    <div class="header">
+      <div class="logo-area">
+        <div class="company">❄️ ${emp}</div>
+        <div class="tagline">Refrigeração e Climatização</div>
+        <div class="contact">${[cnpj, tel, email, end].filter(Boolean).join(" · ")}</div>
+      </div>
+      <div class="doc-badge">
+        <div class="doc-type">${docType}</div>
+        <div class="doc-num">${numero}</div>
+        <div class="doc-date">${dataStr}</div>
+      </div>
+    </div>
+  `;
+}
+
+// Gera HTML do Orçamento
+function generateOrcamentoHTML(os, clients) {
+  const config = DB.get("erp:config") || {};
+  const cliente = (clients || []).find((c) => c.id === os.clienteId) || {};
+  const dataHoje = new Date().toLocaleDateString("pt-BR");
+  const validade = new Date(Date.now() + 15 * 86400000).toLocaleDateString("pt-BR");
+  const valorServico = os.valor || 0;
+
+  const endCliente = cliente.endereco
+    ? `${cliente.endereco.rua || ""}, ${cliente.endereco.bairro || ""} — ${cliente.endereco.cidade || ""}/${cliente.endereco.estado || ""}`
+    : os.endereco || "—";
+
+  const docCliente = cliente.tipo === "pj"
+    ? (cliente.cnpj ? `CNPJ: ${cliente.cnpj}` : "—")
+    : (cliente.cpf ? `CPF: ${cliente.cpf}` : "—");
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><title>Orçamento ${os.numero}</title>
+<style>${_docStyles("#3b82f6")}</style></head>
+<body>
+<div class="page">
+  ${_docHeader(config, "ORÇAMENTO", os.numero, `Emitido em: ${dataHoje}`)}
+
+  <div class="info-grid section">
+    <div>
+      <div class="section-title">Dados do Cliente</div>
+      <div class="info-item" style="margin-bottom:10px"><label>Nome / Razão Social</label><span>${cliente.nome || os.clienteNome || "—"}</span></div>
+      <div class="info-item" style="margin-bottom:10px"><label>Documento</label><span>${docCliente}</span></div>
+      <div class="info-item" style="margin-bottom:10px"><label>Telefone</label><span>${cliente.telefone || "—"}</span></div>
+      <div class="info-item"><label>Email</label><span>${cliente.email || "—"}</span></div>
+    </div>
+    <div>
+      <div class="section-title">Detalhes do Serviço</div>
+      <div class="info-item" style="margin-bottom:10px"><label>Tipo de Serviço</label><span>${os.tipo || "—"}</span></div>
+      <div class="info-item" style="margin-bottom:10px"><label>Endereço de Execução</label><span>${endCliente}</span></div>
+      ${os.equipamentoModelo ? `<div class="info-item" style="margin-bottom:10px"><label>Equipamento</label><span>${os.equipamentoModelo}${os.equipamentoBTUs ? ` — ${os.equipamentoBTUs} BTUs` : ""}</span></div>` : ""}
+      <div class="info-item"><label>Técnico Responsável</label><span>${os.tecnicoNome || "—"}</span></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Itens do Orçamento</div>
+    <table>
+      <thead><tr><th>Descrição</th><th>Qtd</th><th style="text-align:right">Valor Unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
+      <tbody>
+        <tr><td>${os.tipo} — ${os.equipamentoModelo || "Serviço de Refrigeração"}</td><td>1</td><td style="text-align:right">${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(valorServico)}</td><td style="text-align:right">${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(valorServico)}</td></tr>
+        ${(os.itensUtilizados||[]).map(item=>`<tr><td>${item.nome||"Material"}</td><td>${item.quantidade||1}</td><td style="text-align:right">—</td><td style="text-align:right">incluso</td></tr>`).join("")}
+      </tbody>
+    </table>
+    <div class="total-section" style="margin-top:12px">
+      <div class="total-row"><span>Mão de obra</span><span>${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(valorServico)}</span></div>
+      <div class="total-row"><span>Materiais</span><span>Incluso</span></div>
+      <div class="total-row grand"><span>TOTAL</span><span>${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(valorServico)}</span></div>
+    </div>
+  </div>
+
+  ${os.observacoes ? `<div class="section"><div class="section-title">Observações</div><div class="obs-box">${os.observacoes}</div></div>` : ""}
+
+  <div class="terms">
+    <strong>Condições do Orçamento</strong>
+    Validade: ${validade} &nbsp;·&nbsp; Garantia de serviço: 90 dias &nbsp;·&nbsp; Equipamentos com garantia do fabricante &nbsp;·&nbsp; Valores sujeitos a alteração após vistoria.
+  </div>
+
+  <div class="signatures">
+    <div><div class="sig-line">${config.nomeEmpresa || "FrostERP Refrigeração"}<br>Responsável Técnico</div></div>
+    <div><div class="sig-line">${cliente.nome || os.clienteNome || "Cliente"}<br>Aceite do Orçamento</div></div>
+  </div>
+
+  <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
+</div>
+<button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
+</body></html>`;
+}
+
+// Gera HTML da Ordem de Serviço
+function generateOSHTML(os, clients) {
+  const config = DB.get("erp:config") || {};
+  const cliente = (clients || []).find((c) => c.id === os.clienteId) || {};
+  const dataAbertura = os.dataAbertura ? new Date(os.dataAbertura).toLocaleDateString("pt-BR") : "—";
+  const dataAgendada = os.dataAgendada
+    ? new Date(os.dataAgendada.replace("T00:00:00.000Z","T12:00:00")).toLocaleDateString("pt-BR")
+    : "—";
+
+  const STATUS_LABELS_OS = {
+    aguardando:"Aguardando",em_deslocamento:"Em Deslocamento",
+    em_execucao:"Em Execução",finalizado:"Finalizado",faturado:"Faturado",
+    concluido:"Concluído",pendente:"Pendente",em_andamento:"Em Andamento",
+  };
+
+  const statusLabel = STATUS_LABELS_OS[os.status] || os.status || "—";
+  const statusClass = ["finalizado","faturado","concluido"].includes(os.status) ? "badge-green"
+    : os.status === "aguardando" || os.status === "pendente" ? "badge-yellow" : "badge-blue";
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><title>OS ${os.numero}</title>
+<style>${_docStyles("#1d4ed8")}</style></head>
+<body>
+<div class="page">
+  ${_docHeader(config, "ORDEM DE SERVIÇO", os.numero, `Abertura: ${dataAbertura}`)}
+
+  <div class="info-grid section">
+    <div>
+      <div class="section-title">Cliente</div>
+      <div class="info-item" style="margin-bottom:10px"><label>Nome</label><span>${cliente.nome || os.clienteNome || "—"}</span></div>
+      <div class="info-item" style="margin-bottom:10px"><label>Telefone</label><span>${cliente.telefone || "—"}</span></div>
+      <div class="info-item"><label>Endereço de Atendimento</label><span>${os.endereco || (cliente.endereco ? `${cliente.endereco.rua}, ${cliente.endereco.bairro}` : "—")}</span></div>
+    </div>
+    <div>
+      <div class="section-title">Execução</div>
+      <div class="info-item" style="margin-bottom:10px"><label>Status</label><span><span class="badge ${statusClass}">${statusLabel}</span></span></div>
+      <div class="info-item" style="margin-bottom:10px"><label>Técnico</label><span>${os.tecnicoNome || "—"}</span></div>
+      <div class="info-item" style="margin-bottom:10px"><label>Data Agendada</label><span>${dataAgendada}</span></div>
+      <div class="info-item"><label>Tipo</label><span>${os.tipo || "—"}</span></div>
+    </div>
+  </div>
+
+  ${os.equipamentoModelo ? `
+  <div class="section">
+    <div class="section-title">Equipamento</div>
+    <div class="info-grid">
+      <div class="info-item"><label>Modelo</label><span>${os.equipamentoModelo}</span></div>
+      ${os.equipamentoBTUs ? `<div class="info-item"><label>Capacidade</label><span>${os.equipamentoBTUs} BTUs</span></div>` : ""}
+    </div>
+  </div>` : ""}
+
+  <div class="section">
+    <div class="section-title">Descrição do Serviço</div>
+    <div class="obs-box">${os.descricao || os.observacoes || "Sem descrição informada."}</div>
+  </div>
+
+  ${(os.itensUtilizados||[]).length > 0 ? `
+  <div class="section">
+    <div class="section-title">Materiais Utilizados</div>
+    <table>
+      <thead><tr><th>Item</th><th>Quantidade</th></tr></thead>
+      <tbody>${(os.itensUtilizados||[]).map(i=>`<tr><td>${i.nome||"—"}</td><td>${i.quantidade||1}</td></tr>`).join("")}</tbody>
+    </table>
+  </div>` : ""}
+
+  <div class="section">
+    <div class="section-title">Relato do Técnico</div>
+    <div class="obs-box" style="min-height:80px;color:#a0aec0;font-style:italic">Descreva aqui os procedimentos realizados...</div>
+  </div>
+
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe">
+    <span style="font-size:13px;color:#4a5568">Valor do Serviço</span>
+    <span style="font-size:20px;font-weight:800;color:#1d4ed8">${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(os.valor||0)}</span>
+  </div>
+
+  <div class="signatures">
+    <div><div class="sig-line">Técnico Responsável<br>${os.tecnicoNome || "—"}</div></div>
+    <div><div class="sig-line">Responsável do Cliente<br>Ciente do Serviço</div></div>
+  </div>
+
+  <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
+</div>
+<button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
+</body></html>`;
+}
+
+// Gera HTML do Recibo de Serviço
+function generateReciboHTML(os, clients) {
+  const config = DB.get("erp:config") || {};
+  const cliente = (clients || []).find((c) => c.id === os.clienteId) || {};
+  const dataConclusao = os.dataConclusao
+    ? new Date(os.dataConclusao).toLocaleDateString("pt-BR")
+    : new Date().toLocaleDateString("pt-BR");
+  const valor = os.valor || 0;
+  const valorExtenso = valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 });
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><title>Recibo ${os.numero}</title>
+<style>${_docStyles("#10b981")}</style></head>
+<body>
+<div class="page">
+  ${_docHeader(config, "RECIBO DE SERVIÇO", os.numero, `Data: ${dataConclusao}`)}
+
+  <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:20px 24px;margin-bottom:28px;text-align:center">
+    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#6b7280;margin-bottom:4px">Valor Total do Serviço</div>
+    <div style="font-size:36px;font-weight:800;color:#10b981">${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(valor)}</div>
+    <div style="font-size:12px;color:#6b7280;margin-top:4px">R$ ${valorExtenso}</div>
+  </div>
+
+  <div class="info-grid section">
+    <div>
+      <div class="section-title">Recebemos de</div>
+      <div class="info-item" style="margin-bottom:10px"><label>Nome / Razão Social</label><span>${cliente.nome || os.clienteNome || "—"}</span></div>
+      <div class="info-item" style="margin-bottom:10px"><label>Telefone</label><span>${cliente.telefone || "—"}</span></div>
+      <div class="info-item"><label>Endereço</label><span>${os.endereco || (cliente.endereco ? `${cliente.endereco.rua}, ${cliente.endereco.bairro}` : "—")}</span></div>
+    </div>
+    <div>
+      <div class="section-title">Referente a</div>
+      <div class="info-item" style="margin-bottom:10px"><label>Serviço</label><span>${os.tipo || "—"}</span></div>
+      ${os.equipamentoModelo ? `<div class="info-item" style="margin-bottom:10px"><label>Equipamento</label><span>${os.equipamentoModelo}</span></div>` : ""}
+      <div class="info-item" style="margin-bottom:10px"><label>Técnico</label><span>${os.tecnicoNome || "—"}</span></div>
+      <div class="info-item"><label>Data de Conclusão</label><span>${dataConclusao}</span></div>
+    </div>
+  </div>
+
+  ${os.observacoes || os.descricao ? `
+  <div class="section">
+    <div class="section-title">Descrição</div>
+    <div class="obs-box">${os.descricao || os.observacoes}</div>
+  </div>` : ""}
+
+  <div class="terms">
+    <strong>Garantia</strong>
+    Este serviço possui garantia de 90 dias a partir da data de conclusão contra defeitos na execução.
+    Garantia do fabricante para equipamentos conforme manual do produto.
+    A garantia não cobre danos causados por mau uso, sobrecargas elétricas, sinistros ou falta de manutenção.
+  </div>
+
+  <div class="signatures">
+    <div><div class="sig-line">${config.nomeEmpresa || "FrostERP Refrigeração"}<br>Prestador do Serviço</div></div>
+    <div><div class="sig-line">${cliente.nome || os.clienteNome || "Cliente"}<br>Recebimento e Aprovação</div></div>
+  </div>
+
+  <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
+</div>
+<button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
+</body></html>`;
+}
+
 // ─── PROCESS MODULE (OS) ────────────────────────────────────────────────────
 
 function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
@@ -4493,6 +4802,30 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 </button>
               )}
+              {/* Botões de documentos HTML */}
+              <button
+                onClick={() => openHTMLDoc(generateOrcamentoHTML(row, clients))}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-gray-700 transition"
+                title="Gerar Orçamento HTML"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
+              </button>
+              <button
+                onClick={() => openHTMLDoc(generateOSHTML(row, clients))}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-purple-400 hover:bg-gray-700 transition"
+                title="Gerar Ordem de Serviço HTML"
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
+              </button>
+              {(row.status === "finalizado" || row.status === "faturado" || row.status === "concluido") && (
+                <button
+                  onClick={() => openHTMLDoc(generateReciboHTML(row, clients))}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition"
+                  title="Gerar Recibo HTML"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>
+                </button>
+              )}
             </>
           )}
           emptyMessage="Nenhuma OS encontrada."
@@ -4518,24 +4851,36 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                     osInCol.map((os) => (
                       <div
                         key={os.id}
-                        className="bg-gray-700/50 border border-gray-600/30 rounded-lg p-3 hover:bg-gray-700 transition cursor-pointer"
-                        onClick={() => {
-                          const next = getNextStatus(os.status);
-                          if (next) {
-                            if (next === "faturado") {
-                              faturarOS(os);
-                            } else {
-                              changeStatus(os, next);
-                            }
-                          }
-                        }}
+                        className="bg-gray-700/50 border border-gray-600/30 rounded-lg p-3 hover:bg-gray-700 transition"
                       >
-                        <p className="text-white text-xs font-semibold">{os.numero}</p>
-                        <p className="text-gray-300 text-xs mt-1 truncate">{os.clienteNome}</p>
-                        <p className="text-gray-400 text-xs truncate">{os.tipo}</p>
-                        <div className="flex items-center justify-between mt-2">
-                          <span className="text-gray-500 text-xs">{os.tecnicoNome}</span>
-                          {os.valor > 0 && <span className="text-green-400 text-xs font-medium">{formatCurrency(os.valor)}</span>}
+                        <div
+                          className="cursor-pointer"
+                          onClick={() => {
+                            const next = getNextStatus(os.status);
+                            if (next) {
+                              if (next === "faturado") {
+                                faturarOS(os);
+                              } else {
+                                changeStatus(os, next);
+                              }
+                            }
+                          }}
+                        >
+                          <p className="text-white text-xs font-semibold">{os.numero}</p>
+                          <p className="text-gray-300 text-xs mt-1 truncate">{os.clienteNome}</p>
+                          <p className="text-gray-400 text-xs truncate">{os.tipo}</p>
+                          <div className="flex items-center justify-between mt-2">
+                            <span className="text-gray-500 text-xs">{os.tecnicoNome}</span>
+                            {os.valor > 0 && <span className="text-green-400 text-xs font-medium">{formatCurrency(os.valor)}</span>}
+                          </div>
+                        </div>
+                        {/* Ações rápidas de documentos */}
+                        <div className="flex items-center gap-1 mt-2 pt-2 border-t border-gray-600/30">
+                          <button onClick={() => openHTMLDoc(generateOrcamentoHTML(os, clients))} className="flex-1 py-1 text-xs rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/40 transition text-center" title="Orçamento">Orç.</button>
+                          <button onClick={() => openHTMLDoc(generateOSHTML(os, clients))} className="flex-1 py-1 text-xs rounded bg-purple-600/20 text-purple-400 hover:bg-purple-600/40 transition text-center" title="OS">OS</button>
+                          {(os.status === "finalizado" || os.status === "faturado" || os.status === "concluido") && (
+                            <button onClick={() => openHTMLDoc(generateReciboHTML(os, clients))} className="flex-1 py-1 text-xs rounded bg-green-600/20 text-green-400 hover:bg-green-600/40 transition text-center" title="Recibo">Recibo</button>
+                          )}
                         </div>
                       </div>
                     ))
@@ -4824,8 +5169,9 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
 
   const openEdit = useCallback((appt) => {
     setEditing(appt);
-    const startTime = appt.data ? new Date(appt.data).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "08:00";
-    const endTime = appt.dataFim ? new Date(appt.dataFim).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "10:00";
+    // Extrai horário diretamente da string (sem conversão de fuso) — ex: "2024-01-15T09:00" → "09:00"
+    const startTime = appt.data && appt.data.includes("T") ? appt.data.slice(11, 16) : "08:00";
+    const endTime = appt.dataFim && appt.dataFim.includes("T") ? appt.dataFim.slice(11, 16) : "10:00";
     setForm({
       data: appt.data ? appt.data.split("T")[0] : toISODate(new Date()),
       horaInicio: startTime,
@@ -4875,8 +5221,8 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
       const updated = {
         ...editing,
         titulo: `${form.tipo} - ${cliente?.nome || ""}`,
-        data: `${form.data}T${form.horaInicio}:00.000Z`,
-        dataFim: `${form.data}T${form.horaFim}:00.000Z`,
+        data: `${form.data}T${form.horaInicio}:00`,
+        dataFim: `${form.data}T${form.horaFim}:00`,
         clienteId: form.clienteId,
         clienteNome: cliente?.nome || "—",
         tecnicoId: form.tecnicoId,
@@ -4892,8 +5238,8 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
       const newAppt = {
         id: genId(),
         titulo: `${form.tipo} - ${cliente?.nome || ""}`,
-        data: `${form.data}T${form.horaInicio}:00.000Z`,
-        dataFim: `${form.data}T${form.horaFim}:00.000Z`,
+        data: `${form.data}T${form.horaInicio}:00`,
+        dataFim: `${form.data}T${form.horaFim}:00`,
         clienteId: form.clienteId,
         clienteNome: cliente?.nome || "—",
         tecnicoId: form.tecnicoId,
@@ -7057,10 +7403,11 @@ export default function App() {
 
   // ─── Init com Splash de 3 segundos ───
   useEffect(() => {
-    // Splash de 3s com fade-out
-    setTimeout(() => {
+    // Splash de 3s com fade-out — timers armazenados para cleanup
+    const t1 = setTimeout(() => {
       setSplashFading(true);
-      setTimeout(() => setSplashVisible(false), 600);
+      const t2 = setTimeout(() => setSplashVisible(false), 600);
+      return () => clearTimeout(t2);
     }, 3000);
 
     // Real init — hydrate from Supabase, then load
@@ -7076,7 +7423,7 @@ export default function App() {
       loadAllData();
     });
 
-    return () => unsubscribe();
+    return () => { clearTimeout(t1); unsubscribe(); };
   }, []);
 
   // ─── Load All Data ───
@@ -7099,12 +7446,10 @@ export default function App() {
   }, []);
 
   // ─── Add Toast ───
+  // Timer de remoção fica apenas no componente Toast (via useEffect com clearTimeout)
   const addToast = useCallback((message, type = "info") => {
     const id = genId();
     setToasts((prev) => [...prev, { id, message, type, duration: 4000 }]);
-    setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
   }, []);
 
   const removeToast = useCallback((id) => {

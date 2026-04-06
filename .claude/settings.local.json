@@ -3,7 +3,23 @@
     "allow": [
       "Bash(find:*)",
       "Bash(dir:*)",
-      "Bash(cd:*)"
+      "Bash(cd:*)",
+      "Bash(git:*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "INPUT=$(cat); cd \"C:/Users/Gabriel/Downloads/Frostapp-main/Frostapp-main\" && { git rev-parse --git-dir > /dev/null 2>&1 || git init; } && { git config user.email > /dev/null 2>&1 || git config user.email \"frostapp@local\"; } && { git config user.name > /dev/null 2>&1 || git config user.name \"FrostApp\"; } && FILE=$(echo \"$INPUT\" | grep -o '\"file_path\":\"[^\"]*\"' | head -1 | cut -d'\"' -f4) && BASENAME=$(basename \"${FILE:-arquivo}\") && git add -A && { git diff --cached --quiet || git commit -m \"update: $BASENAME\"; } 2>/dev/null || true",
+            "timeout": 30,
+            "statusMessage": "Commitando alterações no Git..."
+          }
+        ]
+      }
     ]
   }
 }
