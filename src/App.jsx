@@ -2647,6 +2647,239 @@ function PrintableBoleto({ boleto, config }) {
   );
 }
 
+// Gera HTML da NFS-e no padrão visual SEFAZ
+function generateNFSeHTML(invoice, config, clients) {
+  const fmt = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v || 0);
+  const cliente = (clients || []).find((c) => c.id === invoice.clienteId) || {};
+  const dataEmissao = invoice.data ? (() => { const p = String(invoice.data).slice(0,10).split("-"); return `${p[2]}/${p[1]}/${p[0]}`; })() : "—";
+  const hora = invoice.data ? new Date(invoice.data).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "—";
+  const competencia = invoice.data ? (() => { const p = String(invoice.data).slice(0,10).split("-"); return `${p[1]}/${p[0]}`; })() : "—";
+
+  const docCliente = cliente.tipo === "pj"
+    ? `CNPJ: ${cliente.cnpj || invoice.clienteDocumento || "—"}`
+    : `CPF: ${cliente.cpf || invoice.clienteDocumento || "—"}`;
+
+  const endCliente = cliente.endereco
+    ? `${cliente.endereco.rua || ""}, ${cliente.endereco.bairro || ""} — ${cliente.endereco.cidade || ""}/${cliente.endereco.estado || ""} — CEP ${cliente.endereco.cep || "—"}`
+    : "—";
+
+  const chaveVerif = invoice.numero
+    ? invoice.numero.replace(/\D/g, "").padStart(9, "0") + String(Date.now()).slice(-5)
+    : "000000000000000";
+
+  const codVerificacao = [
+    chaveVerif.slice(0, 4),
+    chaveVerif.slice(4, 8),
+    chaveVerif.slice(8, 12),
+    chaveVerif.slice(12, 16),
+  ].join("-");
+
+  const itensTR = (invoice.itens || []).map((item, i) => {
+    const total = (parseFloat(item.quantidade) || 0) * (parseFloat(item.valorUnitario) || 0);
+    return `
+      <tr>
+        <td style="text-align:center">${i + 1}</td>
+        <td>1.07.00</td>
+        <td style="text-align:left;padding-left:8px">${item.descricao || "—"}</td>
+        <td style="text-align:center">${item.quantidade || 1}</td>
+        <td style="text-align:right">${fmt(item.valorUnitario)}</td>
+        <td style="text-align:right">${fmt(total)}</td>
+      </tr>`;
+  }).join("");
+
+  const campo = (label, value, width = "auto") =>
+    `<div style="flex:${width === "auto" ? 1 : "0 0 " + width};min-width:0">
+      <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#555;margin-bottom:2px">${label}</div>
+      <div style="font-size:12px;color:#111;word-break:break-word">${value || "—"}</div>
+    </div>`;
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>NFS-e ${invoice.numero}</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{font-family:Arial,sans-serif;font-size:11px;background:#e8e8e8;color:#111}
+  .page{width:210mm;min-height:297mm;margin:12px auto;background:#fff;border:1px solid #999}
+  .topo{background:#1a3a6b;color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between}
+  .topo-title{font-size:14px;font-weight:700;letter-spacing:.05em}
+  .topo-sub{font-size:10px;opacity:.85;margin-top:2px}
+  .topo-num{text-align:right}
+  .topo-num .nf-num{font-size:22px;font-weight:800;letter-spacing:.04em}
+  .topo-num .nf-serie{font-size:10px;opacity:.8}
+  .secao{border:1px solid #999;margin:0}
+  .secao+.secao{border-top:none}
+  .secao-titulo{background:#e8edf5;border-bottom:1px solid #aab;padding:4px 10px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#1a3a6b}
+  .secao-corpo{padding:8px 10px;display:flex;gap:16px;flex-wrap:wrap}
+  .secao-corpo-col{padding:8px 10px}
+  table.itens{width:100%;border-collapse:collapse;font-size:11px}
+  table.itens thead tr{background:#1a3a6b;color:#fff}
+  table.itens th{padding:6px 8px;text-align:center;font-size:9px;font-weight:700;letter-spacing:.05em;border:1px solid #aab}
+  table.itens td{padding:5px 8px;border:1px solid #dde;vertical-align:top}
+  table.itens tr:nth-child(even) td{background:#f5f7fb}
+  .totais{display:grid;grid-template-columns:1fr 1fr;border:1px solid #999;border-top:none}
+  .totais-col{padding:8px 10px}
+  .totais-col+.totais-col{border-left:1px solid #999}
+  .totais-titulo{background:#e8edf5;border-bottom:1px solid #aab;padding:4px 10px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#1a3a6b}
+  .linha-total{display:flex;justify-content:space-between;padding:3px 0;font-size:11px;border-bottom:1px dotted #ddd}
+  .linha-total:last-child{border-bottom:none}
+  .linha-total.destaque{font-weight:700;font-size:13px;color:#1a3a6b;border-top:2px solid #1a3a6b;margin-top:4px;padding-top:6px}
+  .rodape{border:1px solid #999;border-top:none;padding:8px 10px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+  .chave-box{border:1px solid #bbb;padding:6px 10px;border-radius:4px;background:#f8f8f8;flex:1}
+  .chave-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#555;margin-bottom:3px}
+  .chave-val{font-family:monospace;font-size:13px;font-weight:700;letter-spacing:.15em;color:#1a3a6b}
+  .aviso{flex:1;border:2px solid #c00;padding:8px 10px;border-radius:4px}
+  .aviso-txt{font-size:9px;font-weight:700;text-transform:uppercase;color:#c00;text-align:center;line-height:1.6}
+  .discrim{border:1px solid #999;border-top:none;padding:8px 10px}
+  .discrim-titulo{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#1a3a6b;margin-bottom:4px}
+  .discrim-txt{font-size:10px;line-height:1.6;color:#333}
+  .print-btn{position:fixed;bottom:20px;right:20px;background:#1a3a6b;color:#fff;border:none;padding:10px 22px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.3)}
+  @media print{body{background:#fff}.page{margin:0;border:none;width:100%}.print-btn{display:none}}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- TOPO -->
+  <div class="topo">
+    <div>
+      <div class="topo-title">❄️ ${config?.nomeEmpresa || "FrostERP Refrigeração"}</div>
+      <div class="topo-sub">CNPJ: ${config?.cnpj || "—"} &nbsp;|&nbsp; ${config?.endereco || "—"}</div>
+      <div class="topo-sub" style="margin-top:4px;font-size:12px;font-weight:700;letter-spacing:.05em">NOTA FISCAL DE SERVIÇOS ELETRÔNICA — NFS-e</div>
+    </div>
+    <div class="topo-num">
+      <div class="nf-num">${invoice.numero || "—"}</div>
+      <div class="nf-serie">Série: 1 &nbsp;|&nbsp; ${dataEmissao} ${hora}</div>
+      <div class="nf-serie" style="margin-top:4px">Competência: ${competencia}</div>
+    </div>
+  </div>
+
+  <!-- PRESTADOR -->
+  <div class="secao">
+    <div class="secao-titulo">1 — Prestador de Serviços</div>
+    <div class="secao-corpo">
+      ${campo("CNPJ", config?.cnpj || "—", "160px")}
+      ${campo("Inscrição Municipal", config?.inscricaoMunicipal || "—", "160px")}
+      ${campo("Razão Social / Nome", config?.nomeEmpresa || "—")}
+      ${campo("Telefone / Email", [config?.telefone, config?.email].filter(Boolean).join(" | "))}
+    </div>
+    <div class="secao-corpo" style="padding-top:0">
+      ${campo("Endereço", config?.endereco || "—")}
+      ${campo("Regime Tributário", "Simples Nacional", "200px")}
+    </div>
+  </div>
+
+  <!-- IDENTIFICAÇÃO -->
+  <div class="secao">
+    <div class="secao-titulo">2 — Identificação da NFS-e</div>
+    <div class="secao-corpo">
+      ${campo("Número NFS-e", invoice.numero || "—", "120px")}
+      ${campo("Série", "1", "80px")}
+      ${campo("Tipo", "NFS-e", "80px")}
+      ${campo("Situação", (invoice.status === "cancelado" ? "CANCELADA" : "EMITIDA"), "120px")}
+      ${campo("Data/Hora Emissão", `${dataEmissao} ${hora}`, "160px")}
+      ${campo("Competência", competencia, "120px")}
+      ${campo("Natureza da Operação", "Tributação no Município")}
+    </div>
+  </div>
+
+  <!-- TOMADOR -->
+  <div class="secao">
+    <div class="secao-titulo">3 — Tomador de Serviços (Cliente)</div>
+    <div class="secao-corpo">
+      ${campo(cliente.tipo === "pj" ? "CNPJ" : "CPF", cliente.tipo === "pj" ? (cliente.cnpj || "—") : (cliente.cpf || "—"), "180px")}
+      ${campo("Inscrição Municipal", "—", "160px")}
+      ${campo("Razão Social / Nome", cliente.nome || invoice.clienteNome || "—")}
+      ${campo("Telefone", cliente.telefone || "—", "160px")}
+    </div>
+    <div class="secao-corpo" style="padding-top:0">
+      ${campo("Endereço", endCliente)}
+      ${campo("Email", cliente.email || "—", "220px")}
+    </div>
+  </div>
+
+  <!-- ITENS -->
+  <div class="secao">
+    <div class="secao-titulo">4 — Serviços Prestados</div>
+    <div style="padding:8px 10px">
+      <table class="itens">
+        <thead>
+          <tr>
+            <th style="width:36px">Item</th>
+            <th style="width:80px">Cód. Serviço</th>
+            <th>Descrição do Serviço</th>
+            <th style="width:50px">Qtd.</th>
+            <th style="width:100px">Valor Unit.</th>
+            <th style="width:100px">Valor Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${itensTR || `<tr><td colspan="6" style="text-align:center;color:#888;padding:12px">Nenhum item</td></tr>`}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- TOTAIS -->
+  <div class="totais">
+    <div>
+      <div class="totais-titulo">5 — Valores dos Serviços</div>
+      <div class="totais-col">
+        <div class="linha-total"><span>Subtotal dos Serviços</span><span>${fmt(invoice.subtotal)}</span></div>
+        <div class="linha-total"><span>Deduções</span><span>${fmt(0)}</span></div>
+        <div class="linha-total"><span>Desconto Incondicionado</span><span>${fmt(invoice.desconto)}</span></div>
+        <div class="linha-total destaque"><span>BASE DE CÁLCULO ISS</span><span>${fmt((invoice.subtotal || 0) - (invoice.desconto || 0))}</span></div>
+      </div>
+    </div>
+    <div>
+      <div class="totais-titulo">6 — Impostos e Retenções</div>
+      <div class="totais-col">
+        <div class="linha-total"><span>ISS (${invoice.issPercent || 5}%)</span><span>${fmt(invoice.issValor)}</span></div>
+        <div class="linha-total"><span>PIS (0,65%)</span><span>${fmt((invoice.subtotal || 0) * 0.0065)}</span></div>
+        <div class="linha-total"><span>COFINS (3%)</span><span>${fmt((invoice.subtotal || 0) * 0.03)}</span></div>
+        <div class="linha-total"><span>CSLL (1%)</span><span>${fmt((invoice.subtotal || 0) * 0.01)}</span></div>
+        <div class="linha-total destaque"><span>VALOR LÍQUIDO NFS-e</span><span>${fmt(invoice.total)}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- DISCRIMINAÇÃO -->
+  <div class="discrim">
+    <div class="discrim-titulo">7 — Discriminação dos Serviços</div>
+    <div class="discrim-txt">${
+      (invoice.itens || []).map((item, i) =>
+        `${i + 1}. ${item.descricao} — Qtd: ${item.quantidade} x ${new Intl.NumberFormat("pt-BR", {style:"currency",currency:"BRL"}).format(item.valorUnitario)} = ${new Intl.NumberFormat("pt-BR", {style:"currency",currency:"BRL"}).format((item.quantidade||0)*(item.valorUnitario||0))}`
+      ).join("<br>") || "—"
+    }${invoice.observacoes ? `<br><br><strong>Observações:</strong> ${invoice.observacoes}` : ""}</div>
+  </div>
+
+  <!-- RODAPÉ -->
+  <div class="rodape">
+    <div class="chave-box">
+      <div class="chave-label">Código de Verificação</div>
+      <div class="chave-val">${codVerificacao}</div>
+    </div>
+    <div class="chave-box">
+      <div class="chave-label">Inscrição Municipal Prestador</div>
+      <div class="chave-val">${config?.inscricaoMunicipal || "000000-0"}</div>
+      <div style="font-size:9px;color:#888;margin-top:4px">Data/Hora Geração: ${dataEmissao} ${hora}</div>
+    </div>
+    <div class="aviso">
+      <div class="aviso-txt">
+        ⚠ ESTE DOCUMENTO NÃO TEM VALIDADE FISCAL<br>
+        Emitido por sistema de gestão interno.<br>
+        Para nota fiscal com validade legal, utilize<br>
+        o sistema oficial da prefeitura.
+      </div>
+    </div>
+  </div>
+
+</div>
+<button class="print-btn" onclick="window.print()">🖨️ Imprimir NFS-e</button>
+</body></html>`;
+}
+
 function InvoiceModule({ user, dateFilter, addToast, clients }) {
   const [activeTab, setActiveTab] = useState("nf");
   const [invoices, setInvoices] = useState([]);
@@ -2872,9 +3105,8 @@ function InvoiceModule({ user, dateFilter, addToast, clients }) {
   }, [user, loadData, addToast]);
 
   const handlePrintNF = useCallback((nf) => {
-    setPrintInvoice(nf);
-    setTimeout(() => window.print(), 300);
-  }, []);
+    openHTMLDoc(generateNFSeHTML(nf, config, clients));
+  }, [config, clients]);
 
   // Boleto CRUD
   const openCreateBoleto = useCallback(() => {
@@ -4493,7 +4725,13 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     faturado: "bg-purple-500",
   };
 
-  const tecnicos = useMemo(() => (employees || []).filter((e) => e.tipo === "tecnico" && e.status === "ativo"), [employees]);
+  // Carrega do DB diretamente para garantir dados atualizados mesmo se o prop estiver desatualizado
+  const [allEmployees, setAllEmployees] = useState(employees || []);
+  useEffect(() => {
+    const fromDB = DB.list("erp:employee:");
+    setAllEmployees(fromDB.length > 0 ? fromDB : (employees || []));
+  }, [employees]);
+  const tecnicos = useMemo(() => allEmployees.filter((e) => e.tipo === "tecnico" && e.status === "ativo"), [allEmployees]);
 
   const loadOrders = useCallback(() => {
     setOrders(DB.list("erp:os:"));
@@ -5060,7 +5298,12 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
     cancelado: "Cancelado",
   };
 
-  const tecnicos = useMemo(() => (employees || []).filter((e) => e.tipo === "tecnico" && e.status === "ativo"), [employees]);
+  const [allEmployees, setAllEmployees] = useState(employees || []);
+  useEffect(() => {
+    const fromDB = DB.list("erp:employee:");
+    setAllEmployees(fromDB.length > 0 ? fromDB : (employees || []));
+  }, [employees]);
+  const tecnicos = useMemo(() => allEmployees.filter((e) => e.tipo === "tecnico" && e.status === "ativo"), [allEmployees]);
 
   const loadAppointments = useCallback(() => {
     setAppointments(DB.list("erp:schedule:"));
@@ -6030,7 +6273,7 @@ function BankingModule({ user, dateFilter, addToast }) {
 
 // ─── CADASTRO MODULE ─────────────────────────────────────────────────────────
 
-function CadastroModule({ user, addToast }) {
+function CadastroModule({ user, addToast, reloadData }) {
   const [activeTab, setActiveTab] = useState("clientes");
   const [clients, setClients] = useState([]);
   const [employees, setEmployees] = useState([]);
@@ -6256,7 +6499,8 @@ function CadastroModule({ user, addToast }) {
     }
     setModalOpen(false);
     loadEmployees();
-  }, [employeeForm, editing, loadEmployees, addToast]);
+    if (reloadData) reloadData(); // atualiza data.employees no App para refletir nos módulos OS e Agenda
+  }, [employeeForm, editing, loadEmployees, addToast, reloadData]);
 
   const handleDeleteEmployee = useCallback((row) => {
     if (user.role !== "admin") {
@@ -7904,7 +8148,7 @@ export default function App() {
             <BankingModule user={user} dateFilter={dateFilter} addToast={addToast} />
           )}
           {activeModule === "cadastro" && (
-            <CadastroModule user={user} addToast={addToast} />
+            <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
           )}
           {activeModule === "mensagens" && (
             <MessageCenter user={user} addToast={addToast} />
