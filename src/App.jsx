@@ -6364,14 +6364,6 @@ function CadastroModule({ user, addToast, reloadData }) {
       addToast("Informe o nome do cliente.", "error");
       return;
     }
-    if (clientForm.tipo === "pf" && !clientForm.cpf.trim()) {
-      addToast("Informe o CPF do cliente.", "error");
-      return;
-    }
-    if (clientForm.tipo === "pj" && !clientForm.cnpj.trim()) {
-      addToast("Informe o CNPJ do cliente.", "error");
-      return;
-    }
     if (!clientForm.telefone.trim()) {
       addToast("Informe o telefone do cliente.", "error");
       return;
@@ -6808,7 +6800,7 @@ function CadastroModule({ user, addToast, reloadData }) {
               <div>
                 {clientForm.tipo === "pf" ? (
                   <>
-                    <label className="block text-sm font-medium text-gray-300 mb-1.5">CPF *</label>
+                    <label className="block text-sm font-medium text-gray-300 mb-1.5">CPF</label>
                     <input
                       type="text"
                       value={clientForm.cpf}
@@ -6820,7 +6812,7 @@ function CadastroModule({ user, addToast, reloadData }) {
                   </>
                 ) : (
                   <>
-                    <label className="block text-sm font-medium text-gray-300 mb-1.5">CNPJ *</label>
+                    <label className="block text-sm font-medium text-gray-300 mb-1.5">CNPJ</label>
                     <input
                       type="text"
                       value={clientForm.cnpj}
