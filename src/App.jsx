@@ -7658,6 +7658,9 @@ export default function App() {
       seedDatabase();
       loadAllData();
       setLoading(false);
+      // Envia dados locais (incluindo usuários) para o Supabase a cada abertura do app,
+      // garantindo que outros dispositivos recebam os dados mais recentes
+      uploadAllToSupabase();
     });
 
     // Realtime: escuta mudanças de outros aparelhos e atualiza dados automaticamente
