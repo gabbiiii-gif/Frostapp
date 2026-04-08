@@ -18,7 +18,9 @@ if (supabase) {
 }
 
 // Chaves que contêm dados sensíveis e não devem ser sincronizadas ao Supabase
-const SENSITIVE_PREFIXES = ['erp:user:'];
+// Nota: erp:user: foi removido — usuários precisam sincronizar para login funcionar em outros PCs
+// As senhas são armazenadas com hash, portanto é seguro sincronizar
+const SENSITIVE_PREFIXES = [];
 
 function isSensitive(key) {
   return SENSITIVE_PREFIXES.some(prefix => key.startsWith(prefix));
