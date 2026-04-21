@@ -310,8 +310,29 @@ function getNextNumber(prefix, items) {
   return prefix + "-" + String(max + 1).padStart(3, "0");
 }
 
+// Lista de módulos disponíveis para autorização manual no gerenciamento de usuários
+const ALL_MODULES = [
+  { id: "dashboard", label: "Dashboard" },
+  { id: "financeiro", label: "Financeiro" },
+  { id: "bancario", label: "Bancário" },
+  { id: "faturas", label: "Faturas / NF" },
+  { id: "pdv", label: "PDV" },
+  { id: "estoque", label: "Estoque" },
+  { id: "processos", label: "Ordens de Serviço" },
+  { id: "agenda", label: "Agenda" },
+  { id: "tickets", label: "Tickets" },
+  { id: "mensagens", label: "Mensagens" },
+  { id: "cadastro", label: "Cadastros" },
+  { id: "config", label: "Configurações (admin)" },
+];
+
+// hasPermission respeita customPermissions quando o array está definido (mesmo vazio,
+// permitindo que o admin restrinja totalmente um usuário). Caso contrário, cai no role.
 function hasPermission(user, module) {
   if (!user || !user.role) return false;
+  if (Array.isArray(user.customPermissions)) {
+    return user.customPermissions.includes("all") || user.customPermissions.includes(module);
+  }
   const perms = ROLE_PERMISSIONS[user.role] || [];
   return perms.includes("all") || perms.includes(module);
 }
@@ -335,38 +356,29 @@ function monthsAgo(n) {
 
 // ─── SEED DATA ──────────────────────────────────────────────────────────────────
 
+// Apaga todas as credenciais (locais e remotas) — usado em migração e em "esqueci a senha"
+function purgeAllUsers() {
+  const keys = [];
+  for (let i = 0; i < window.storage.length; i++) {
+    const k = window.storage.key(i);
+    if (k && k.startsWith("erp:user:")) keys.push(k);
+  }
+  keys.forEach((k) => DB.delete(k));
+  return keys.length;
+}
+
 async function seedDatabase() {
+  // Migração única: ao detectar versão antiga, limpa TODOS os usuários demo
+  // para forçar o cadastro do primeiro super admin pelo próprio cliente.
+  if (!DB.get("erp:credentialsCleared_v1")) {
+    purgeAllUsers();
+    DB.set("erp:credentialsCleared_v1", true);
+  }
+
   if (DB.get("erp:seeded")) return;
 
-  // Usuários demo — forcePasswordChange obriga troca no primeiro login
-  // Emails sempre normalizados em lowercase para evitar mismatch no login
-  const users = [
-    {
-      id: genId(), email: "admin@frosterp.com.br", nome: "Administrador",
-      password: await hashPassword("admin@frost2024"), role: "admin",
-      avatar: "AD", createdAt: new Date().toISOString(), status: "ativo",
-      forcePasswordChange: true, sessionTokenHash: null,
-    },
-    {
-      id: genId(), email: "gerente@frosterp.com.br", nome: "Fernanda Gestora",
-      password: await hashPassword("gerente@frost2024"), role: "gerente",
-      avatar: "FG", createdAt: new Date().toISOString(), status: "ativo",
-      forcePasswordChange: true, sessionTokenHash: null,
-    },
-    {
-      id: genId(), email: "tecnico@frosterp.com.br", nome: "Ricardo Técnico",
-      password: await hashPassword("tecnico@frost2024"), role: "tecnico",
-      avatar: "RT", createdAt: new Date().toISOString(), status: "ativo",
-      forcePasswordChange: true, sessionTokenHash: null,
-    },
-    {
-      id: genId(), email: "atendente@frosterp.com.br", nome: "Juliana Atendente",
-      password: await hashPassword("atend@frost2024"), role: "atendente",
-      avatar: "JA", createdAt: new Date().toISOString(), status: "ativo",
-      forcePasswordChange: true, sessionTokenHash: null,
-    },
-  ];
-  users.forEach((u) => DB.set("erp:user:" + u.id, u));
+  // NÃO há mais usuários demo — o primeiro acesso exibe a tela de cadastro
+  // do super admin. Veja o componente FirstUserSetup.
 
   // Clients
   const clients = [
@@ -1401,6 +1413,144 @@ function ForcePasswordChangeDialog({ user, onComplete }) {
               className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50"
             >
               {saving ? "Salvando..." : "Definir Nova Senha"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── PRIMEIRO ACESSO — CADASTRO DO SUPER ADMIN ──────────────────────────────
+// Exibido quando NÃO há nenhum usuário cadastrado. O usuário criado aqui recebe
+// role admin (acesso total) e é o responsável por criar/gerenciar os demais.
+
+function FirstUserSetup({ onComplete }) {
+  const [nome, setNome] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = useCallback(async () => {
+    setError("");
+    if (!nome.trim() || !email.trim() || !password) {
+      setError("Preencha todos os campos.");
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!emailRegex.test(normalizedEmail)) {
+      setError("Formato de email inválido.");
+      return;
+    }
+    if (password.length < 8) {
+      setError("A senha deve ter no mínimo 8 caracteres.");
+      return;
+    }
+    if (password !== confirmPassword) {
+      setError("As senhas não conferem.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const newUser = {
+        id: genId(),
+        email: normalizedEmail,
+        nome: nome.trim(),
+        password: await hashPassword(password),
+        role: "admin",
+        avatar: nome.trim().slice(0, 2).toUpperCase(),
+        createdAt: new Date().toISOString(),
+        status: "ativo",
+        forcePasswordChange: false,
+        sessionTokenHash: null,
+        customPermissions: null,
+        isSuperAdmin: true,
+      };
+      DB.set("erp:user:" + newUser.id, newUser);
+      onComplete(newUser);
+    } finally {
+      setSaving(false);
+    }
+  }, [nome, email, password, confirmPassword, onComplete]);
+
+  return (
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4" style={{ position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", inset: 0, zIndex: 0 }}>
+        <Aurora colorStops={["#4e487f", "#433a5f", "#5227FF"]} amplitude={1} blend={0.43} />
+      </div>
+      <div className="w-full max-w-md animate-slideIn" style={{ position: "relative", zIndex: 1 }}>
+        <div className="bg-gray-800/80 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-700 p-8">
+          <div className="text-center mb-6">
+            <div className="text-5xl mb-3">❄️</div>
+            <h2 className="text-2xl font-bold text-white">Primeiro Acesso</h2>
+            <p className="text-gray-400 text-sm mt-2">
+              Cadastre o usuário <strong className="text-white">Super Administrador</strong>.<br />
+              Este usuário terá acesso total e poderá criar os demais.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Nome completo</label>
+              <input
+                type="text"
+                value={nome}
+                onChange={(e) => { setNome(e.target.value); setError(""); }}
+                placeholder="Seu nome"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
+              <input
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => { setEmail(e.target.value); setError(""); }}
+                placeholder="seu@email.com.br"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Senha</label>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                placeholder="Mínimo 8 caracteres"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar Senha</label>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={confirmPassword}
+                onChange={(e) => { setConfirmPassword(e.target.value); setError(""); }}
+                placeholder="Repita a senha"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+              />
+            </div>
+
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50"
+            >
+              {saving ? "Criando..." : "Criar Super Administrador"}
             </button>
           </div>
         </div>
@@ -7515,6 +7665,378 @@ function MessageCenter({ user, addToast }) {
 
 // ─── SETTINGS MODULE ──────────────────────────────────────────────────────────
 
+// ─── GERENCIAMENTO DE USUÁRIOS — apenas para admins ────────────────────────────
+// Permite criar, editar, ativar/desativar e remover usuários.
+// O admin pode escolher um papel padrão (role) OU marcar permissões manuais
+// que sobrescrevem completamente as permissões do papel.
+
+function UserManagement({ currentUser, addToast }) {
+  const [users, setUsers] = useState([]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const emptyForm = {
+    nome: "", email: "", password: "", confirmPassword: "",
+    role: "atendente", status: "ativo",
+    useCustomPermissions: false,
+    customPermissions: [],
+  };
+  const [form, setForm] = useState(emptyForm);
+
+  const loadUsers = useCallback(() => {
+    const list = DB.list("erp:user:").sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+    setUsers(list);
+  }, []);
+
+  useEffect(() => { loadUsers(); }, [loadUsers]);
+
+  const openCreate = useCallback(() => {
+    setEditing(null);
+    setForm(emptyForm);
+    setModalOpen(true);
+  }, []);
+
+  const openEdit = useCallback((u) => {
+    setEditing(u);
+    setForm({
+      nome: u.nome || "",
+      email: u.email || "",
+      password: "",
+      confirmPassword: "",
+      role: u.role || "atendente",
+      status: u.status || "ativo",
+      useCustomPermissions: Array.isArray(u.customPermissions),
+      customPermissions: Array.isArray(u.customPermissions) ? u.customPermissions : [],
+    });
+    setModalOpen(true);
+  }, []);
+
+  const togglePermission = useCallback((moduleId) => {
+    setForm((f) => ({
+      ...f,
+      customPermissions: f.customPermissions.includes(moduleId)
+        ? f.customPermissions.filter((m) => m !== moduleId)
+        : [...f.customPermissions, moduleId],
+    }));
+  }, []);
+
+  const handleSave = useCallback(async () => {
+    const nome = form.nome.trim();
+    const emailNorm = form.email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+    if (!nome) { addToast("Informe o nome.", "error"); return; }
+    if (!emailRegex.test(emailNorm)) { addToast("Email inválido.", "error"); return; }
+
+    // Verifica unicidade do email (ignora o próprio usuário em edição)
+    const dup = users.find((u) => (u.email || "").toLowerCase() === emailNorm && (!editing || u.id !== editing.id));
+    if (dup) { addToast("Já existe um usuário com este email.", "error"); return; }
+
+    if (!editing) {
+      // Criação exige senha
+      if (!form.password || form.password.length < 8) {
+        addToast("Senha deve ter no mínimo 8 caracteres.", "error"); return;
+      }
+      if (form.password !== form.confirmPassword) {
+        addToast("As senhas não conferem.", "error"); return;
+      }
+    } else if (form.password) {
+      // Em edição, troca de senha é opcional
+      if (form.password.length < 8) {
+        addToast("Nova senha deve ter no mínimo 8 caracteres.", "error"); return;
+      }
+      if (form.password !== form.confirmPassword) {
+        addToast("As senhas não conferem.", "error"); return;
+      }
+    }
+
+    if (editing) {
+      const updated = {
+        ...editing,
+        nome,
+        email: emailNorm,
+        role: form.role,
+        status: form.status,
+        customPermissions: form.useCustomPermissions ? form.customPermissions : null,
+        updatedAt: new Date().toISOString(),
+      };
+      if (form.password) {
+        updated.password = await hashPassword(form.password);
+        // Invalida sessões antigas ao trocar senha
+        updated.sessionTokenHash = null;
+      }
+      DB.set("erp:user:" + updated.id, updated);
+      addToast("Usuário atualizado.", "success");
+    } else {
+      const newUser = {
+        id: genId(),
+        nome,
+        email: emailNorm,
+        password: await hashPassword(form.password),
+        role: form.role,
+        status: form.status,
+        avatar: nome.slice(0, 2).toUpperCase(),
+        createdAt: new Date().toISOString(),
+        forcePasswordChange: false,
+        sessionTokenHash: null,
+        customPermissions: form.useCustomPermissions ? form.customPermissions : null,
+      };
+      DB.set("erp:user:" + newUser.id, newUser);
+      addToast("Usuário criado.", "success");
+    }
+
+    setModalOpen(false);
+    loadUsers();
+  }, [form, editing, users, addToast, loadUsers]);
+
+  const handleDelete = useCallback((u) => {
+    if (u.id === currentUser.id) {
+      addToast("Você não pode excluir o próprio usuário.", "error");
+      return;
+    }
+    // Impede deletar o último admin ativo
+    const activeAdmins = users.filter((x) => x.role === "admin" && x.status === "ativo");
+    if (u.role === "admin" && activeAdmins.length <= 1) {
+      addToast("Não é possível excluir o último administrador ativo.", "error");
+      return;
+    }
+    setConfirmDelete(u);
+  }, [currentUser.id, users, addToast]);
+
+  const executeDelete = useCallback(() => {
+    if (!confirmDelete) return;
+    DB.delete("erp:user:" + confirmDelete.id);
+    addToast(`Usuário ${confirmDelete.nome} excluído.`, "success");
+    setConfirmDelete(null);
+    loadUsers();
+  }, [confirmDelete, addToast, loadUsers]);
+
+  const toggleStatus = useCallback((u) => {
+    if (u.id === currentUser.id) {
+      addToast("Você não pode desativar a si mesmo.", "error");
+      return;
+    }
+    const activeAdmins = users.filter((x) => x.role === "admin" && x.status === "ativo");
+    if (u.role === "admin" && u.status === "ativo" && activeAdmins.length <= 1) {
+      addToast("Não é possível desativar o último administrador ativo.", "error");
+      return;
+    }
+    const updated = { ...u, status: u.status === "ativo" ? "inativo" : "ativo" };
+    if (updated.status === "inativo") updated.sessionTokenHash = null;
+    DB.set("erp:user:" + updated.id, updated);
+    addToast(`Usuário ${updated.status === "ativo" ? "ativado" : "desativado"}.`, "success");
+    loadUsers();
+  }, [currentUser.id, users, addToast, loadUsers]);
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Usuários do Sistema</h3>
+          <p className="text-gray-400 text-sm mt-0.5">Gerencie quem tem acesso e o que cada um pode fazer.</p>
+        </div>
+        <button
+          onClick={openCreate}
+          className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
+        >
+          + Novo Usuário
+        </button>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-gray-700 text-gray-400 text-xs uppercase">
+              <th className="text-left px-3 py-2">Nome</th>
+              <th className="text-left px-3 py-2">Email</th>
+              <th className="text-left px-3 py-2">Papel</th>
+              <th className="text-left px-3 py-2">Permissões</th>
+              <th className="text-left px-3 py-2">Status</th>
+              <th className="text-right px-3 py-2">Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            {users.length === 0 && (
+              <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500">Nenhum usuário cadastrado.</td></tr>
+            )}
+            {users.map((u) => (
+              <tr key={u.id} className="border-b border-gray-700/50 hover:bg-gray-700/30">
+                <td className="px-3 py-2 text-white">
+                  {u.nome}
+                  {u.id === currentUser.id && <span className="ml-2 text-xs text-blue-400">(você)</span>}
+                </td>
+                <td className="px-3 py-2 text-gray-300">{u.email}</td>
+                <td className="px-3 py-2 text-gray-300 capitalize">{u.role}</td>
+                <td className="px-3 py-2 text-gray-400 text-xs">
+                  {Array.isArray(u.customPermissions)
+                    ? `Manual (${u.customPermissions.length})`
+                    : "Padrão do papel"}
+                </td>
+                <td className="px-3 py-2">
+                  <StatusBadge status={u.status === "ativo" ? "ativo" : "inativo"} />
+                </td>
+                <td className="px-3 py-2 text-right whitespace-nowrap">
+                  <button
+                    onClick={() => toggleStatus(u)}
+                    className="px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600 transition mr-1"
+                    title={u.status === "ativo" ? "Desativar" : "Ativar"}
+                  >
+                    {u.status === "ativo" ? "Desativar" : "Ativar"}
+                  </button>
+                  <button
+                    onClick={() => openEdit(u)}
+                    className="px-2 py-1 text-xs rounded bg-blue-600/30 text-blue-300 hover:bg-blue-600/50 transition mr-1"
+                  >
+                    Editar
+                  </button>
+                  <button
+                    onClick={() => handleDelete(u)}
+                    className="px-2 py-1 text-xs rounded bg-red-600/30 text-red-300 hover:bg-red-600/50 transition"
+                  >
+                    Excluir
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Modal de criação/edição */}
+      <Modal
+        isOpen={modalOpen}
+        title={editing ? "Editar Usuário" : "Novo Usuário"}
+        onClose={() => setModalOpen(false)}
+        size="lg"
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Nome</label>
+              <input
+                type="text"
+                value={form.nome}
+                onChange={(e) => setForm({ ...form, nome: e.target.value })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
+              <input
+                type="email"
+                value={form.email}
+                onChange={(e) => setForm({ ...form, email: e.target.value })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                Senha {editing && <span className="text-xs text-gray-500">(deixe vazio para manter)</span>}
+              </label>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={form.password}
+                onChange={(e) => setForm({ ...form, password: e.target.value })}
+                placeholder="Mínimo 8 caracteres"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar senha</label>
+              <input
+                type="password"
+                autoComplete="new-password"
+                value={form.confirmPassword}
+                onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Papel (Role)</label>
+              <select
+                value={form.role}
+                onChange={(e) => setForm({ ...form, role: e.target.value })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+              >
+                <option value="admin">Administrador</option>
+                <option value="gerente">Gerente</option>
+                <option value="tecnico">Técnico</option>
+                <option value="atendente">Atendente</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Status</label>
+              <select
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+              >
+                <option value="ativo">Ativo</option>
+                <option value="inativo">Inativo</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="border border-gray-700 rounded-lg p-4 bg-gray-900/40">
+            <label className="flex items-center gap-2 mb-3 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={form.useCustomPermissions}
+                onChange={(e) => setForm({ ...form, useCustomPermissions: e.target.checked })}
+                className="w-4 h-4"
+              />
+              <span className="text-sm text-white font-medium">Personalizar permissões manualmente</span>
+            </label>
+            <p className="text-xs text-gray-400 mb-3">
+              Quando ativado, o acesso é definido pelos módulos marcados abaixo, ignorando o papel.
+              Se desativado, o usuário usa as permissões padrão do papel selecionado.
+            </p>
+            <div className={`grid grid-cols-2 md:grid-cols-3 gap-2 ${form.useCustomPermissions ? "" : "opacity-40 pointer-events-none"}`}>
+              {ALL_MODULES.map((m) => (
+                <label key={m.id} className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer hover:text-white">
+                  <input
+                    type="checkbox"
+                    checked={form.customPermissions.includes(m.id)}
+                    onChange={() => togglePermission(m.id)}
+                    className="w-4 h-4"
+                  />
+                  <span>{m.label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600">
+              Cancelar
+            </button>
+            <button onClick={handleSave} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700">
+              {editing ? "Salvar alterações" : "Criar usuário"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Excluir o usuário ${confirmDelete.nome}? Esta ação não pode ser desfeita.`}
+          requireType="EXCLUIR"
+          onConfirm={executeDelete}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+    </div>
+  );
+}
+
 function SettingsModule({ user, addToast, reloadData }) {
   const [config, setConfig] = useState({
     razaoSocial: "", cnpj: "", telefone: "", email: "", endereco: "",
@@ -7818,6 +8340,9 @@ function SettingsModule({ user, addToast, reloadData }) {
       </div>
 
 
+      {/* Gerenciamento de Usuários (apenas admin) */}
+      <UserManagement currentUser={user} addToast={addToast} />
+
       {/* System Info */}
       <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
         <h3 className="text-lg font-semibold text-white mb-4">Informações do Sistema</h3>
@@ -7894,6 +8419,7 @@ export default function App() {
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
   const [pendingPasswordChange, setPendingPasswordChange] = useState(null);
+  const [needsFirstUser, setNeedsFirstUser] = useState(false);
   const searchRef = useRef(null);
   const lastActivityRef = useRef(Date.now());
 
@@ -7908,10 +8434,13 @@ export default function App() {
 
     // Real init — hydrate from Supabase, then load
     hydrateFromSupabase().then(async () => {
-      // Inicialização: popula dados demo se for o primeiro acesso
+      // Inicialização: popula dados demo se for o primeiro acesso (sem usuários)
       await seedDatabase();
       loadAllData();
       setLoading(false);
+      // Se não há nenhum usuário cadastrado, exige criação do super admin
+      const usersCount = DB.list("erp:user:").length;
+      if (usersCount === 0) setNeedsFirstUser(true);
       // Restauração de sessão via sessionStorage — agora valida token contra hash do usuário
       try {
         const sessionRaw = sessionStorage.getItem("frost_session");
@@ -8101,13 +8630,14 @@ export default function App() {
     ];
 
     if (!user) return [];
-    const perms = ROLE_PERMISSIONS[user.role] || [];
-    if (perms.includes("all")) return items;
-
+    // Usa hasPermission para respeitar permissões customizadas (sobrescrevem o role)
     return items.filter((item) => {
-      if (item.id === "dashboard") return true;
-      if (item.id === "config") return user.role === "admin";
-      return perms.includes(item.id) || perms.includes(item.module);
+      if (item.id === "dashboard") return hasPermission(user, "dashboard");
+      if (item.id === "config") {
+        // Apenas admin (ou quem tem 'config' explicitamente) acessa configurações
+        return user.role === "admin" || hasPermission(user, "config");
+      }
+      return hasPermission(user, item.id) || hasPermission(user, item.module);
     });
   }, [user]);
 
@@ -8152,6 +8682,16 @@ export default function App() {
     loadAllData();
   }, [loadAllData, startSession]);
 
+  // Após criar o super admin no primeiro acesso — loga automaticamente
+  const handleFirstUserCreated = useCallback(async (newUser) => {
+    setNeedsFirstUser(false);
+    const sessUser = await startSession(newUser);
+    setUser(sessUser);
+    setActiveModule("dashboard");
+    lastActivityRef.current = Date.now();
+    loadAllData();
+  }, [loadAllData, startSession]);
+
   const handleLogout = useCallback(() => {
     // Invalida o token também no usuário (sessões em outras abas/aparelhos perdem validade)
     if (user?.id) {
@@ -8185,6 +8725,16 @@ export default function App() {
           className="text-5xl font-bold text-white"
         />
       </div>
+    );
+  }
+
+  // Primeiro acesso: nenhum usuário cadastrado → cria super admin
+  if (needsFirstUser && !user) {
+    return (
+      <>
+        <StyleSheet />
+        <FirstUserSetup onComplete={handleFirstUserCreated} />
+      </>
     );
   }
 
