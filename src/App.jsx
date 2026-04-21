@@ -130,6 +130,24 @@ function genId() {
   return Date.now().toString(36) + Math.random().toString(36).slice(2);
 }
 
+// Token criptograficamente seguro (32 bytes em hex) — usado para sessão
+function genSecureToken() {
+  if (crypto?.getRandomValues) {
+    const arr = new Uint8Array(32);
+    crypto.getRandomValues(arr);
+    return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  // Fallback inseguro apenas para ambientes sem WebCrypto (não-HTTPS)
+  return genId() + genId();
+}
+
+// SHA-256 em hex — usado para validar token de sessão sem armazená-lo em claro
+async function sha256Hex(str) {
+  if (!crypto?.subtle) return str;
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
 function formatCurrency(value) {
   return new Intl.NumberFormat("pt-BR", {
     style: "currency",
@@ -211,8 +229,8 @@ function filterByDate(items, dateField, dateFilter) {
   });
 }
 
-// Hash de senha com salt — substitui btoa inseguro
-function hashPassword(pwd) {
+// ─── Hash legado (mantido apenas para migração de senhas antigas) ────────────
+function hashPasswordLegacy(pwd) {
   let hash = 0;
   const salt = "frostErpSalt2024";
   const salted = salt + pwd + salt;
@@ -229,10 +247,55 @@ function hashPassword(pwd) {
   return result;
 }
 
-function checkPassword(plain, hashed) {
-  // Compatibilidade com senhas antigas em base64
-  if (hashed === btoa(plain)) return true;
-  return hashPassword(plain) === hashed;
+// ─── Hash seguro com PBKDF2 via Web Crypto API ───────────────────���──────────
+// Retorna formato "pbkdf2:<base64-salt>:<base64-hash>"
+// Usa salt aleatório por usuário, 100k iterações, SHA-256
+async function hashPassword(pwd, existingSalt = null) {
+  // Fallback para navegadores sem Web Crypto (contextos inseguros)
+  if (!crypto?.subtle) {
+    return hashPasswordLegacy(pwd);
+  }
+  const encoder = new TextEncoder();
+  const salt = existingSalt
+    ? Uint8Array.from(atob(existingSalt), (c) => c.charCodeAt(0))
+    : crypto.getRandomValues(new Uint8Array(16));
+
+  const keyMaterial = await crypto.subtle.importKey(
+    "raw", encoder.encode(pwd), "PBKDF2", false, ["deriveBits"]
+  );
+  const derivedBits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations: 100000, hash: "SHA-256" },
+    keyMaterial, 256
+  );
+  const hashArray = new Uint8Array(derivedBits);
+  const saltB64 = btoa(String.fromCharCode(...salt));
+  const hashB64 = btoa(String.fromCharCode(...hashArray));
+  return `pbkdf2:${saltB64}:${hashB64}`;
+}
+
+// ─── Verificação de senha com suporte a migração automática ──────────────────
+// Retorna { match: boolean, needsRehash: boolean }
+// Detecta formato PBKDF2, legado (DJB2) e antigo (base64/btoa)
+async function checkPassword(plain, stored) {
+  // Formato novo PBKDF2
+  if (stored && stored.startsWith("pbkdf2:")) {
+    const parts = stored.split(":");
+    if (parts.length === 3) {
+      const rehashed = await hashPassword(plain, parts[1]);
+      return { match: rehashed === stored, needsRehash: false };
+    }
+  }
+  // Formato legado (DJB2 customizado)
+  if (stored === hashPasswordLegacy(plain)) {
+    return { match: true, needsRehash: true };
+  }
+  // Formato antigo (base64 — inseguro, apenas para migração)
+  try {
+    if (stored === btoa(plain)) {
+      return { match: true, needsRehash: true };
+    }
+  } catch { /* ignora erro de codificação */ }
+  return { match: false, needsRehash: false };
 }
 
 function getNextNumber(prefix, items) {
@@ -272,30 +335,35 @@ function monthsAgo(n) {
 
 // ─── SEED DATA ──────────────────────────────────────────────────────────────────
 
-function seedDatabase() {
+async function seedDatabase() {
   if (DB.get("erp:seeded")) return;
 
-  // Users
+  // Usuários demo — forcePasswordChange obriga troca no primeiro login
+  // Emails sempre normalizados em lowercase para evitar mismatch no login
   const users = [
     {
       id: genId(), email: "admin@frosterp.com.br", nome: "Administrador",
-      password: hashPassword("admin@frost2024"), role: "admin",
+      password: await hashPassword("admin@frost2024"), role: "admin",
       avatar: "AD", createdAt: new Date().toISOString(), status: "ativo",
+      forcePasswordChange: true, sessionTokenHash: null,
     },
     {
       id: genId(), email: "gerente@frosterp.com.br", nome: "Fernanda Gestora",
-      password: hashPassword("gerente@frost2024"), role: "gerente",
+      password: await hashPassword("gerente@frost2024"), role: "gerente",
       avatar: "FG", createdAt: new Date().toISOString(), status: "ativo",
+      forcePasswordChange: true, sessionTokenHash: null,
     },
     {
       id: genId(), email: "tecnico@frosterp.com.br", nome: "Ricardo Técnico",
-      password: hashPassword("tecnico@frost2024"), role: "tecnico",
+      password: await hashPassword("tecnico@frost2024"), role: "tecnico",
       avatar: "RT", createdAt: new Date().toISOString(), status: "ativo",
+      forcePasswordChange: true, sessionTokenHash: null,
     },
     {
       id: genId(), email: "atendente@frosterp.com.br", nome: "Juliana Atendente",
-      password: hashPassword("atend@frost2024"), role: "atendente",
+      password: await hashPassword("atend@frost2024"), role: "atendente",
       avatar: "JA", createdAt: new Date().toISOString(), status: "ativo",
+      forcePasswordChange: true, sessionTokenHash: null,
     },
   ];
   users.forEach((u) => DB.set("erp:user:" + u.id, u));
@@ -1043,36 +1111,123 @@ function LoadingSkeleton({ rows = 5 }) {
 
 // ─── LOGIN SCREEN ───────────────────────────────────────────────────────────────
 
+// Chave usada para persistir tentativas de login entre recargas (sessionStorage)
+const LOGIN_ATTEMPTS_KEY = "frost_login_attempts";
+
+function readLoginAttempts() {
+  try {
+    const raw = sessionStorage.getItem(LOGIN_ATTEMPTS_KEY);
+    if (!raw) return { count: 0, lockoutUntil: 0 };
+    const parsed = JSON.parse(raw);
+    return { count: Number(parsed.count) || 0, lockoutUntil: Number(parsed.lockoutUntil) || 0 };
+  } catch {
+    return { count: 0, lockoutUntil: 0 };
+  }
+}
+
+function writeLoginAttempts(state) {
+  try { sessionStorage.setItem(LOGIN_ATTEMPTS_KEY, JSON.stringify(state)); } catch { /* ignora */ }
+}
+
+function clearLoginAttempts() {
+  try { sessionStorage.removeItem(LOGIN_ATTEMPTS_KEY); } catch { /* ignora */ }
+}
+
 function LoginScreen({ onLogin }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Inicializa a partir do sessionStorage para que o lockout persista entre recargas
+  const initial = readLoginAttempts();
+  const [failedAttempts, setFailedAttempts] = useState(initial.count);
+  const [lockoutUntil, setLockoutUntil] = useState(initial.lockoutUntil > Date.now() ? initial.lockoutUntil : null);
+  const [lockoutSeconds, setLockoutSeconds] = useState(0);
 
-  const handleSubmit = useCallback((e) => {
+  // Countdown do lockout — atualiza a cada segundo enquanto bloqueado
+  useEffect(() => {
+    if (!lockoutUntil) { setLockoutSeconds(0); return; }
+    const tick = () => {
+      const remaining = Math.ceil((lockoutUntil - Date.now()) / 1000);
+      if (remaining <= 0) { setLockoutUntil(null); setLockoutSeconds(0); }
+      else setLockoutSeconds(remaining);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [lockoutUntil]);
+
+  const handleSubmit = useCallback(async (e) => {
     e.preventDefault();
     setError("");
+
+    // Rate limiting — bloqueia tentativas durante lockout (consulta sessionStorage também)
+    const persisted = readLoginAttempts();
+    const effectiveLockout = Math.max(lockoutUntil || 0, persisted.lockoutUntil || 0);
+    if (effectiveLockout && Date.now() < effectiveLockout) {
+      setError(`Aguarde ${Math.ceil((effectiveLockout - Date.now()) / 1000)}s antes de tentar novamente.`);
+      return;
+    }
 
     if (!email.trim() || !password.trim()) {
       setError("Preencha todos os campos.");
       return;
     }
 
+    // Validação de formato de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!emailRegex.test(normalizedEmail)) {
+      setError("Formato de email inválido.");
+      return;
+    }
+
     setLoading(true);
-    setTimeout(() => {
+    try {
       const users = DB.list("erp:user:");
-      const found = users.find(
-        (u) => u.email === email.trim().toLowerCase() && checkPassword(password, u.password)
-      );
+      let found = null;
+
+      // checkPassword é async (PBKDF2) — verifica cada usuário
+      // Comparação case-insensitive para tolerar registros antigos
+      for (const u of users) {
+        if ((u.email || "").trim().toLowerCase() === normalizedEmail) {
+          const result = await checkPassword(password, u.password);
+          if (result.match) {
+            // Normaliza email persistido caso esteja em maiúsculas
+            if (u.email !== normalizedEmail) u.email = normalizedEmail;
+            // Migração automática: re-hash com PBKDF2 se senha em formato antigo
+            if (result.needsRehash) {
+              const newHash = await hashPassword(password);
+              u.password = newHash;
+            }
+            DB.set("erp:user:" + u.id, u);
+            found = u;
+            break;
+          }
+        }
+      }
 
       if (found) {
+        setFailedAttempts(0);
+        setLockoutUntil(null);
+        clearLoginAttempts();
         onLogin(found);
       } else {
+        const attempts = (persisted.count || failedAttempts) + 1;
+        // Lockout progressivo: 5 falhas=30s, 10=60s, 15+=300s
+        let nextLockout = 0;
+        if (attempts >= 15) nextLockout = Date.now() + 300000;
+        else if (attempts >= 10) nextLockout = Date.now() + 60000;
+        else if (attempts >= 5) nextLockout = Date.now() + 30000;
+        setFailedAttempts(attempts);
+        setLockoutUntil(nextLockout || null);
+        writeLoginAttempts({ count: attempts, lockoutUntil: nextLockout });
         setError("Email ou senha incorretos.");
       }
+    } finally {
       setLoading(false);
-    }, 600);
-  }, [email, password, onLogin]);
+    }
+  }, [email, password, onLogin, failedAttempts, lockoutUntil]);
 
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4" style={{ position: 'relative', overflow: 'hidden' }}>
@@ -1128,9 +1283,15 @@ function LoginScreen({ onLogin }) {
               </div>
             )}
 
+            {lockoutSeconds > 0 && (
+              <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-4 py-2.5 text-yellow-400 text-sm text-center">
+                Bloqueado por {lockoutSeconds}s — muitas tentativas incorretas
+              </div>
+            )}
+
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || lockoutSeconds > 0}
               className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
             >
               {loading ? (
@@ -1151,6 +1312,96 @@ function LoginScreen({ onLogin }) {
             <p className="text-gray-500 text-xs text-center">
               FrostERP &copy; {new Date().getFullYear()}
             </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── DIALOG DE TROCA DE SENHA OBRIGATÓRIA ────────────────────────────────────
+// Exibido quando o usuário faz login com credenciais demo ou forcePasswordChange=true
+
+function ForcePasswordChangeDialog({ user, onComplete }) {
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = useCallback(async () => {
+    setError("");
+    if (!newPassword || !confirmPassword) {
+      setError("Preencha todos os campos.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      setError("A senha deve ter no mínimo 8 caracteres.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setError("As senhas não conferem.");
+      return;
+    }
+
+    setSaving(true);
+    try {
+      const hashed = await hashPassword(newPassword);
+      const updated = { ...user, password: hashed, forcePasswordChange: false };
+      DB.set("erp:user:" + user.id, updated);
+      onComplete(updated);
+    } finally {
+      setSaving(false);
+    }
+  }, [newPassword, confirmPassword, user, onComplete]);
+
+  return (
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-md animate-slideIn">
+        <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-8">
+          <div className="text-center mb-6">
+            <div className="text-4xl mb-2">🔐</div>
+            <h2 className="text-xl font-bold text-white">Troca de Senha Obrigatória</h2>
+            <p className="text-gray-400 text-sm mt-2">
+              Por segurança, defina uma nova senha para continuar.
+            </p>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Nova Senha</label>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => { setNewPassword(e.target.value); setError(""); }}
+                placeholder="Mínimo 8 caracteres"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar Senha</label>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => { setConfirmPassword(e.target.value); setError(""); }}
+                placeholder="Repita a nova senha"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+              />
+            </div>
+
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50"
+            >
+              {saving ? "Salvando..." : "Definir Nova Senha"}
+            </button>
           </div>
         </div>
       </div>
@@ -7449,8 +7700,8 @@ function SettingsModule({ user, addToast, reloadData }) {
     setConfirmResetFinal(true);
   }, []);
 
-  const executeResetDemo = useCallback(() => {
-    // Clear all data
+  const executeResetDemo = useCallback(async () => {
+    // Apaga todos os dados do sistema
     const prefixes = [
       "erp:client:", "erp:employee:", "erp:inventory:", "erp:os:",
       "erp:schedule:", "erp:finance:", "erp:invoice:", "erp:boleto:", "erp:ticket:",
@@ -7464,11 +7715,12 @@ function SettingsModule({ user, addToast, reloadData }) {
     DB.delete("erp:seeded");
     DB.delete("erp:lastBackup");
 
-    // Cria apenas o usuário admin padrão (sem dados demo)
+    // Cria apenas o usuário admin padrão com senha segura (PBKDF2)
     const adminUser = {
       id: genId(), email: "admin@frosterp.com.br", nome: "Administrador",
-      password: hashPassword("admin@frost2024"), role: "admin",
+      password: await hashPassword("admin@frost2024"), role: "admin",
       avatar: "AD", createdAt: new Date().toISOString(), status: "ativo",
+      forcePasswordChange: true, sessionTokenHash: null,
     };
     DB.set("erp:user:" + adminUser.id, adminUser);
     DB.set("erp:seeded", true);
@@ -7634,18 +7886,20 @@ export default function App() {
   const [splashFading, setSplashFading] = useState(false);
   const [data, setData] = useState({
     clients: [], employees: [], services: [], schedule: [],
-    finance: [], config: {},
+    finance: [], inventory: [], config: {},
   });
   const [notifications, setNotifications] = useState([]);
   const [globalSearch, setGlobalSearch] = useState("");
   const [globalSearchResults, setGlobalSearchResults] = useState([]);
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [pendingPasswordChange, setPendingPasswordChange] = useState(null);
   const searchRef = useRef(null);
+  const lastActivityRef = useRef(Date.now());
 
-  // ─── Init com Splash de 3 segundos ───
+  // ─── Init com Splash de 3 segundos + restauração de sessão ───
   useEffect(() => {
-    // Splash de 3s com fade-out — timers armazenados para cleanup
+    // Splash de 3s com fade-out
     const t1 = setTimeout(() => {
       setSplashFading(true);
       const t2 = setTimeout(() => setSplashVisible(false), 600);
@@ -7653,22 +7907,51 @@ export default function App() {
     }, 3000);
 
     // Real init — hydrate from Supabase, then load
-    hydrateFromSupabase().then(() => {
+    hydrateFromSupabase().then(async () => {
       // Inicialização: popula dados demo se for o primeiro acesso
-      seedDatabase();
+      await seedDatabase();
       loadAllData();
       setLoading(false);
-      // Envia dados locais (incluindo usuários) para o Supabase a cada abertura do app,
-      // garantindo que outros dispositivos recebam os dados mais recentes
-      uploadAllToSupabase();
+      // Restauração de sessão via sessionStorage — agora valida token contra hash do usuário
+      try {
+        const sessionRaw = sessionStorage.getItem("frost_session");
+        if (sessionRaw) {
+          const session = JSON.parse(sessionRaw);
+          const SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutos
+          const within = session.userId && session.token && (Date.now() - session.lastActivity) < SESSION_TIMEOUT;
+          if (within) {
+            const savedUser = DB.get("erp:user:" + session.userId);
+            // Valida HASH do token armazenado no usuário — impede forjar sessão pelo DevTools
+            const tokenHash = await sha256Hex(session.token);
+            if (savedUser && savedUser.status === "ativo" && savedUser.sessionTokenHash === tokenHash) {
+              setUser(savedUser);
+              lastActivityRef.current = Date.now();
+              sessionStorage.setItem("frost_session", JSON.stringify({ ...session, lastActivity: Date.now() }));
+            } else {
+              // Token inválido ou usuário desativado — limpa sessão
+              sessionStorage.removeItem("frost_session");
+            }
+          } else {
+            sessionStorage.removeItem("frost_session");
+          }
+        }
+      } catch { sessionStorage.removeItem("frost_session"); }
+      // Upload inicial só roda quando NÃO existe nada no Supabase (evita escrita massiva a cada load)
     });
 
     // Realtime: escuta mudanças de outros aparelhos e atualiza dados automaticamente
+    // Debounce 300ms — evita reload em rajada quando muitas chaves mudam de uma vez
+    let realtimeTimer = null;
     const unsubscribe = subscribeToChanges(() => {
-      loadAllData();
+      if (realtimeTimer) clearTimeout(realtimeTimer);
+      realtimeTimer = setTimeout(() => { loadAllData(); }, 300);
     });
 
-    return () => { clearTimeout(t1); unsubscribe(); };
+    return () => {
+      clearTimeout(t1);
+      if (realtimeTimer) clearTimeout(realtimeTimer);
+      unsubscribe();
+    };
   }, []);
 
   // ─── Load All Data ───
@@ -7679,6 +7962,7 @@ export default function App() {
       services: DB.list("erp:os:"),
       schedule: DB.list("erp:schedule:"),
       finance: DB.list("erp:finance:"),
+      inventory: DB.list("erp:inventory:"),
       config: DB.get("erp:config") || {},
     });
   }, []);
@@ -7693,6 +7977,39 @@ export default function App() {
   const removeToast = useCallback((id) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  // ─── Timeout de inatividade (30 min) — desloga automaticamente ───
+  useEffect(() => {
+    const INACTIVITY_TIMEOUT = 30 * 60 * 1000;
+    const resetActivity = () => {
+      lastActivityRef.current = Date.now();
+      try {
+        const raw = sessionStorage.getItem("frost_session");
+        if (raw) {
+          const s = JSON.parse(raw);
+          s.lastActivity = Date.now();
+          sessionStorage.setItem("frost_session", JSON.stringify(s));
+        }
+      } catch { /* ignora */ }
+    };
+    const events = ["mousemove", "keydown", "click", "touchstart", "scroll"];
+    events.forEach((ev) => document.addEventListener(ev, resetActivity, { passive: true }));
+
+    const checkInterval = setInterval(() => {
+      if (user && (Date.now() - lastActivityRef.current) > INACTIVITY_TIMEOUT) {
+        setUser(null);
+        setPendingPasswordChange(null);
+        setActiveModule("dashboard");
+        sessionStorage.removeItem("frost_session");
+        addToast("Sessão expirada por inatividade.", "warning");
+      }
+    }, 60000);
+
+    return () => {
+      events.forEach((ev) => document.removeEventListener(ev, resetActivity));
+      clearInterval(checkInterval);
+    };
+  }, [user, addToast]);
 
   // ─── Compute Notifications ───
   const computedNotifications = useMemo(() => {
@@ -7749,28 +8066,37 @@ export default function App() {
     setShowSearchResults(results.length > 0);
   }, [globalSearch, data]);
 
-  // Close search results on click outside
+  // Fecha busca/notificações ao clicar fora — usa ref do dropdown de notificações
+  // para permitir clicar nas notificações sem fechá-las imediatamente
+  const notificationsRef = useRef(null);
   useEffect(() => {
     const handler = (e) => {
       if (searchRef.current && !searchRef.current.contains(e.target)) {
         setShowSearchResults(false);
       }
-      if (showNotifications) {
+      if (notificationsRef.current && !notificationsRef.current.contains(e.target)) {
         setShowNotifications(false);
       }
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [showNotifications]);
+  }, []);
 
   // ─── Sidebar Nav Items ───
+  // Cada item declara o módulo correspondente em ROLE_PERMISSIONS para controle de acesso
   const navItems = useMemo(() => {
     const items = [
       { id: "dashboard", label: "Dashboard", icon: "📊", module: "dashboard" },
       { id: "financeiro", label: "Financeiro", icon: "💰", module: "financeiro" },
-      { id: "processos", label: "Ordens de Serviço", icon: "🔧", module: "processos" },
+      { id: "bancario", label: "Bancário", icon: "🏦", module: "financeiro" },
+      { id: "faturas", label: "Faturas / NF", icon: "🧾", module: "financeiro" },
+      { id: "pdv", label: "PDV", icon: "🛒", module: "financeiro" },
+      { id: "estoque", label: "Estoque", icon: "📦", module: "estoque" },
+      { id: "processos", label: "Ordens de Serviço", icon: "🔧", module: "os" },
       { id: "agenda", label: "Agenda", icon: "📅", module: "agenda" },
-      { id: "cadastro", label: "Cadastros", icon: "👥", module: "cadastro" },
+      { id: "tickets", label: "Tickets", icon: "🎫", module: "tickets" },
+      { id: "mensagens", label: "Mensagens", icon: "💬", module: "tickets" },
+      { id: "cadastro", label: "Cadastros", icon: "👥", module: "clientes" },
       { id: "config", label: "Configurações", icon: "⚙️", module: "config" },
     ];
 
@@ -7790,19 +8116,55 @@ export default function App() {
     return item ? item.label : "Dashboard";
   }, [navItems, activeModule]);
 
-  // ─── Login Handler ───
-  const handleLogin = useCallback((u) => {
-    setUser(u);
+  // Gera um token seguro, salva apenas o HASH no usuário e o token bruto na sessão
+  // Isso impede que um atacante forje sessões pelo DevTools (ele não conhece o token original)
+  const startSession = useCallback(async (u) => {
+    const token = genSecureToken();
+    const tokenHash = await sha256Hex(token);
+    const updated = { ...u, sessionTokenHash: tokenHash, lastLoginAt: new Date().toISOString() };
+    DB.set("erp:user:" + updated.id, updated);
+    sessionStorage.setItem("frost_session", JSON.stringify({
+      userId: updated.id, loginAt: Date.now(), lastActivity: Date.now(), token,
+    }));
+    return updated;
+  }, []);
+
+  // ─── Login Handler — salva sessão e verifica troca de senha obrigatória ───
+  const handleLogin = useCallback(async (u) => {
+    if (u.forcePasswordChange) {
+      setPendingPasswordChange(u);
+      return;
+    }
+    const sessUser = await startSession(u);
+    setUser(sessUser);
     setActiveModule("dashboard");
+    lastActivityRef.current = Date.now();
     loadAllData();
-  }, [loadAllData]);
+  }, [loadAllData, startSession]);
+
+  // Callback após troca de senha obrigatória
+  const handlePasswordChanged = useCallback(async (updatedUser) => {
+    setPendingPasswordChange(null);
+    const sessUser = await startSession(updatedUser);
+    setUser(sessUser);
+    setActiveModule("dashboard");
+    lastActivityRef.current = Date.now();
+    loadAllData();
+  }, [loadAllData, startSession]);
 
   const handleLogout = useCallback(() => {
+    // Invalida o token também no usuário (sessões em outras abas/aparelhos perdem validade)
+    if (user?.id) {
+      const fresh = DB.get("erp:user:" + user.id);
+      if (fresh) DB.set("erp:user:" + user.id, { ...fresh, sessionTokenHash: null });
+    }
     setUser(null);
+    setPendingPasswordChange(null);
     setActiveModule("dashboard");
     setGlobalSearch("");
     setGlobalSearchResults([]);
-  }, []);
+    sessionStorage.removeItem("frost_session");
+  }, [user]);
 
   // ─── Render ───
   if (splashVisible) {
@@ -7823,6 +8185,16 @@ export default function App() {
           className="text-5xl font-bold text-white"
         />
       </div>
+    );
+  }
+
+  // Dialog de troca de senha obrigatória (antes de permitir acesso)
+  if (pendingPasswordChange) {
+    return (
+      <>
+        <StyleSheet />
+        <ForcePasswordChangeDialog user={pendingPasswordChange} onComplete={handlePasswordChanged} />
+      </>
     );
   }
 
@@ -8000,7 +8372,7 @@ export default function App() {
             </div>
 
             {/* Notifications Bell */}
-            <div className="relative">
+            <div className="relative" ref={notificationsRef}>
               <button
                 onClick={() => setShowNotifications(!showNotifications)}
                 className="relative p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition"
@@ -8082,16 +8454,34 @@ export default function App() {
           {activeModule === "financeiro" && (
             <FinanceModule user={user} dateFilter={dateFilter} addToast={addToast} />
           )}
-{activeModule === "processos" && (
+          {activeModule === "bancario" && (
+            <BankingModule user={user} dateFilter={dateFilter} addToast={addToast} />
+          )}
+          {activeModule === "faturas" && (
+            <InvoiceModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} />
+          )}
+          {activeModule === "pdv" && (
+            <PDVModule user={user} addToast={addToast} inventory={data.inventory} reloadData={loadAllData} />
+          )}
+          {activeModule === "estoque" && (
+            <InventoryModule user={user} addToast={addToast} />
+          )}
+          {activeModule === "processos" && (
             <ProcessModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} />
           )}
           {activeModule === "agenda" && (
             <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} />
           )}
+          {activeModule === "tickets" && (
+            <WebdeskModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} />
+          )}
+          {activeModule === "mensagens" && (
+            <MessageCenter user={user} addToast={addToast} />
+          )}
           {activeModule === "cadastro" && (
             <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
           )}
-{activeModule === "config" && (
+          {activeModule === "config" && (
             <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} />
           )}
         </main>
