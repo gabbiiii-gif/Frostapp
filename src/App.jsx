@@ -311,16 +311,12 @@ function getNextNumber(prefix, items) {
 }
 
 // Lista de módulos disponíveis para autorização manual no gerenciamento de usuários
+// Mantida em sincronia com navItems do App (remoções de sessões devem ocorrer aqui também)
 const ALL_MODULES = [
   { id: "dashboard", label: "Dashboard" },
   { id: "financeiro", label: "Financeiro" },
-  { id: "bancario", label: "Bancário" },
-  { id: "faturas", label: "Faturas / NF" },
-  { id: "pdv", label: "PDV" },
-  { id: "estoque", label: "Estoque" },
   { id: "processos", label: "Ordens de Serviço" },
   { id: "agenda", label: "Agenda" },
-  { id: "tickets", label: "Tickets" },
   { id: "mensagens", label: "Mensagens" },
   { id: "cadastro", label: "Cadastros" },
   { id: "config", label: "Configurações (admin)" },
@@ -5132,12 +5128,16 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     faturado: "bg-purple-500",
   };
 
-  // Carrega do DB diretamente para garantir dados atualizados mesmo se o prop estiver desatualizado
+  // Carrega clientes e funcionários do DB diretamente para garantir dados atualizados
+  // mesmo se os props estiverem desatualizados (ex: após novo cadastro sem rehydrate)
   const [allEmployees, setAllEmployees] = useState(employees || []);
+  const [allClients, setAllClients] = useState(clients || []);
   useEffect(() => {
-    const fromDB = DB.list("erp:employee:");
-    setAllEmployees(fromDB.length > 0 ? fromDB : (employees || []));
-  }, [employees]);
+    const empFromDB = DB.list("erp:employee:");
+    setAllEmployees(empFromDB.length > 0 ? empFromDB : (employees || []));
+    const cliFromDB = DB.list("erp:client:");
+    setAllClients(cliFromDB.length > 0 ? cliFromDB : (clients || []));
+  }, [employees, clients]);
   const tecnicos = useMemo(() => allEmployees.filter((e) => e.tipo === "tecnico" && e.status === "ativo"), [allEmployees]);
 
   const loadOrders = useCallback(() => {
@@ -5213,7 +5213,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
       return;
     }
 
-    const cliente = (clients || []).find((c) => c.id === form.clienteId);
+    const cliente = (allClients || []).find((c) => c.id === form.clienteId);
     const tecnico = tecnicos.find((t) => t.id === form.tecnicoId);
     const valor = parseFloat(String(form.valor).replace(",", ".")) || 0;
 
@@ -5264,7 +5264,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
     setModalOpen(false);
     loadOrders();
-  }, [form, editing, orders, clients, tecnicos, loadOrders, addToast]);
+  }, [form, editing, orders, allClients, tecnicos, loadOrders, addToast]);
 
   const handleDelete = useCallback((row) => {
     setConfirmDelete(row);
@@ -5449,14 +5449,14 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
               )}
               {/* Botões de documentos HTML */}
               <button
-                onClick={() => openHTMLDoc(generateOrcamentoHTML(row, clients))}
+                onClick={() => openHTMLDoc(generateOrcamentoHTML(row, allClients))}
                 className="p-1.5 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-gray-700 transition"
                 title="Gerar Orçamento HTML"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" /></svg>
               </button>
               <button
-                onClick={() => openHTMLDoc(generateOSHTML(row, clients))}
+                onClick={() => openHTMLDoc(generateOSHTML(row, allClients))}
                 className="p-1.5 rounded-lg text-gray-400 hover:text-purple-400 hover:bg-gray-700 transition"
                 title="Gerar Ordem de Serviço HTML"
               >
@@ -5464,7 +5464,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
               </button>
               {(row.status === "finalizado" || row.status === "faturado" || row.status === "concluido") && (
                 <button
-                  onClick={() => openHTMLDoc(generateReciboHTML(row, clients))}
+                  onClick={() => openHTMLDoc(generateReciboHTML(row, allClients))}
                   className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition"
                   title="Gerar Recibo HTML"
                 >
@@ -5521,10 +5521,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                         </div>
                         {/* Ações rápidas de documentos */}
                         <div className="flex items-center gap-1 mt-2 pt-2 border-t border-gray-600/30">
-                          <button onClick={() => openHTMLDoc(generateOrcamentoHTML(os, clients))} className="flex-1 py-1 text-xs rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/40 transition text-center" title="Orçamento">Orç.</button>
-                          <button onClick={() => openHTMLDoc(generateOSHTML(os, clients))} className="flex-1 py-1 text-xs rounded bg-purple-600/20 text-purple-400 hover:bg-purple-600/40 transition text-center" title="OS">OS</button>
+                          <button onClick={() => openHTMLDoc(generateOrcamentoHTML(os, allClients))} className="flex-1 py-1 text-xs rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/40 transition text-center" title="Orçamento">Orç.</button>
+                          <button onClick={() => openHTMLDoc(generateOSHTML(os, allClients))} className="flex-1 py-1 text-xs rounded bg-purple-600/20 text-purple-400 hover:bg-purple-600/40 transition text-center" title="OS">OS</button>
                           {(os.status === "finalizado" || os.status === "faturado" || os.status === "concluido") && (
-                            <button onClick={() => openHTMLDoc(generateReciboHTML(os, clients))} className="flex-1 py-1 text-xs rounded bg-green-600/20 text-green-400 hover:bg-green-600/40 transition text-center" title="Recibo">Recibo</button>
+                            <button onClick={() => openHTMLDoc(generateReciboHTML(os, allClients))} className="flex-1 py-1 text-xs rounded bg-green-600/20 text-green-400 hover:bg-green-600/40 transition text-center" title="Recibo">Recibo</button>
                           )}
                         </div>
                       </div>
@@ -5547,7 +5547,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                 value={form.clienteId}
                 onChange={(e) => {
                   const cid = e.target.value;
-                  const c = (clients || []).find((cl) => cl.id === cid);
+                  const c = (allClients || []).find((cl) => cl.id === cid);
                   setForm({
                     ...form,
                     clienteId: cid,
@@ -5557,7 +5557,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
               >
                 <option value="">Selecione...</option>
-                {(clients || []).map((c) => (
+                {(allClients || []).map((c) => (
                   <option key={c.id} value={c.id}>{c.nome}</option>
                 ))}
               </select>
@@ -5705,11 +5705,15 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
     cancelado: "Cancelado",
   };
 
+  // Carrega clientes e funcionários do DB diretamente para refletir cadastros recentes
   const [allEmployees, setAllEmployees] = useState(employees || []);
+  const [allClients, setAllClients] = useState(clients || []);
   useEffect(() => {
-    const fromDB = DB.list("erp:employee:");
-    setAllEmployees(fromDB.length > 0 ? fromDB : (employees || []));
-  }, [employees]);
+    const empFromDB = DB.list("erp:employee:");
+    setAllEmployees(empFromDB.length > 0 ? empFromDB : (employees || []));
+    const cliFromDB = DB.list("erp:client:");
+    setAllClients(cliFromDB.length > 0 ? cliFromDB : (clients || []));
+  }, [employees, clients]);
   const tecnicos = useMemo(() => allEmployees.filter((e) => e.tipo === "tecnico" && e.status === "ativo"), [allEmployees]);
 
   const loadAppointments = useCallback(() => {
@@ -5864,7 +5868,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
       return;
     }
 
-    const cliente = (clients || []).find((c) => c.id === form.clienteId);
+    const cliente = (allClients || []).find((c) => c.id === form.clienteId);
     const tecnico = tecnicos.find((t) => t.id === form.tecnicoId);
 
     if (editing) {
@@ -5906,7 +5910,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
 
     setModalOpen(false);
     loadAppointments();
-  }, [form, editing, appointments, clients, tecnicos, loadAppointments, addToast]);
+  }, [form, editing, appointments, allClients, tecnicos, loadAppointments, addToast]);
 
   const handleDelete = useCallback((appt) => {
     setConfirmDelete(appt);
@@ -5929,7 +5933,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
   }, [loadAppointments, addToast]);
 
   const sendWhatsApp = useCallback((appt) => {
-    const cliente = (clients || []).find((c) => c.id === appt.clienteId);
+    const cliente = (allClients || []).find((c) => c.id === appt.clienteId);
     if (!cliente?.telefone) {
       addToast("Cliente sem telefone cadastrado.", "warning");
       return;
@@ -5939,10 +5943,10 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
       `Olá ${cliente.nome}! Confirmamos seu agendamento de ${appt.tipo} para ${formatDateTime(appt.data)}. Endereço: ${appt.endereco || "a confirmar"}. FrostERP Refrigeração.`
     );
     window.open(`https://wa.me/55${phone}?text=${msg}`, "_blank");
-  }, [clients, addToast]);
+  }, [allClients, addToast]);
 
   const sendEmail = useCallback((appt) => {
-    const cliente = (clients || []).find((c) => c.id === appt.clienteId);
+    const cliente = (allClients || []).find((c) => c.id === appt.clienteId);
     if (!cliente?.email) {
       addToast("Cliente sem email cadastrado.", "warning");
       return;
@@ -5952,7 +5956,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
       `Olá ${cliente.nome},\n\nConfirmamos seu agendamento:\n\nServiço: ${appt.tipo}\nData: ${formatDateTime(appt.data)}\nEndereço: ${appt.endereco || "a confirmar"}\n\nAtenciosamente,\nFrostERP Refrigeração`
     );
     window.open(`mailto:${cliente.email}?subject=${subject}&body=${body}`, "_blank");
-  }, [clients, addToast]);
+  }, [allClients, addToast]);
 
   return (
     <div className="space-y-6">
@@ -6217,7 +6221,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
                 value={form.clienteId}
                 onChange={(e) => {
                   const cid = e.target.value;
-                  const c = (clients || []).find((cl) => cl.id === cid);
+                  const c = (allClients || []).find((cl) => cl.id === cid);
                   setForm({
                     ...form,
                     clienteId: cid,
@@ -6227,7 +6231,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
               >
                 <option value="">Selecione...</option>
-                {(clients || []).map((c) => (
+                {(allClients || []).map((c) => (
                   <option key={c.id} value={c.id}>{c.nome}</option>
                 ))}
               </select>
@@ -6806,7 +6810,9 @@ function CadastroModule({ user, addToast, reloadData }) {
     }
     setModalOpen(false);
     loadClients();
-  }, [clientForm, editing, loadClients, addToast]);
+    // Propaga o cliente atualizado aos demais módulos (Processos/OS, Agenda, Finanças)
+    if (reloadData) reloadData();
+  }, [clientForm, editing, loadClients, addToast, reloadData]);
 
   /* Exclusão de cliente — remove também OS, transações, tickets e agendamentos vinculados */
   const handleDeleteClient = useCallback((row) => {
@@ -6834,8 +6840,10 @@ function CadastroModule({ user, addToast, reloadData }) {
       setConfirmDelete(null);
       setDetailView(null);
       loadClients();
+      // Propaga a exclusão aos demais módulos (remoções em cascata de OS/transações/tickets/agenda)
+      if (reloadData) reloadData();
     }
-  }, [confirmDelete, loadClients, addToast]);
+  }, [confirmDelete, loadClients, addToast, reloadData]);
 
   // ─── Employee CRUD ───
   const openCreateEmployee = useCallback(() => {
@@ -6915,8 +6923,10 @@ function CadastroModule({ user, addToast, reloadData }) {
       addToast("Funcionário excluído.", "success");
       setConfirmDelete(null);
       loadEmployees();
+      // Propaga a remoção do funcionário aos módulos que o usam (Processos/OS, Agenda)
+      if (reloadData) reloadData();
     }
-  }, [confirmDelete, loadEmployees, addToast]);
+  }, [confirmDelete, loadEmployees, addToast, reloadData]);
 
   // ─── Client Detail View ───
   const clientDetailData = useMemo(() => {
@@ -8617,13 +8627,8 @@ export default function App() {
     const items = [
       { id: "dashboard", label: "Dashboard", icon: "📊", module: "dashboard" },
       { id: "financeiro", label: "Financeiro", icon: "💰", module: "financeiro" },
-      { id: "bancario", label: "Bancário", icon: "🏦", module: "financeiro" },
-      { id: "faturas", label: "Faturas / NF", icon: "🧾", module: "financeiro" },
-      { id: "pdv", label: "PDV", icon: "🛒", module: "financeiro" },
-      { id: "estoque", label: "Estoque", icon: "📦", module: "estoque" },
       { id: "processos", label: "Ordens de Serviço", icon: "🔧", module: "os" },
       { id: "agenda", label: "Agenda", icon: "📅", module: "agenda" },
-      { id: "tickets", label: "Tickets", icon: "🎫", module: "tickets" },
       { id: "mensagens", label: "Mensagens", icon: "💬", module: "tickets" },
       { id: "cadastro", label: "Cadastros", icon: "👥", module: "clientes" },
       { id: "config", label: "Configurações", icon: "⚙️", module: "config" },
@@ -9004,26 +9009,11 @@ export default function App() {
           {activeModule === "financeiro" && (
             <FinanceModule user={user} dateFilter={dateFilter} addToast={addToast} />
           )}
-          {activeModule === "bancario" && (
-            <BankingModule user={user} dateFilter={dateFilter} addToast={addToast} />
-          )}
-          {activeModule === "faturas" && (
-            <InvoiceModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} />
-          )}
-          {activeModule === "pdv" && (
-            <PDVModule user={user} addToast={addToast} inventory={data.inventory} reloadData={loadAllData} />
-          )}
-          {activeModule === "estoque" && (
-            <InventoryModule user={user} addToast={addToast} />
-          )}
           {activeModule === "processos" && (
             <ProcessModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} />
           )}
           {activeModule === "agenda" && (
             <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} />
-          )}
-          {activeModule === "tickets" && (
-            <WebdeskModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} />
           )}
           {activeModule === "mensagens" && (
             <MessageCenter user={user} addToast={addToast} />
