@@ -13,7 +13,7 @@ import BlurText from "./BlurText.jsx";
 // Paleta compartilhada por gráficos e badges
 const COLORS = ["#3b82f6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"];
 
-// Mapeamento global de status — usado pelo StatusBadge em OS, Agenda e Cadastros
+// Mapeamento global de status — usado pelo StatusBadge em OS, Agenda, Cadastros e Financeiro
 const STATUS_MAP = {
   ativo: { label: "Ativo", color: "bg-green-500" },
   inativo: { label: "Inativo", color: "bg-gray-500" },
@@ -23,15 +23,130 @@ const STATUS_MAP = {
   cancelado: { label: "Cancelado", color: "bg-red-500" },
   agendado: { label: "Agendado", color: "bg-cyan-500" },
   confirmado: { label: "Confirmado", color: "bg-blue-500" },
+  pago: { label: "Pago", color: "bg-green-500" },
+  atrasado: { label: "Atrasado", color: "bg-red-500" },
 };
 
-// Matriz de permissões por role — após remoção dos módulos financeiros, fiscais e de mensageria
+// Matriz de permissões por role — inclui módulo financeiro
 const ROLE_PERMISSIONS = {
   admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "os", "agenda", "config"],
+  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config"],
   tecnico: ["dashboard", "os", "agenda"],
   atendente: ["dashboard", "clientes", "os", "agenda"],
 };
+
+// ─── CATEGORIAS E FORMAS DE PAGAMENTO DO FINANCEIRO ─────────────────────────
+// Categorias separadas em receita (entradas) e despesa (saídas) para
+// evitar confusão no relatório — o usuário só vê as categorias relevantes
+// ao tipo selecionado.
+const CATEGORIES_RECEITA = [
+  "Instalação",
+  "Manutenção",
+  "Troca de Peças",
+  "Solda",
+  "Venda de Equipamento",
+  "Venda de Peça",
+  "Contrato de Manutenção",
+  "Outros",
+];
+
+const CATEGORIES_DESPESA = [
+  "Peça/Material",
+  "Combustível",
+  "Aluguel",
+  "Salário",
+  "Imposto",
+  "Ferramentas",
+  "Veículo",
+  "Marketing",
+  "Outros",
+];
+
+const PAYMENT_METHODS = [
+  "PIX",
+  "Cartão de Crédito",
+  "Cartão de Débito",
+  "Boleto",
+  "Dinheiro",
+  "Transferência",
+];
+
+// ─── TIPOS DE EQUIPAMENTO — OS ──────────────────────────────────────────────
+// Cada tipo define quais campos técnicos aparecem no formulário de OS.
+// Usado para refrigeração comercial, climatização e linha branca.
+const EQUIPMENT_TYPES = {
+  central: {
+    label: "Central de Ar (Split/Janela)",
+    capacityLabel: "Capacidade (BTUs)",
+    capacityPlaceholder: "Ex: 12000",
+    capacityKey: "equipamentoBTUs",
+  },
+  geladeira: {
+    label: "Geladeira / Freezer",
+    capacityLabel: "Capacidade (Litros)",
+    capacityPlaceholder: "Ex: 450",
+    capacityKey: "equipamentoLitros",
+  },
+  lavadora: {
+    label: "Máquina de Lavar",
+    capacityLabel: "Capacidade (Kg)",
+    capacityPlaceholder: "Ex: 12",
+    capacityKey: "equipamentoKg",
+  },
+  centrifuga: {
+    label: "Centrífuga",
+    capacityLabel: "Capacidade (Kg)",
+    capacityPlaceholder: "Ex: 8",
+    capacityKey: "equipamentoKg",
+  },
+  expositor: {
+    label: "Expositor / Vitrine Refrigerada",
+    capacityLabel: "Capacidade (Litros)",
+    capacityPlaceholder: "Ex: 800",
+    capacityKey: "equipamentoLitros",
+  },
+  bebedouro_industrial: {
+    label: "Bebedouro Industrial",
+    capacityLabel: "Capacidade (Litros/h)",
+    capacityPlaceholder: "Ex: 100",
+    capacityKey: "equipamentoLitros",
+  },
+  bebedouro_mesa: {
+    label: "Bebedouro / Gelágua Mesa",
+    capacityLabel: "Modelo",
+    capacityPlaceholder: "Ex: Mesa 20L",
+    capacityKey: "equipamentoModeloExtra",
+  },
+  bebedouro_coluna: {
+    label: "Bebedouro / Gelágua Coluna",
+    capacityLabel: "Modelo",
+    capacityPlaceholder: "Ex: Coluna 20L",
+    capacityKey: "equipamentoModeloExtra",
+  },
+  camara_fria: {
+    label: "Câmara Fria",
+    capacityLabel: "Volume (m³)",
+    capacityPlaceholder: "Ex: 20",
+    capacityKey: "equipamentoVolumeM3",
+  },
+  outro: {
+    label: "Outro",
+    capacityLabel: "Especificação",
+    capacityPlaceholder: "Descreva",
+    capacityKey: "equipamentoEspecificacao",
+  },
+};
+
+// ─── TIPOS DE SERVIÇO — OS ───────────────────────────────────────────────────
+// Lista usada no dropdown de serviços da OS e da Agenda.
+// Removidos: Higienização, Reparo. Adicionados: Troca de Peças, Solda.
+const SERVICE_TYPES_OS = [
+  "Instalação",
+  "Manutenção",
+  "Troca de Peças",
+  "Solda",
+  "Desinstalação",
+];
 
 // ─── DB LAYER ───────────────────────────────────────────────────────────────────
 
@@ -1485,12 +1600,13 @@ function FirstUserSetup({ onComplete }) {
 
 // ─── DASHBOARD ──────────────────────────────────────────────────────────────────
 
-// Dashboard simplificado — foca em OS, Agenda e Cadastros (após remoção de Financeiro/Estoque/etc)
+// Dashboard completo — OS, Agenda, Cadastros e Financeiro (receita realizada do mês)
 function Dashboard({ user, dateFilter, onNavigate }) {
   const [data, setData] = useState({
     serviceOrders: [],
     schedule: [],
     clients: [],
+    transactions: [],
   });
 
   const loadData = useCallback(() => {
@@ -1498,12 +1614,28 @@ function Dashboard({ user, dateFilter, onNavigate }) {
       serviceOrders: DB.list("erp:os:"),
       schedule: DB.list("erp:schedule:"),
       clients: DB.list("erp:client:"),
+      transactions: DB.list("erp:finance:"),
     });
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const { serviceOrders, schedule, clients } = data;
+  const { serviceOrders, schedule, clients, transactions } = data;
+
+  // Receita "realizada" do mês — considera apenas transações com status "pago"
+  // para não inflar o dashboard com receitas ainda não efetivadas.
+  const receitaRealizadaMes = useMemo(() => {
+    const m = new Date().getMonth();
+    const y = new Date().getFullYear();
+    return transactions
+      .filter((t) => {
+        if (t.tipo !== "receita" || t.status !== "pago") return false;
+        if (!t.data) return false;
+        const d = new Date(t.data);
+        return d.getMonth() === m && d.getFullYear() === y;
+      })
+      .reduce((acc, t) => acc + (Number(t.valor) || 0), 0);
+  }, [transactions]);
 
   // useMemo garante que 'now' não quebre o cache dos memos que dependem dele
   const now = useMemo(() => new Date(), []);
@@ -1615,8 +1747,8 @@ function Dashboard({ user, dateFilter, onNavigate }) {
         </div>
       </div>
 
-      {/* KPI Cards — centrados em OS e Agenda */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* KPI Cards — OS, Agenda, Cadastros e Financeiro */}
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
         <KPICard
           title="OS em Andamento"
           value={osEmAndamento}
@@ -1640,6 +1772,12 @@ function Dashboard({ user, dateFilter, onNavigate }) {
           value={clientesAtivos}
           icon="👥"
           onClick={() => onNavigate("cadastro")}
+        />
+        <KPICard
+          title="Receita do Mês"
+          value={formatCurrency(receitaRealizadaMes)}
+          icon="💰"
+          onClick={() => onNavigate("financeiro")}
         />
       </div>
 
@@ -1733,6 +1871,539 @@ function Dashboard({ user, dateFilter, onNavigate }) {
   );
 }
 
+
+// ─── FINANCE MODULE ─────────────────────────────────────────────────────────
+
+// Módulo financeiro — gestão de receitas/despesas com cálculo por status.
+// Organização dos totais no topo:
+//   - Realizado  = apenas PAGO (dinheiro efetivamente em caixa)
+//   - A receber  = PENDENTE + EM ANDAMENTO (ainda não pagos, mas esperados)
+//   - Vencidos   = ATRASADO (alerta — ação prioritária)
+//   - Cancelado  = informativo, não entra nas somas
+function FinanceModule({ user, dateFilter, addToast }) {
+  const [transactions, setTransactions] = useState([]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+  const [search, setSearch] = useState("");
+  const [filterType, setFilterType] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterCategory, setFilterCategory] = useState("all");
+
+  const loadTransactions = useCallback(() => {
+    setTransactions(DB.list("erp:finance:"));
+  }, []);
+
+  useEffect(() => { loadTransactions(); }, [loadTransactions]);
+
+  const emptyForm = {
+    descricao: "",
+    valor: "",
+    tipo: "receita",
+    categoria: "",
+    data: toISODate(new Date()),
+    status: "pendente",
+    formaPagamento: "PIX",
+    observacoes: "",
+  };
+  const [form, setForm] = useState(emptyForm);
+
+  const filteredTransactions = useMemo(() => {
+    let list = filterByDate(transactions, "data", dateFilter);
+    if (filterType !== "all") list = list.filter((t) => t.tipo === filterType);
+    if (filterStatus !== "all") list = list.filter((t) => t.status === filterStatus);
+    if (filterCategory !== "all") list = list.filter((t) => t.categoria === filterCategory);
+    if (search.trim()) {
+      const s = search.toLowerCase();
+      list = list.filter(
+        (t) =>
+          (t.descricao || "").toLowerCase().includes(s) ||
+          (t.categoria || "").toLowerCase().includes(s) ||
+          (t.numero || "").toLowerCase().includes(s)
+      );
+    }
+    return list.sort((a, b) => new Date(b.data) - new Date(a.data));
+  }, [transactions, dateFilter, filterType, filterStatus, filterCategory, search]);
+
+  // ─── Totais por status — núcleo do módulo ────────────────────────────────
+  // Separação explícita entre dinheiro realizado e pipeline:
+  // admin/gerente vê claramente quanto já entrou, quanto está para entrar
+  // e quanto está atrasado. Cancelado nunca entra em nenhuma soma.
+  const totals = useMemo(() => {
+    const acc = {
+      // Receitas
+      receitaPaga: 0,
+      receitaPendente: 0,
+      receitaEmAndamento: 0,
+      receitaAtrasada: 0,
+      // Despesas
+      despesaPaga: 0,
+      despesaPendente: 0,
+      despesaEmAndamento: 0,
+      despesaAtrasada: 0,
+      // Contagem de cancelados (apenas informativo)
+      canceladosCount: 0,
+    };
+    for (const t of filteredTransactions) {
+      const v = Number(t.valor) || 0;
+      const isReceita = t.tipo === "receita";
+      switch (t.status) {
+        case "pago":
+          if (isReceita) acc.receitaPaga += v; else acc.despesaPaga += v;
+          break;
+        case "pendente":
+          if (isReceita) acc.receitaPendente += v; else acc.despesaPendente += v;
+          break;
+        case "em_andamento":
+          if (isReceita) acc.receitaEmAndamento += v; else acc.despesaEmAndamento += v;
+          break;
+        case "atrasado":
+          if (isReceita) acc.receitaAtrasada += v; else acc.despesaAtrasada += v;
+          break;
+        case "cancelado":
+          acc.canceladosCount += 1;
+          break;
+        default:
+          break;
+      }
+    }
+    // Saldo realizado (em caixa): receita paga - despesa paga
+    acc.saldoRealizado = acc.receitaPaga - acc.despesaPaga;
+    // A receber (pipeline de entrada): pendente + em andamento
+    acc.aReceber = acc.receitaPendente + acc.receitaEmAndamento;
+    // A pagar (pipeline de saída): pendente + em andamento
+    acc.aPagar = acc.despesaPendente + acc.despesaEmAndamento;
+    // Previsão de saldo: considera tudo que não foi cancelado nem está atrasado
+    acc.saldoPrevisto = (acc.receitaPaga + acc.aReceber) - (acc.despesaPaga + acc.aPagar);
+    return acc;
+  }, [filteredTransactions]);
+
+  const allCategories = useMemo(() => {
+    const cats = new Set();
+    transactions.forEach((t) => { if (t.categoria) cats.add(t.categoria); });
+    return [...cats].sort();
+  }, [transactions]);
+
+  const openCreate = useCallback(() => {
+    setEditing(null);
+    setForm(emptyForm);
+    setModalOpen(true);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openEdit = useCallback((row) => {
+    setEditing(row);
+    setForm({
+      descricao: row.descricao || "",
+      valor: row.valor || "",
+      tipo: row.tipo || "receita",
+      categoria: row.categoria || "",
+      data: row.data ? row.data.split("T")[0] : toISODate(new Date()),
+      status: row.status || "pendente",
+      formaPagamento: row.formaPagamento || "PIX",
+      observacoes: row.observacoes || "",
+    });
+    setModalOpen(true);
+  }, []);
+
+  const handleSave = useCallback(() => {
+    if (!form.descricao.trim() || !form.valor || !form.data) {
+      addToast("Preencha descrição, valor e data.", "error");
+      return;
+    }
+    const valor = parseFloat(String(form.valor).replace(",", "."));
+    if (isNaN(valor) || valor <= 0) {
+      addToast("Informe um valor válido.", "error");
+      return;
+    }
+
+    if (editing) {
+      const updated = {
+        ...editing,
+        descricao: form.descricao.trim(),
+        valor,
+        tipo: form.tipo,
+        categoria: form.categoria,
+        data: form.data + "T00:00:00.000Z",
+        status: form.status,
+        formaPagamento: form.formaPagamento,
+        observacoes: form.observacoes,
+        updatedAt: new Date().toISOString(),
+      };
+      DB.set("erp:finance:" + updated.id, updated);
+      addToast("Transação atualizada.", "success");
+    } else {
+      const prefix = form.tipo === "receita" ? "REC" : "DESP";
+      const numero = getNextNumber(prefix, transactions);
+      const newTx = {
+        id: genId(),
+        numero,
+        descricao: form.descricao.trim(),
+        valor,
+        tipo: form.tipo,
+        categoria: form.categoria,
+        data: form.data + "T00:00:00.000Z",
+        status: form.status,
+        formaPagamento: form.formaPagamento,
+        observacoes: form.observacoes,
+        osId: null,
+        createdAt: new Date().toISOString(),
+      };
+      DB.set("erp:finance:" + newTx.id, newTx);
+      addToast(`Transação ${numero} registrada.`, "success");
+    }
+    setModalOpen(false);
+    loadTransactions();
+  }, [form, editing, transactions, loadTransactions, addToast]);
+
+  const handleDelete = useCallback((row) => {
+    setConfirmDelete(row);
+  }, []);
+
+  const confirmDeleteAction = useCallback(() => {
+    if (confirmDelete) {
+      DB.delete("erp:finance:" + confirmDelete.id);
+      addToast("Transação excluída.", "success");
+      setConfirmDelete(null);
+      loadTransactions();
+    }
+  }, [confirmDelete, loadTransactions, addToast]);
+
+  // Atalho: marcar como pago direto da tabela
+  const markAsPaid = useCallback((row) => {
+    if (row.status === "pago") return;
+    const updated = { ...row, status: "pago", dataPagamento: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    DB.set("erp:finance:" + updated.id, updated);
+    addToast(`${row.descricao}: marcada como paga.`, "success");
+    loadTransactions();
+  }, [loadTransactions, addToast]);
+
+  const STATUS_LABELS_FIN = {
+    pago: "Pago",
+    pendente: "Pendente",
+    em_andamento: "Em Andamento",
+    atrasado: "Atrasado",
+    cancelado: "Cancelado",
+  };
+  const STATUS_COLORS_FIN = {
+    pago: "bg-green-500",
+    pendente: "bg-yellow-500",
+    em_andamento: "bg-blue-500",
+    atrasado: "bg-red-500",
+    cancelado: "bg-gray-500",
+  };
+
+  const columns = [
+    { key: "numero", label: "Nº", width: "w-24" },
+    { key: "data", label: "Data", render: (v) => formatDate(v) },
+    { key: "descricao", label: "Descrição" },
+    { key: "categoria", label: "Categoria", render: (v) => v || "—" },
+    {
+      key: "tipo",
+      label: "Tipo",
+      render: (v) => (
+        <span className={`px-2 py-0.5 rounded text-xs font-medium ${v === "receita" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+          {v === "receita" ? "Receita" : "Despesa"}
+        </span>
+      ),
+    },
+    { key: "formaPagamento", label: "Pgto", render: (v) => v || "—" },
+    {
+      key: "status",
+      label: "Status",
+      render: (v) => (
+        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white ${STATUS_COLORS_FIN[v] || "bg-gray-500"}`}>
+          {STATUS_LABELS_FIN[v] || v}
+        </span>
+      ),
+    },
+    {
+      key: "valor",
+      label: "Valor",
+      render: (v, row) => (
+        <span className={`font-medium ${row.tipo === "receita" ? "text-green-400" : "text-red-400"}`}>
+          {row.tipo === "despesa" ? "- " : ""}{formatCurrency(v)}
+        </span>
+      ),
+    },
+  ];
+
+  const canDelete = user.role === "admin" || user.role === "gerente";
+
+  return (
+    <div className="space-y-6">
+      {/* Cabeçalho */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-white">Financeiro</h2>
+          <p className="text-gray-400 text-sm mt-1">Receitas, despesas e saldo por status</p>
+        </div>
+        <button
+          onClick={openCreate}
+          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-2 min-h-[44px]"
+        >
+          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+          Nova Transação
+        </button>
+      </div>
+
+      {/* Cards de status — primeira linha: dinheiro "real" (pago) */}
+      <div>
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Realizado (efetivado)</h3>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="bg-gray-800 border border-green-500/20 rounded-xl p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-gray-400 text-sm">Receita Paga</p>
+              <span className="text-green-400 text-lg">✓</span>
+            </div>
+            <p className="text-2xl font-bold text-green-400 mt-1">{formatCurrency(totals.receitaPaga)}</p>
+          </div>
+          <div className="bg-gray-800 border border-red-500/20 rounded-xl p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-gray-400 text-sm">Despesa Paga</p>
+              <span className="text-red-400 text-lg">✓</span>
+            </div>
+            <p className="text-2xl font-bold text-red-400 mt-1">{formatCurrency(totals.despesaPaga)}</p>
+          </div>
+          <div className="bg-gradient-to-br from-gray-800 to-gray-800/50 border border-gray-600 rounded-xl p-5">
+            <div className="flex items-center justify-between">
+              <p className="text-gray-300 text-sm font-medium">Saldo em Caixa</p>
+              <span className="text-lg">💰</span>
+            </div>
+            <p className={`text-2xl font-bold mt-1 ${totals.saldoRealizado >= 0 ? "text-green-400" : "text-red-400"}`}>
+              {formatCurrency(totals.saldoRealizado)}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Segunda linha: pipeline (ainda não pago) */}
+      <div>
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Pipeline (a receber / a pagar)</h3>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+          <div className="bg-gray-800 border border-yellow-500/20 rounded-xl p-4">
+            <p className="text-gray-400 text-xs">A Receber</p>
+            <p className="text-lg font-bold text-yellow-300 mt-1">{formatCurrency(totals.aReceber)}</p>
+            <p className="text-gray-500 text-xs mt-1">Pendente + em andamento</p>
+          </div>
+          <div className="bg-gray-800 border border-yellow-500/20 rounded-xl p-4">
+            <p className="text-gray-400 text-xs">A Pagar</p>
+            <p className="text-lg font-bold text-yellow-300 mt-1">{formatCurrency(totals.aPagar)}</p>
+            <p className="text-gray-500 text-xs mt-1">Pendente + em andamento</p>
+          </div>
+          <div className="bg-gray-800 border border-red-500/30 rounded-xl p-4">
+            <p className="text-gray-400 text-xs">Vencidos (receita)</p>
+            <p className="text-lg font-bold text-red-400 mt-1">{formatCurrency(totals.receitaAtrasada)}</p>
+            <p className="text-gray-500 text-xs mt-1">Atrasado — prioridade</p>
+          </div>
+          <div className="bg-gray-800 border border-red-500/30 rounded-xl p-4">
+            <p className="text-gray-400 text-xs">Vencidos (despesa)</p>
+            <p className="text-lg font-bold text-red-400 mt-1">{formatCurrency(totals.despesaAtrasada)}</p>
+            <p className="text-gray-500 text-xs mt-1">Atrasado — prioridade</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Terceira linha: saldo previsto + cancelados */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+          <p className="text-gray-400 text-xs">Saldo Previsto (próximo período)</p>
+          <p className={`text-xl font-bold mt-1 ${totals.saldoPrevisto >= 0 ? "text-green-400" : "text-red-400"}`}>
+            {formatCurrency(totals.saldoPrevisto)}
+          </p>
+          <p className="text-gray-500 text-xs mt-1">Pago + a receber − despesas previstas. Atrasados e cancelados excluídos.</p>
+        </div>
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+          <p className="text-gray-400 text-xs">Cancelados</p>
+          <p className="text-xl font-bold text-gray-300 mt-1">{totals.canceladosCount}</p>
+          <p className="text-gray-500 text-xs mt-1">Não entram em nenhum total.</p>
+        </div>
+      </div>
+
+      {/* Filtros */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-[200px] max-w-sm">
+          <SearchInput value={search} onChange={setSearch} placeholder="Buscar transação..." />
+        </div>
+        <select
+          value={filterType}
+          onChange={(e) => setFilterType(e.target.value)}
+          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 min-h-[44px]"
+        >
+          <option value="all">Todos os tipos</option>
+          <option value="receita">Receitas</option>
+          <option value="despesa">Despesas</option>
+        </select>
+        <select
+          value={filterStatus}
+          onChange={(e) => setFilterStatus(e.target.value)}
+          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 min-h-[44px]"
+        >
+          <option value="all">Todos status</option>
+          <option value="pago">Pago</option>
+          <option value="pendente">Pendente</option>
+          <option value="em_andamento">Em Andamento</option>
+          <option value="atrasado">Atrasado</option>
+          <option value="cancelado">Cancelado</option>
+        </select>
+        <select
+          value={filterCategory}
+          onChange={(e) => setFilterCategory(e.target.value)}
+          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 min-h-[44px]"
+        >
+          <option value="all">Todas categorias</option>
+          {allCategories.map((c) => (
+            <option key={c} value={c}>{c}</option>
+          ))}
+        </select>
+      </div>
+
+      {/* Tabela */}
+      <DataTable
+        columns={columns}
+        data={filteredTransactions}
+        onEdit={openEdit}
+        onDelete={canDelete ? handleDelete : undefined}
+        actions={(row) => (
+          row.status !== "pago" && row.status !== "cancelado" ? (
+            <button
+              onClick={() => markAsPaid(row)}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition"
+              title="Marcar como pago"
+              aria-label={`Marcar ${row.descricao} como pago`}
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+            </button>
+          ) : null
+        )}
+        emptyMessage="Nenhuma transação encontrada."
+      />
+
+      {/* Modal criar/editar */}
+      <Modal isOpen={modalOpen} title={editing ? "Editar Transação" : "Nova Transação"} onClose={() => setModalOpen(false)} size="md">
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">Descrição *</label>
+            <input
+              type="text"
+              value={form.descricao}
+              onChange={(e) => setForm({ ...form, descricao: e.target.value })}
+              placeholder="Ex: Instalação split 12000 BTUs — Cliente X"
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Valor (R$) *</label>
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                inputMode="decimal"
+                value={form.valor}
+                onChange={(e) => setForm({ ...form, valor: e.target.value })}
+                placeholder="0,00"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo</label>
+              <select
+                value={form.tipo}
+                onChange={(e) => setForm({ ...form, tipo: e.target.value, categoria: "" })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+              >
+                <option value="receita">Receita</option>
+                <option value="despesa">Despesa</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Categoria</label>
+              <select
+                value={form.categoria}
+                onChange={(e) => setForm({ ...form, categoria: e.target.value })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+              >
+                <option value="">Selecione...</option>
+                {(form.tipo === "receita" ? CATEGORIES_RECEITA : CATEGORIES_DESPESA).map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Data *</label>
+              <input
+                type="date"
+                value={form.data}
+                onChange={(e) => setForm({ ...form, data: e.target.value })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Status</label>
+              <select
+                value={form.status}
+                onChange={(e) => setForm({ ...form, status: e.target.value })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+              >
+                <option value="pendente">Pendente</option>
+                <option value="em_andamento">Em Andamento</option>
+                <option value="pago">Pago</option>
+                <option value="atrasado">Atrasado</option>
+                <option value="cancelado">Cancelado</option>
+              </select>
+              <p className="text-xs text-gray-500 mt-1">Apenas "Pago" entra no saldo em caixa.</p>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Forma de Pagamento</label>
+              <select
+                value={form.formaPagamento}
+                onChange={(e) => setForm({ ...form, formaPagamento: e.target.value })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+              >
+                {PAYMENT_METHODS.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">Observações</label>
+            <textarea
+              value={form.observacoes}
+              onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
+              rows={3}
+              placeholder="Observações adicionais..."
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
+            />
+          </div>
+
+          <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+            <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition min-h-[44px]">Cancelar</button>
+            <button onClick={handleSave} className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition min-h-[44px]">
+              {editing ? "Salvar Alterações" : "Criar Transação"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Excluir a transação "${confirmDelete.descricao}"? Esta ação não pode ser desfeita.`}
+          onConfirm={confirmDeleteAction}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+    </div>
+  );
+}
 
 // ─── GERADOR DE DOCUMENTOS HTML ─────────────────────────────────────────────
 
@@ -1847,7 +2518,19 @@ function generateOrcamentoHTML(os, clients) {
       <div class="section-title">Detalhes do Serviço</div>
       <div class="info-item" style="margin-bottom:10px"><label>Tipo de Serviço</label><span>${os.tipo || "—"}</span></div>
       <div class="info-item" style="margin-bottom:10px"><label>Endereço de Execução</label><span>${endCliente}</span></div>
-      ${os.equipamentoModelo ? `<div class="info-item" style="margin-bottom:10px"><label>Equipamento</label><span>${os.equipamentoModelo}${os.equipamentoBTUs ? ` — ${os.equipamentoBTUs} BTUs` : ""}</span></div>` : ""}
+      ${os.equipamentoModelo || os.equipamentoCapacidade ? (() => {
+        // Monta descrição dinâmica do equipamento conforme o tipo salvo na OS
+        const tipoKey = os.equipamentoTipo || "central";
+        const cfg = {
+          central: "BTUs", geladeira: "L", lavadora: "Kg", centrifuga: "Kg",
+          expositor: "L", bebedouro_industrial: "L/h", bebedouro_mesa: "",
+          bebedouro_coluna: "", camara_fria: "m³", outro: "",
+        };
+        const unidade = cfg[tipoKey] ?? "";
+        const cap = os.equipamentoCapacidade || os.equipamentoBTUs || "";
+        const suffix = cap ? (unidade ? ` — ${cap} ${unidade}` : ` — ${cap}`) : "";
+        return `<div class="info-item" style="margin-bottom:10px"><label>Equipamento</label><span>${os.equipamentoModelo || ""}${suffix}</span></div>`;
+      })() : ""}
       <div class="info-item"><label>Técnico Responsável</label><span>${os.tecnicoNome || "—"}</span></div>
     </div>
   </div>
@@ -1868,14 +2551,37 @@ function generateOrcamentoHTML(os, clients) {
             return `<tr><td>${desc}</td><td>1</td><td style="text-align:right">${fmt(v)}</td><td style="text-align:right">${fmt(v)}</td></tr>`;
           }).join("");
         })()}
-        ${(os.itensUtilizados||[]).map(item=>`<tr><td>${item.nome||"Material"}</td><td>${item.quantidade||1}</td><td style="text-align:right">—</td><td style="text-align:right">incluso</td></tr>`).join("")}
+        ${(() => {
+          // Peças/materiais com quantidade e valor unitário reais (novo modelo)
+          const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
+          const fmt = (n) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(Number(n) || 0);
+          return pecas.map((p) => {
+            const qtd = Number(p.quantidade) || 1;
+            const valU = Number(p.valorUnit) || 0;
+            const sub = qtd * valU;
+            const valStr = valU > 0 ? fmt(valU) : "—";
+            const subStr = valU > 0 ? fmt(sub) : "incluso";
+            return `<tr><td>${p.nome || "Material"}</td><td>${qtd}</td><td style="text-align:right">${valStr}</td><td style="text-align:right">${subStr}</td></tr>`;
+          }).join("");
+        })()}
       </tbody>
     </table>
-    <div class="total-section" style="margin-top:12px">
-      <div class="total-row"><span>Mão de obra</span><span>${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(valorServico)}</span></div>
-      <div class="total-row"><span>Materiais</span><span>Incluso</span></div>
-      <div class="total-row grand"><span>TOTAL</span><span>${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(valorServico)}</span></div>
-    </div>
+    ${(() => {
+      // Totais reais: soma de serviços + soma de peças (com valor unitário)
+      const fmt = (n) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(Number(n) || 0);
+      const servicos = Array.isArray(os.servicos) && os.servicos.length > 0
+        ? os.servicos
+        : [{ valor: valorServico }];
+      const totServ = servicos.reduce((acc, s) => acc + (Number(s.valor) || 0), 0);
+      const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
+      const totPecas = pecas.reduce((acc, p) => acc + (Number(p.quantidade) || 1) * (Number(p.valorUnit) || 0), 0);
+      const total = totServ + totPecas;
+      return `<div class="total-section" style="margin-top:12px">
+      <div class="total-row"><span>Mão de obra</span><span>${fmt(totServ)}</span></div>
+      <div class="total-row"><span>Peças e Materiais</span><span>${totPecas > 0 ? fmt(totPecas) : "Incluso"}</span></div>
+      <div class="total-row grand"><span>TOTAL</span><span>${fmt(total || valorServico)}</span></div>
+    </div>`;
+    })()}
   </div>
 
   ${os.observacoes ? `<div class="section"><div class="section-title">Observações</div><div class="obs-box">${os.observacoes}</div></div>` : ""}
@@ -1939,14 +2645,32 @@ function generateOSHTML(os, clients) {
     </div>
   </div>
 
-  ${os.equipamentoModelo ? `
-  <div class="section">
+  ${(os.equipamentoModelo || os.equipamentoCapacidade || os.equipamentoBTUs) ? (() => {
+    const TYPE_LABELS = {
+      central: "Central de Ar", geladeira: "Geladeira/Freezer", lavadora: "Máq. de Lavar",
+      centrifuga: "Centrífuga", expositor: "Expositor", bebedouro_industrial: "Bebedouro Industrial",
+      bebedouro_mesa: "Gelágua de Mesa", bebedouro_coluna: "Gelágua de Coluna",
+      camara_fria: "Câmara Fria", outro: "Outro",
+    };
+    const UNIT_LABELS = {
+      central: "BTUs", geladeira: "Litros", lavadora: "Kg", centrifuga: "Kg",
+      expositor: "Litros", bebedouro_industrial: "Litros/h",
+      bebedouro_mesa: "", bebedouro_coluna: "", camara_fria: "m³", outro: "",
+    };
+    const tipoKey = os.equipamentoTipo || "central";
+    const tipoLabel = TYPE_LABELS[tipoKey] || "Equipamento";
+    const unit = UNIT_LABELS[tipoKey] || "";
+    const cap = os.equipamentoCapacidade || os.equipamentoBTUs || "";
+    const capLabel = cap ? (unit ? `${cap} ${unit}` : cap) : "";
+    return `<div class="section">
     <div class="section-title">Equipamento</div>
     <div class="info-grid">
-      <div class="info-item"><label>Modelo</label><span>${os.equipamentoModelo}</span></div>
-      ${os.equipamentoBTUs ? `<div class="info-item"><label>Capacidade</label><span>${os.equipamentoBTUs} BTUs</span></div>` : ""}
+      <div class="info-item"><label>Tipo</label><span>${tipoLabel}</span></div>
+      <div class="info-item"><label>Modelo</label><span>${os.equipamentoModelo || "—"}</span></div>
+      ${capLabel ? `<div class="info-item"><label>Capacidade</label><span>${capLabel}</span></div>` : ""}
     </div>
-  </div>` : ""}
+  </div>`;
+  })() : ""}
 
   ${Array.isArray(os.servicos) && os.servicos.length > 0 ? `
   <div class="section">
@@ -1971,14 +2695,27 @@ function generateOSHTML(os, clients) {
   </div>
   `}
 
-  ${(os.itensUtilizados||[]).length > 0 ? `
-  <div class="section">
-    <div class="section-title">Materiais Utilizados</div>
+  ${(() => {
+    // Seção de Peças e Materiais na OS impressa — renderiza nome, qtd, valor unit. e subtotal
+    const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
+    if (!pecas || pecas.length === 0) return "";
+    const fmt = (n) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(Number(n) || 0);
+    const rows = pecas.map((i) => {
+      const qtd = Number(i.quantidade) || 1;
+      const valU = Number(i.valorUnit) || 0;
+      const sub = qtd * valU;
+      const valStr = valU > 0 ? fmt(valU) : "—";
+      const subStr = valU > 0 ? fmt(sub) : "—";
+      return `<tr><td>${i.nome||"—"}</td><td>${qtd}</td><td style="text-align:right">${valStr}</td><td style="text-align:right">${subStr}</td></tr>`;
+    }).join("");
+    return `<div class="section">
+    <div class="section-title">Peças e Materiais</div>
     <table>
-      <thead><tr><th>Item</th><th>Quantidade</th></tr></thead>
-      <tbody>${(os.itensUtilizados||[]).map(i=>`<tr><td>${i.nome||"—"}</td><td>${i.quantidade||1}</td></tr>`).join("")}</tbody>
+      <thead><tr><th>Item</th><th>Qtd</th><th style="text-align:right">Valor Unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
+      <tbody>${rows}</tbody>
     </table>
-  </div>` : ""}
+  </div>`;
+  })()}
 
   <div class="section">
     <div class="section-title">Relato do Técnico</div>
@@ -2077,8 +2814,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
   const [filterTecnico, setFilterTecnico] = useState("all");
   const [viewMode, setViewMode] = useState("lista");
 
-  const SERVICE_TYPES = ["Instalação", "Manutenção", "Higienização", "Reparo", "Desinstalação"];
-  // Fluxo de status simplificado após remoção do módulo financeiro — não há mais "faturado"
+  // Lista de tipos de serviço — vem da constante global (SERVICE_TYPES_OS)
+  // Removidos: Higienização, Reparo. Adicionados: Troca de Peças, Solda.
+  const SERVICE_TYPES = SERVICE_TYPES_OS;
+  // Fluxo de status simplificado — sem "faturado"
   const STATUS_FLOW = ["aguardando", "em_deslocamento", "em_execucao", "finalizado"];
   const STATUS_LABELS_OS = {
     aguardando: "Aguardando",
@@ -2111,24 +2850,37 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
 
-  // Cada OS pode conter múltiplos serviços — cada linha tem tipo, descrição (opcional) e valor.
-  // valorTotal é calculado como soma dos valores individuais.
+  // Cada OS pode conter múltiplos serviços e peças/materiais — cada linha tem valor próprio.
+  // valorTotal = soma de todos os serviços + soma de todas as peças (qtd × valor unit).
   const emptyServico = { tipo: "Instalação", descricao: "", valor: "" };
+  // Peças/materiais: nome obrigatório, quantidade e valor unitário opcionais
+  const emptyPeca = { nome: "", quantidade: "1", valorUnit: "" };
   const emptyForm = {
     clienteId: "", endereco: "",
     servicos: [{ ...emptyServico }],
-    equipamentoModelo: "", equipamentoBTUs: "",
+    pecas: [],
+    // Tipo de equipamento define quais campos técnicos aparecem (BTU, Litros, Kg, etc.)
+    equipamentoTipo: "central",
+    equipamentoModelo: "",
+    equipamentoCapacidade: "", // valor genérico — a unidade depende do tipo
+    equipamentoBTUs: "",       // mantido para retrocompatibilidade (apenas quando tipo=central)
     tecnicoId: "", dataAgendada: toISODate(new Date()), observacoes: "",
   };
   const [form, setForm] = useState(emptyForm);
 
-  // Soma reativa dos valores dos serviços do formulário
+  // Soma reativa dos valores dos serviços + peças
   const valorTotalForm = useMemo(() => {
-    return (form.servicos || []).reduce((acc, s) => {
+    const totalServicos = (form.servicos || []).reduce((acc, s) => {
       const v = parseFloat(String(s.valor || "0").replace(",", ".")) || 0;
       return acc + v;
     }, 0);
-  }, [form.servicos]);
+    const totalPecas = (form.pecas || []).reduce((acc, p) => {
+      const qtd = parseFloat(String(p.quantidade || "0").replace(",", ".")) || 0;
+      const valU = parseFloat(String(p.valorUnit || "0").replace(",", ".")) || 0;
+      return acc + qtd * valU;
+    }, 0);
+    return totalServicos + totalPecas;
+  }, [form.servicos, form.pecas]);
 
   const addServico = useCallback(() => {
     setForm((f) => ({ ...f, servicos: [...(f.servicos || []), { ...emptyServico }] }));
@@ -2147,6 +2899,22 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
       return { ...f, servicos: next.length > 0 ? next : [{ ...emptyServico }] };
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── Peças e materiais — mesmas operações dos serviços ──────────────────
+  const addPeca = useCallback(() => {
+    setForm((f) => ({ ...f, pecas: [...(f.pecas || []), { ...emptyPeca }] }));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updatePeca = useCallback((index, patch) => {
+    setForm((f) => ({
+      ...f,
+      pecas: (f.pecas || []).map((p, i) => (i === index ? { ...p, ...patch } : p)),
+    }));
+  }, []);
+
+  const removePeca = useCallback((index) => {
+    setForm((f) => ({ ...f, pecas: (f.pecas || []).filter((_, i) => i !== index) }));
+  }, []);
 
   const filteredOrders = useMemo(() => {
     let list = filterByDate(orders, "dataAbertura", dateFilter);
@@ -2199,11 +2967,33 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
           descricao: row.descricao || "",
           valor: row.valor !== undefined && row.valor !== null ? String(row.valor) : "",
         }];
+    // Peças: estrutura { nome, quantidade, valorUnit } — migra itensUtilizados antigo
+    const pecas = Array.isArray(row.pecas) && row.pecas.length > 0
+      ? row.pecas.map((p) => ({
+          nome: p.nome || "",
+          quantidade: p.quantidade !== undefined && p.quantidade !== null ? String(p.quantidade) : "1",
+          valorUnit: p.valorUnit !== undefined && p.valorUnit !== null ? String(p.valorUnit) : "",
+        }))
+      : Array.isArray(row.itensUtilizados) && row.itensUtilizados.length > 0
+        ? row.itensUtilizados.map((i) => ({
+            nome: i.nome || "",
+            quantidade: i.quantidade !== undefined && i.quantidade !== null ? String(i.quantidade) : "1",
+            valorUnit: i.valorUnit !== undefined && i.valorUnit !== null ? String(i.valorUnit) : "",
+          }))
+        : [];
+    // Equipamento: migra OS antigas (que só tinham BTUs) para o novo modelo multi-tipo
+    const equipamentoTipo = row.equipamentoTipo || "central";
+    const equipamentoCapacidade = row.equipamentoCapacidade !== undefined && row.equipamentoCapacidade !== null && row.equipamentoCapacidade !== ""
+      ? String(row.equipamentoCapacidade)
+      : String(row.equipamentoBTUs || "");
     setForm({
       clienteId: row.clienteId || "",
       endereco: row.endereco || "",
       servicos,
+      pecas,
+      equipamentoTipo,
       equipamentoModelo: row.equipamentoModelo || "",
+      equipamentoCapacidade,
       equipamentoBTUs: row.equipamentoBTUs || "",
       tecnicoId: row.tecnicoId || "",
       dataAgendada: row.dataAgendada ? row.dataAgendada.split("T")[0] : toISODate(new Date()),
@@ -2227,9 +3017,21 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
       return;
     }
 
+    // Normaliza peças/materiais — só mantém linhas com nome preenchido
+    const pecasLimpas = (form.pecas || [])
+      .map((p) => ({
+        nome: (p.nome || "").trim(),
+        quantidade: parseFloat(String(p.quantidade || "1").replace(",", ".")) || 1,
+        valorUnit: parseFloat(String(p.valorUnit || "0").replace(",", ".")) || 0,
+      }))
+      .filter((p) => p.nome);
+
     const cliente = (allClients || []).find((c) => c.id === form.clienteId);
     const tecnico = tecnicos.find((t) => t.id === form.tecnicoId);
-    const valorTotal = servicosLimpos.reduce((acc, s) => acc + s.valor, 0);
+    // Total da OS = soma dos serviços + soma das peças (qtd × valorUnit)
+    const totalServicos = servicosLimpos.reduce((acc, s) => acc + s.valor, 0);
+    const totalPecas = pecasLimpas.reduce((acc, p) => acc + p.quantidade * p.valorUnit, 0);
+    const valorTotal = totalServicos + totalPecas;
 
     // Campos de retrocompatibilidade: tipo recebe resumo, descricao monta um texto
     const tipoResumo = servicosLimpos.length === 1
@@ -2239,6 +3041,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
       .map((s) => s.descricao ? `${s.tipo}: ${s.descricao}` : s.tipo)
       .join(" • ");
 
+    // Mantém compat com código antigo: se tipo=central, popula equipamentoBTUs
+    const equipCapacidade = form.equipamentoCapacidade || "";
+    const equipBTUs = form.equipamentoTipo === "central" ? equipCapacidade : "";
+
     if (editing) {
       const updated = {
         ...editing,
@@ -2246,15 +3052,20 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         clienteNome: cliente?.nome || "—",
         endereco: form.endereco,
         servicos: servicosLimpos,
+        pecas: pecasLimpas,
         tipo: tipoResumo,
         descricao: descricaoResumo,
+        equipamentoTipo: form.equipamentoTipo,
         equipamentoModelo: form.equipamentoModelo,
-        equipamentoBTUs: form.equipamentoBTUs,
+        equipamentoCapacidade: equipCapacidade,
+        equipamentoBTUs: equipBTUs,
         tecnicoId: form.tecnicoId,
         tecnicoNome: tecnico?.nome || "—",
         dataAgendada: form.dataAgendada + "T00:00:00.000Z",
         observacoes: form.observacoes,
         valor: valorTotal,
+        // Mantém itensUtilizados sincronizado (alguns docs antigos ainda usam)
+        itensUtilizados: pecasLimpas.map((p) => ({ nome: p.nome, quantidade: p.quantidade, valorUnit: p.valorUnit })),
         updatedAt: new Date().toISOString(),
       };
       DB.set("erp:os:" + updated.id, updated);
@@ -2268,10 +3079,13 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         clienteNome: cliente?.nome || "—",
         endereco: form.endereco || (cliente?.endereco ? `${cliente.endereco.rua}, ${cliente.endereco.bairro} - ${cliente.endereco.cidade}/${cliente.endereco.estado}` : ""),
         servicos: servicosLimpos,
+        pecas: pecasLimpas,
         tipo: tipoResumo,
         descricao: descricaoResumo,
+        equipamentoTipo: form.equipamentoTipo,
         equipamentoModelo: form.equipamentoModelo,
-        equipamentoBTUs: form.equipamentoBTUs,
+        equipamentoCapacidade: equipCapacidade,
+        equipamentoBTUs: equipBTUs,
         tecnicoId: form.tecnicoId,
         tecnicoNome: tecnico?.nome || "—",
         status: "aguardando",
@@ -2280,7 +3094,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         dataConclusao: null,
         observacoes: form.observacoes,
         valor: valorTotal,
-        itensUtilizados: [],
+        itensUtilizados: pecasLimpas.map((p) => ({ nome: p.nome, quantidade: p.quantidade, valorUnit: p.valorUnit })),
         createdAt: new Date().toISOString(),
       };
       DB.set("erp:os:" + newOS.id, newOS);
@@ -2567,7 +3381,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
             <div className="flex items-center justify-between">
               <label className="block text-sm font-medium text-gray-300">Serviços *</label>
               <span className="text-xs text-gray-400">
-                Total: <span className="text-white font-semibold">{formatCurrency(valorTotalForm)}</span>
+                Total OS (serviços + peças): <span className="text-white font-semibold tabular-nums">{formatCurrency(valorTotalForm)}</span>
               </span>
             </div>
             <div className="space-y-2">
@@ -2632,24 +3446,128 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
             </button>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          {/* ─── Peças e Materiais ────────────────────────────────────────
+              Lista opcional: cada linha tem nome, quantidade e valor unitário.
+              Subtotal reativo por linha, total somado ao valor da OS. */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-300">Peças e Materiais</label>
+              <span className="text-xs text-gray-400">
+                {(form.pecas || []).length > 0 ? `${(form.pecas || []).length} ite${(form.pecas || []).length === 1 ? "m" : "ns"}` : "Opcional"}
+              </span>
+            </div>
+            {(form.pecas || []).length > 0 && (
+              <div className="space-y-2">
+                {(form.pecas || []).map((p, idx) => {
+                  const qtd = parseFloat(String(p.quantidade || "0").replace(",", ".")) || 0;
+                  const valU = parseFloat(String(p.valorUnit || "0").replace(",", ".")) || 0;
+                  const subtotal = qtd * valU;
+                  return (
+                    <div key={idx} className="grid grid-cols-12 gap-2 items-end bg-gray-700/40 border border-gray-700 rounded-lg p-2.5">
+                      <div className="col-span-12 sm:col-span-5">
+                        <label className="block text-xs text-gray-400 mb-1">Peça/Material</label>
+                        <input
+                          type="text"
+                          value={p.nome}
+                          onChange={(e) => updatePeca(idx, { nome: e.target.value })}
+                          placeholder="Ex: Compressor, Gás R-410A, Filtro..."
+                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                        />
+                      </div>
+                      <div className="col-span-4 sm:col-span-2">
+                        <label className="block text-xs text-gray-400 mb-1">Qtd</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          inputMode="decimal"
+                          value={p.quantidade}
+                          onChange={(e) => updatePeca(idx, { quantidade: e.target.value })}
+                          placeholder="1"
+                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                        />
+                      </div>
+                      <div className="col-span-4 sm:col-span-2">
+                        <label className="block text-xs text-gray-400 mb-1">Valor Unit.</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          inputMode="decimal"
+                          value={p.valorUnit}
+                          onChange={(e) => updatePeca(idx, { valorUnit: e.target.value })}
+                          placeholder="0,00"
+                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                        />
+                      </div>
+                      <div className="col-span-3 sm:col-span-2">
+                        <label className="block text-xs text-gray-400 mb-1">Subtotal</label>
+                        <div className="px-3 py-2 rounded-lg bg-gray-800 border border-gray-700 text-sm text-gray-300 tabular-nums">
+                          {formatCurrency(subtotal)}
+                        </div>
+                      </div>
+                      <div className="col-span-1 flex justify-end">
+                        <button
+                          type="button"
+                          onClick={() => removePeca(idx)}
+                          className="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-gray-700 transition min-h-[36px] min-w-[36px] inline-flex items-center justify-center"
+                          aria-label="Remover peça"
+                          title="Remover peça"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={addPeca}
+              className="w-full sm:w-auto px-3 py-2 text-sm rounded-lg bg-emerald-600/20 border border-emerald-600/40 text-emerald-300 hover:bg-emerald-600/30 transition inline-flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              Adicionar peça/material
+            </button>
+          </div>
+
+          {/* ─── Equipamento ──────────────────────────────────────────────
+              Campos técnicos dependem do tipo selecionado:
+              - central  → BTUs   - geladeira  → Litros
+              - lavadora → Kg     - câmara fria → m³ etc. */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Modelo Equipamento</label>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo de Equipamento</label>
+              <select
+                value={form.equipamentoTipo}
+                onChange={(e) => setForm({ ...form, equipamentoTipo: e.target.value, equipamentoCapacidade: "" })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+              >
+                {Object.entries(EQUIPMENT_TYPES).map(([key, cfg]) => (
+                  <option key={key} value={key}>{cfg.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Modelo / Marca</label>
               <input
                 type="text"
                 value={form.equipamentoModelo}
                 onChange={(e) => setForm({ ...form, equipamentoModelo: e.target.value })}
-                placeholder="Ex: Split Inverter Samsung"
+                placeholder="Ex: Consul, Brastemp, Samsung..."
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">BTUs</label>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                {EQUIPMENT_TYPES[form.equipamentoTipo]?.capacityLabel || "Capacidade"}
+              </label>
               <input
                 type="text"
-                value={form.equipamentoBTUs}
-                onChange={(e) => setForm({ ...form, equipamentoBTUs: e.target.value })}
-                placeholder="Ex: 12000"
+                value={form.equipamentoCapacidade}
+                onChange={(e) => setForm({ ...form, equipamentoCapacidade: e.target.value })}
+                placeholder={EQUIPMENT_TYPES[form.equipamentoTipo]?.capacityPlaceholder || ""}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
               />
             </div>
@@ -2724,7 +3642,8 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
   const [viewMode, setViewMode] = useState("mes");
   const [currentDate, setCurrentDate] = useState(new Date());
 
-  const SERVICE_TYPES_SCHEDULE = ["Instalação", "Manutenção", "Higienização", "Reparo", "Revisão", "Desinstalação"];
+  // Tipos usados no dropdown de agendamento — mesma lista da OS + "Revisão" para visitas técnicas
+  const SERVICE_TYPES_SCHEDULE = [...SERVICE_TYPES_OS, "Revisão"];
   const STATUS_COLORS_SCHEDULE = {
     agendado: "bg-cyan-500",
     confirmado: "bg-blue-500",
@@ -3470,15 +4389,18 @@ function CadastroModule({ user, addToast, reloadData }) {
   useEffect(() => { loadClients(); loadEmployees(); }, [loadClients, loadEmployees]);
 
   // ─── Client Form ───
+  // rg: apenas para pessoa física
   const emptyClientForm = {
-    nome: "", tipo: "pf", cpf: "", cnpj: "", telefone: "", email: "",
+    nome: "", tipo: "pf", cpf: "", rg: "", cnpj: "", telefone: "", email: "",
     rua: "", numero: "", bairro: "", cidade: "", estado: "", cep: "",
     observacoes: "",
   };
 
+  // Funcionário agora tem endereço completo (rua, número, bairro, cidade, estado, CEP)
   const emptyEmployeeForm = {
-    nome: "", cpf: "", telefone: "", email: "",
+    nome: "", cpf: "", rg: "", telefone: "", email: "",
     cargo: "Técnico", salario: "", dataAdmissao: toISODate(new Date()), status: "ativo",
+    rua: "", numero: "", bairro: "", cidade: "", estado: "", cep: "",
   };
 
   const [clientForm, setClientForm] = useState(emptyClientForm);
@@ -3525,6 +4447,7 @@ function CadastroModule({ user, addToast, reloadData }) {
       nome: row.nome || "",
       tipo: row.tipo || "pf",
       cpf: row.cpf || "",
+      rg: row.rg || "",
       cnpj: row.cnpj || "",
       telefone: row.telefone || "",
       email: row.email || "",
@@ -3553,6 +4476,7 @@ function CadastroModule({ user, addToast, reloadData }) {
       nome: clientForm.nome.trim(),
       tipo: clientForm.tipo,
       cpf: clientForm.tipo === "pf" ? clientForm.cpf : "",
+      rg: clientForm.tipo === "pf" ? clientForm.rg.trim() : "",
       cnpj: clientForm.tipo === "pj" ? clientForm.cnpj : "",
       telefone: clientForm.telefone,
       email: clientForm.email.trim(),
@@ -3620,12 +4544,19 @@ function CadastroModule({ user, addToast, reloadData }) {
     setEmployeeForm({
       nome: row.nome || "",
       cpf: row.cpf || "",
+      rg: row.rg || "",
       telefone: row.telefone || "",
       email: row.email || "",
       cargo: row.cargo || "Técnico",
       salario: row.salario || "",
       dataAdmissao: row.dataAdmissao || toISODate(new Date()),
       status: row.status || "ativo",
+      rua: row.endereco?.rua || "",
+      numero: row.endereco?.numero || "",
+      bairro: row.endereco?.bairro || "",
+      cidade: row.endereco?.cidade || "",
+      estado: row.endereco?.estado || "",
+      cep: row.endereco?.cep || "",
     });
     setModalOpen(true);
   }, []);
@@ -3647,6 +4578,7 @@ function CadastroModule({ user, addToast, reloadData }) {
     const data = {
       nome: employeeForm.nome.trim(),
       cpf: employeeForm.cpf,
+      rg: employeeForm.rg.trim(),
       telefone: employeeForm.telefone,
       email: employeeForm.email.trim(),
       cargo: employeeForm.cargo,
@@ -3656,6 +4588,15 @@ function CadastroModule({ user, addToast, reloadData }) {
       status: employeeForm.status,
       especialidades: [],
       crea: "",
+      // Endereço residencial completo do funcionário
+      endereco: {
+        rua: employeeForm.rua.trim(),
+        numero: employeeForm.numero.trim(),
+        bairro: employeeForm.bairro.trim(),
+        cidade: employeeForm.cidade.trim(),
+        estado: employeeForm.estado.trim(),
+        cep: employeeForm.cep.trim(),
+      },
     };
 
     if (editing) {
@@ -3772,8 +4713,14 @@ function CadastroModule({ user, addToast, reloadData }) {
                 </div>
                 <div>
                   <p className="text-xs text-gray-400 uppercase">{detailView.tipo === "pf" ? "CPF" : "CNPJ"}</p>
-                  <p className="text-white">{detailView.tipo === "pf" ? detailView.cpf : detailView.cnpj}</p>
+                  <p className="text-white">{detailView.tipo === "pf" ? (detailView.cpf || "—") : (detailView.cnpj || "—")}</p>
                 </div>
+                {detailView.tipo === "pf" && (
+                  <div>
+                    <p className="text-xs text-gray-400 uppercase">RG</p>
+                    <p className="text-white">{detailView.rg || "—"}</p>
+                  </div>
+                )}
                 <div>
                   <p className="text-xs text-gray-400 uppercase">Telefone</p>
                   <p className="text-white">{detailView.telefone || "—"}</p>
@@ -3959,6 +4906,20 @@ function CadastroModule({ user, addToast, reloadData }) {
                   </>
                 )}
               </div>
+              {/* RG — só aparece para Pessoa Física */}
+              {clientForm.tipo === "pf" && (
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">RG</label>
+                  <input
+                    type="text"
+                    value={clientForm.rg}
+                    onChange={(e) => setClientForm({ ...clientForm, rg: e.target.value })}
+                    placeholder="00.000.000-0"
+                    maxLength={20}
+                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                  />
+                </div>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -4092,7 +5053,7 @@ function CadastroModule({ user, addToast, reloadData }) {
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
               />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">CPF *</label>
                 <input
@@ -4101,6 +5062,17 @@ function CadastroModule({ user, addToast, reloadData }) {
                   onChange={(e) => setEmployeeForm({ ...employeeForm, cpf: formatCPF(e.target.value) })}
                   placeholder="000.000.000-00"
                   maxLength={14}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">RG</label>
+                <input
+                  type="text"
+                  value={employeeForm.rg}
+                  onChange={(e) => setEmployeeForm({ ...employeeForm, rg: e.target.value })}
+                  placeholder="00.000.000-0"
+                  maxLength={20}
                   className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
                 />
               </div>
@@ -4172,6 +5144,77 @@ function CadastroModule({ user, addToast, reloadData }) {
                   <option value="ativo">Ativo</option>
                   <option value="inativo">Inativo</option>
                 </select>
+              </div>
+            </div>
+
+            {/* Endereço residencial do funcionário — mesmo padrão usado no cadastro de cliente */}
+            <div className="border-t border-gray-700 pt-4">
+              <h4 className="text-sm font-medium text-gray-300 mb-3">Endereço Residencial</h4>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Rua</label>
+                  <input
+                    type="text"
+                    value={employeeForm.rua}
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, rua: e.target.value })}
+                    placeholder="Rua, Avenida..."
+                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Número</label>
+                  <input
+                    type="text"
+                    value={employeeForm.numero}
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, numero: e.target.value })}
+                    placeholder="123"
+                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-4 mt-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Bairro</label>
+                  <input
+                    type="text"
+                    value={employeeForm.bairro}
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, bairro: e.target.value })}
+                    placeholder="Bairro"
+                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Cidade</label>
+                  <input
+                    type="text"
+                    value={employeeForm.cidade}
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, cidade: e.target.value })}
+                    placeholder="Cidade"
+                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Estado</label>
+                  <input
+                    type="text"
+                    value={employeeForm.estado}
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, estado: e.target.value.toUpperCase().slice(0, 2) })}
+                    placeholder="SP"
+                    maxLength={2}
+                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">CEP</label>
+                  <input
+                    type="text"
+                    value={employeeForm.cep}
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, cep: formatCEP(e.target.value) })}
+                    placeholder="00000-000"
+                    maxLength={9}
+                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                  />
+                </div>
               </div>
             </div>
 
@@ -5160,6 +6203,7 @@ export default function App() {
       employees: DB.list("erp:employee:"),
       services: DB.list("erp:os:"),
       schedule: DB.list("erp:schedule:"),
+      finance: DB.list("erp:finance:"),
       config: DB.get("erp:config") || {},
     });
   }, []);
@@ -5285,6 +6329,7 @@ export default function App() {
       { id: "dashboard", label: "Dashboard", icon: "📊", module: "dashboard" },
       { id: "processos", label: "Ordens de Serviço", icon: "🔧", module: "os" },
       { id: "agenda", label: "Agenda", icon: "📅", module: "agenda" },
+      { id: "financeiro", label: "Financeiro", icon: "💰", module: "financeiro" },
       { id: "cadastro", label: "Cadastros", icon: "👥", module: "clientes" },
       { id: "config", label: "Configurações", icon: "⚙️", module: "config" },
     ];
@@ -5670,6 +6715,9 @@ export default function App() {
           )}
           {activeModule === "agenda" && (
             <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} onNavigate={setActiveModule} />
+          )}
+          {activeModule === "financeiro" && (
+            <FinanceModule user={user} dateFilter={dateFilter} addToast={addToast} />
           )}
           {activeModule === "cadastro" && (
             <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
