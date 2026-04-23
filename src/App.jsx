@@ -2406,6 +2406,10 @@ function FinanceModule({ user, dateFilter, addToast }) {
 }
 
 // ─── GERADOR DE DOCUMENTOS HTML ─────────────────────────────────────────────
+// Documentos pensados para serem salvos como PDF (via Ctrl+P → "Salvar como PDF")
+// ou impressos em A4. Design compacto, tipografia hierárquica, sem emojis,
+// tabular-numerals em todos os valores monetários, contraste AA. Alinhado
+// ao skill UI/UX Pro Max: rhythm 4/8pt, semantic color tokens, print-first.
 
 // Abre documento HTML em nova aba do navegador
 function openHTMLDoc(html) {
@@ -2415,65 +2419,148 @@ function openHTMLDoc(html) {
   w.document.close();
 }
 
-// Estilos CSS compartilhados para todos os documentos
-function _docStyles(accentColor = "#3b82f6") {
+// Formatação compacta de moeda (BRL) com tabular-nums implícito
+function _fmtBRL(n) {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(n) || 0);
+}
+
+// Estilos CSS compartilhados — design tokens, print-first (A4)
+function _docStyles(accentColor = "#1d4ed8") {
   return `
-    *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:'Segoe UI',Arial,sans-serif;background:#f0f4f8;color:#1a202c;font-size:14px}
-    .page{max-width:820px;margin:24px auto;background:#fff;padding:48px;box-shadow:0 4px 24px rgba(0,0,0,.12);border-radius:10px}
-    .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px;padding-bottom:24px;border-bottom:3px solid ${accentColor}}
-    .logo-area .company{font-size:22px;font-weight:700;color:#1e3a5f}
-    .logo-area .tagline{font-size:12px;color:#718096;margin-top:2px}
-    .logo-area .contact{font-size:11px;color:#a0aec0;margin-top:8px;line-height:1.6}
-    .doc-badge{text-align:right}
-    .doc-badge .doc-type{font-size:26px;font-weight:800;color:${accentColor};letter-spacing:-0.5px}
-    .doc-badge .doc-num{background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:6px 14px;font-size:13px;font-weight:700;color:#1d4ed8;margin-top:8px;display:inline-block}
-    .doc-badge .doc-date{font-size:11px;color:#a0aec0;margin-top:6px}
-    .section{margin-bottom:28px}
-    .section-title{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:${accentColor};margin-bottom:12px;padding-bottom:6px;border-bottom:1px solid #e2e8f0}
-    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-    .info-item label{font-size:10px;color:#a0aec0;display:block;margin-bottom:3px;text-transform:uppercase;letter-spacing:.05em}
-    .info-item span{font-size:14px;color:#2d3748;font-weight:500}
-    table{width:100%;border-collapse:collapse}
-    thead tr{background:${accentColor};color:#fff}
-    th{padding:10px 14px;text-align:left;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.05em}
-    td{padding:10px 14px;font-size:13px;color:#4a5568;border-bottom:1px solid #edf2f7}
-    tr:last-child td{border-bottom:none}
-    tr:nth-child(even) td{background:#f7fafc}
-    .total-section{margin-top:16px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden}
-    .total-row{display:flex;justify-content:space-between;padding:10px 16px;font-size:13px;color:#4a5568;border-bottom:1px solid #e2e8f0}
-    .total-row:last-child{border-bottom:none}
-    .total-row.grand{background:${accentColor};color:#fff;font-size:16px;font-weight:700}
-    .obs-box{background:#f7fafc;border:1px solid #e2e8f0;border-radius:8px;padding:16px;font-size:12px;color:#718096;line-height:1.6}
-    .signatures{display:grid;grid-template-columns:1fr 1fr;gap:48px;margin-top:48px;padding-top:24px;border-top:1px solid #e2e8f0}
-    .sig-line{border-top:1px solid #2d3748;padding-top:8px;text-align:center;font-size:11px;color:#718096;margin-top:48px}
-    .terms{margin-top:24px;background:#f7fafc;border-radius:8px;padding:16px;font-size:11px;color:#718096;line-height:1.7}
-    .terms strong{display:block;margin-bottom:4px;color:#4a5568;font-size:11px}
-    .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
-    .badge-blue{background:#eff6ff;color:#1d4ed8}
-    .badge-green{background:#f0fdf4;color:#166534}
-    .badge-yellow{background:#fffbeb;color:#92400e}
-    .print-btn{position:fixed;bottom:24px;right:24px;background:${accentColor};color:#fff;border:none;padding:12px 28px;border-radius:8px;cursor:pointer;font-size:14px;font-weight:700;box-shadow:0 4px 16px rgba(59,130,246,.4);transition:.2s}
-    .print-btn:hover{filter:brightness(1.1)}
-    .watermark{font-size:10px;color:#cbd5e0;text-align:center;margin-top:32px;padding-top:16px;border-top:1px solid #f0f4f8}
-    @media print{body{background:#fff}.page{box-shadow:none;margin:0;border-radius:0;padding:32px}.print-btn{display:none}}
+    /* ─── Design tokens (semantic) ─────────────────────────────────────── */
+    :root{
+      --accent:${accentColor};
+      --accent-soft:${accentColor}14;       /* ~8% do accent p/ background sutil */
+      --accent-border:${accentColor}33;     /* ~20% do accent p/ borders */
+      --ink-900:#0f172a;                    /* texto primário */
+      --ink-700:#334155;                    /* texto corpo */
+      --ink-500:#64748b;                    /* texto secundário */
+      --ink-400:#94a3b8;                    /* rótulos */
+      --ink-300:#cbd5e1;                    /* dividers */
+      --ink-100:#f1f5f9;                    /* surface muted */
+      --ink-50:#f8fafc;                     /* zebra */
+      --surface:#ffffff;
+    }
+
+    /* ─── Reset + base ─────────────────────────────────────────────────── */
+    *{margin:0;padding:0;box-sizing:border-box;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    html,body{font-family:'Inter','DM Sans','Segoe UI',-apple-system,Arial,sans-serif;background:var(--ink-100);color:var(--ink-900);font-size:13px;line-height:1.5;font-feature-settings:'tnum' 1,'cv11' 1}
+    body{padding:32px 16px}
+
+    /* ─── Página A4 ────────────────────────────────────────────────────── */
+    .page{max-width:760px;margin:0 auto;background:var(--surface);border-radius:4px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.08);overflow:hidden}
+    .page-inner{padding:36px 44px}
+
+    /* ─── Header: identidade + badge ──────────────────────────────────── */
+    .hdr{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;padding-bottom:20px;border-bottom:2px solid var(--accent)}
+    .hdr-brand{flex:1;min-width:0}
+    .hdr-brand .company{font-size:18px;font-weight:700;color:var(--ink-900);letter-spacing:-0.01em;line-height:1.2}
+    .hdr-brand .tagline{font-size:11px;color:var(--ink-500);margin-top:2px;font-weight:500}
+    .hdr-brand .contact{font-size:10.5px;color:var(--ink-500);margin-top:8px;line-height:1.6}
+    .hdr-doc{text-align:right;flex-shrink:0}
+    .hdr-doc .doc-type{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--accent)}
+    .hdr-doc .doc-num{font-size:22px;font-weight:800;color:var(--ink-900);letter-spacing:-0.02em;margin-top:2px;tab-size:2;font-variant-numeric:tabular-nums}
+    .hdr-doc .doc-date{font-size:10.5px;color:var(--ink-500);margin-top:4px;font-variant-numeric:tabular-nums}
+
+    /* ─── Seção genérica ──────────────────────────────────────────────── */
+    .section{margin-top:20px}
+    .section-title{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--ink-500);margin-bottom:8px}
+
+    /* ─── Info grid (2 colunas densas) ────────────────────────────────── */
+    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px 24px}
+    .info-item{display:flex;flex-direction:column;gap:2px;min-width:0}
+    .info-item label{font-size:9.5px;color:var(--ink-400);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+    .info-item span{font-size:12.5px;color:var(--ink-900);font-weight:500;word-break:break-word}
+    .info-item.mono span{font-variant-numeric:tabular-nums}
+
+    /* ─── Info card compacto (dados cliente + execução) ───────────────── */
+    .info-card{background:var(--ink-50);border:1px solid var(--ink-300);border-radius:6px;padding:14px 16px}
+    .info-card + .info-card{margin-left:0}
+
+    /* ─── Tabela ──────────────────────────────────────────────────────── */
+    table{width:100%;border-collapse:collapse;font-size:12px}
+    thead tr{border-bottom:1.5px solid var(--ink-900);background:transparent}
+    th{padding:8px 10px;text-align:left;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--ink-700)}
+    th.num,td.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+    tbody td{padding:9px 10px;font-size:12px;color:var(--ink-900);border-bottom:1px solid var(--ink-300)}
+    tbody td.muted{color:var(--ink-500)}
+    tbody tr:last-child td{border-bottom:1px solid var(--ink-300)}
+
+    /* ─── Totais ──────────────────────────────────────────────────────── */
+    .totals{margin-top:14px;display:flex;justify-content:flex-end}
+    .totals-inner{min-width:280px;width:100%;max-width:340px}
+    .total-row{display:flex;justify-content:space-between;gap:16px;padding:6px 12px;font-size:12px;color:var(--ink-700);font-variant-numeric:tabular-nums}
+    .total-row.grand{margin-top:4px;background:var(--ink-900);color:#fff;padding:12px 14px;border-radius:4px;font-size:13px;font-weight:700;letter-spacing:0}
+    .total-row.grand .label{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;opacity:.85}
+    .total-row.grand .value{font-size:16px;font-weight:800}
+
+    /* ─── Box de observações ───────────────────────────────────────────── */
+    .obs-box{background:var(--ink-50);border-left:3px solid var(--accent);padding:12px 14px;font-size:11.5px;color:var(--ink-700);line-height:1.6;border-radius:3px}
+    .obs-box.placeholder{color:var(--ink-400);font-style:italic;min-height:56px}
+
+    /* ─── Assinaturas ─────────────────────────────────────────────────── */
+    .signatures{display:grid;grid-template-columns:1fr 1fr;gap:40px;margin-top:48px;page-break-inside:avoid}
+    .sig{padding-top:40px;border-top:1px solid var(--ink-700);text-align:center}
+    .sig .name{font-size:11.5px;color:var(--ink-900);font-weight:600;line-height:1.3}
+    .sig .role{font-size:10px;color:var(--ink-500);margin-top:2px;text-transform:uppercase;letter-spacing:.06em}
+
+    /* ─── Termos / rodapé legal ───────────────────────────────────────── */
+    .terms{margin-top:20px;border-top:1px solid var(--ink-300);padding-top:12px;font-size:10px;color:var(--ink-500);line-height:1.6}
+    .terms strong{display:block;color:var(--ink-700);font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;margin-bottom:3px}
+
+    /* ─── Badges ──────────────────────────────────────────────────────── */
+    .badge{display:inline-flex;align-items:center;padding:2px 9px;border-radius:999px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;line-height:1.4;border:1px solid transparent}
+    .badge-blue{background:#eff6ff;color:#1d4ed8;border-color:#bfdbfe}
+    .badge-green{background:#ecfdf5;color:#047857;border-color:#a7f3d0}
+    .badge-yellow{background:#fefce8;color:#a16207;border-color:#fde68a}
+    .badge-red{background:#fef2f2;color:#b91c1c;border-color:#fecaca}
+
+    /* ─── Hero (recibo): bloco de valor em destaque ───────────────────── */
+    .hero-amount{margin:16px 0 8px;text-align:center;padding:20px 16px;background:linear-gradient(180deg,var(--accent-soft),transparent);border:1px solid var(--accent-border);border-radius:8px}
+    .hero-amount .hero-label{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--ink-500);font-weight:700}
+    .hero-amount .hero-value{font-size:32px;font-weight:800;color:var(--accent);letter-spacing:-0.02em;margin-top:4px;font-variant-numeric:tabular-nums;line-height:1.1}
+    .hero-amount .hero-hint{font-size:10.5px;color:var(--ink-500);margin-top:4px;font-variant-numeric:tabular-nums}
+
+    /* ─── Rodapé watermark ────────────────────────────────────────────── */
+    .watermark{margin-top:28px;padding-top:12px;border-top:1px solid var(--ink-300);font-size:9.5px;color:var(--ink-400);text-align:center;letter-spacing:.04em}
+
+    /* ─── Barra de ação (apenas tela — some na impressão) ─────────────── */
+    .actionbar{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:8px;background:var(--surface);padding:8px;border-radius:999px;box-shadow:0 4px 16px rgba(15,23,42,.18),0 0 0 1px var(--ink-300);z-index:999}
+    .actionbar button{background:var(--accent);color:#fff;border:none;padding:10px 18px;border-radius:999px;cursor:pointer;font-size:13px;font-weight:600;display:inline-flex;align-items:center;gap:6px;transition:background .15s}
+    .actionbar button.secondary{background:var(--ink-100);color:var(--ink-900)}
+    .actionbar button:hover{filter:brightness(1.05)}
+    .actionbar button:active{transform:translateY(1px)}
+
+    /* ─── Print (A4) ──────────────────────────────────────────────────── */
+    @page{size:A4;margin:12mm 14mm}
+    @media print{
+      html,body{background:#fff;padding:0;font-size:11.5pt}
+      .page{max-width:none;margin:0;box-shadow:none;border-radius:0}
+      .page-inner{padding:0}
+      .actionbar{display:none !important}
+      .section{page-break-inside:avoid}
+      .totals,.signatures{page-break-inside:avoid}
+      thead{display:table-header-group}
+    }
   `;
 }
 
+// Header reutilizável — identidade da empresa + badge do documento
 function _docHeader(config, docType, numero, dataStr) {
   const emp = config.nomeEmpresa || "FrostERP Refrigeração";
-  const cnpj = config.cnpj ? `CNPJ: ${config.cnpj}` : "";
-  const tel = config.telefone ? `Tel: ${config.telefone}` : "";
-  const email = config.email ? `Email: ${config.email}` : "";
+  const cnpj = config.cnpj ? `CNPJ ${config.cnpj}` : "";
+  const tel = config.telefone ? `Tel ${config.telefone}` : "";
+  const email = config.email || "";
   const end = config.endereco || "";
+  const contactLine = [cnpj, tel, email, end].filter(Boolean).join(" · ");
   return `
-    <div class="header">
-      <div class="logo-area">
-        <div class="company">❄️ ${emp}</div>
+    <div class="hdr">
+      <div class="hdr-brand">
+        <div class="company">${emp}</div>
         <div class="tagline">Refrigeração e Climatização</div>
-        <div class="contact">${[cnpj, tel, email, end].filter(Boolean).join(" · ")}</div>
+        ${contactLine ? `<div class="contact">${contactLine}</div>` : ""}
       </div>
-      <div class="doc-badge">
+      <div class="hdr-doc">
         <div class="doc-type">${docType}</div>
         <div class="doc-num">${numero}</div>
         <div class="doc-date">${dataStr}</div>
@@ -2482,7 +2569,39 @@ function _docHeader(config, docType, numero, dataStr) {
   `;
 }
 
-// Gera HTML do Orçamento
+// Barra fixa com ações (imprimir/salvar-PDF + fechar) — some no print
+function _actionBar() {
+  return `
+    <div class="actionbar" role="toolbar" aria-label="Ações do documento">
+      <button onclick="window.print()" aria-label="Salvar como PDF ou imprimir">Salvar PDF / Imprimir</button>
+      <button class="secondary" onclick="window.close()" aria-label="Fechar aba">Fechar</button>
+    </div>
+  `;
+}
+
+// ─── Helper compartilhado: descrição do equipamento ────────────────────────
+// Monta "Modelo — Capacidade Unidade" conforme o tipo salvo na OS.
+function _equipamentoDescricao(os) {
+  const UNIT = {
+    central: "BTUs", geladeira: "L", lavadora: "Kg", centrifuga: "Kg",
+    expositor: "L", bebedouro_industrial: "L/h", bebedouro_mesa: "",
+    bebedouro_coluna: "", camara_fria: "m³", outro: "",
+  };
+  const TYPE_LABEL = {
+    central: "Central de Ar", geladeira: "Geladeira/Freezer", lavadora: "Máq. de Lavar",
+    centrifuga: "Centrífuga", expositor: "Expositor", bebedouro_industrial: "Bebedouro Industrial",
+    bebedouro_mesa: "Gelágua de Mesa", bebedouro_coluna: "Gelágua de Coluna",
+    camara_fria: "Câmara Fria", outro: "Equipamento",
+  };
+  const tipoKey = os.equipamentoTipo || "central";
+  const tipoLabel = TYPE_LABEL[tipoKey] || "Equipamento";
+  const unit = UNIT[tipoKey] || "";
+  const cap = os.equipamentoCapacidade || os.equipamentoBTUs || "";
+  const capLabel = cap ? (unit ? `${cap} ${unit}` : cap) : "";
+  return { tipoLabel, capLabel, modelo: os.equipamentoModelo || "" };
+}
+
+// Gera HTML do Orçamento — documento para envio ao cliente (PDF)
 function generateOrcamentoHTML(os, clients) {
   const config = DB.get("erp:config") || {};
   const cliente = (clients || []).find((c) => c.id === os.clienteId) || {};
@@ -2490,255 +2609,310 @@ function generateOrcamentoHTML(os, clients) {
   const validade = new Date(Date.now() + 15 * 86400000).toLocaleDateString("pt-BR");
   const valorServico = os.valor || 0;
 
-  const endCliente = cliente.endereco
-    ? `${cliente.endereco.rua || ""}, ${cliente.endereco.bairro || ""} — ${cliente.endereco.cidade || ""}/${cliente.endereco.estado || ""}`
-    : os.endereco || "—";
+  const endCliente = cliente.endereco && (cliente.endereco.rua || cliente.endereco.cidade)
+    ? `${cliente.endereco.rua || ""}${cliente.endereco.numero ? ", " + cliente.endereco.numero : ""} · ${cliente.endereco.bairro || ""} — ${cliente.endereco.cidade || ""}${cliente.endereco.estado ? "/" + cliente.endereco.estado : ""}`
+    : (os.endereco || "—");
 
   const docCliente = cliente.tipo === "pj"
-    ? (cliente.cnpj ? `CNPJ: ${cliente.cnpj}` : "—")
-    : (cliente.cpf ? `CPF: ${cliente.cpf}` : "—");
+    ? (cliente.cnpj ? `CNPJ ${cliente.cnpj}` : "—")
+    : (cliente.cpf ? `CPF ${cliente.cpf}` : "—");
+
+  const equip = _equipamentoDescricao(os);
+  const equipText = [equip.tipoLabel, equip.modelo, equip.capLabel].filter(Boolean).join(" · ") || "—";
+
+  // Monta linhas da tabela: serviços + peças
+  const servicos = Array.isArray(os.servicos) && os.servicos.length > 0
+    ? os.servicos
+    : [{ tipo: os.tipo, descricao: os.equipamentoModelo || "Serviço de Refrigeração", valor: valorServico }];
+  const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
+
+  const rowsServicos = servicos.map((s) => {
+    const v = Number(s.valor) || 0;
+    const desc = s.descricao
+      ? `<strong style="color:var(--ink-900)">${s.tipo}</strong><div style="font-size:11px;color:var(--ink-500);margin-top:2px">${s.descricao}</div>`
+      : `<strong style="color:var(--ink-900)">${s.tipo}</strong>`;
+    return `<tr><td>${desc}</td><td class="num">1</td><td class="num">${_fmtBRL(v)}</td><td class="num">${_fmtBRL(v)}</td></tr>`;
+  }).join("");
+
+  const rowsPecas = pecas.map((p) => {
+    const qtd = Number(p.quantidade) || 1;
+    const valU = Number(p.valorUnit) || 0;
+    const sub = qtd * valU;
+    const valStr = valU > 0 ? _fmtBRL(valU) : "—";
+    const subStr = valU > 0 ? _fmtBRL(sub) : "<span class=\"muted\">Incluso</span>";
+    return `<tr><td>${p.nome || "Material"}</td><td class="num">${qtd}</td><td class="num">${valStr}</td><td class="num">${subStr}</td></tr>`;
+  }).join("");
+
+  const totServ = servicos.reduce((acc, s) => acc + (Number(s.valor) || 0), 0);
+  const totPecas = pecas.reduce((acc, p) => acc + (Number(p.quantidade) || 1) * (Number(p.valorUnit) || 0), 0);
+  const total = (totServ + totPecas) || valorServico;
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
-<head><meta charset="UTF-8"><title>Orçamento ${os.numero}</title>
-<style>${_docStyles("#3b82f6")}</style></head>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Orçamento ${os.numero}</title>
+<style>${_docStyles("#1d4ed8")}</style>
+</head>
 <body>
-<div class="page">
-  ${_docHeader(config, "ORÇAMENTO", os.numero, `Emitido em: ${dataHoje}`)}
+<main class="page">
+  <div class="page-inner">
+    ${_docHeader(config, "Orçamento", os.numero, `Emitido em ${dataHoje}`)}
 
-  <div class="info-grid section">
-    <div>
-      <div class="section-title">Dados do Cliente</div>
-      <div class="info-item" style="margin-bottom:10px"><label>Nome / Razão Social</label><span>${cliente.nome || os.clienteNome || "—"}</span></div>
-      <div class="info-item" style="margin-bottom:10px"><label>Documento</label><span>${docCliente}</span></div>
-      <div class="info-item" style="margin-bottom:10px"><label>Telefone</label><span>${cliente.telefone || "—"}</span></div>
-      <div class="info-item"><label>Email</label><span>${cliente.email || "—"}</span></div>
+    <!-- Info cards lado a lado: cliente + detalhes do serviço -->
+    <div class="section">
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="section-title" style="margin-bottom:10px">Cliente</div>
+          <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
+            <div class="info-item"><label>Nome / Razão Social</label><span>${cliente.nome || os.clienteNome || "—"}</span></div>
+            <div class="info-item mono"><label>Documento</label><span>${docCliente}</span></div>
+            <div class="info-item mono"><label>Telefone</label><span>${cliente.telefone || "—"}</span></div>
+            <div class="info-item"><label>Email</label><span>${cliente.email || "—"}</span></div>
+          </div>
+        </div>
+        <div class="info-card">
+          <div class="section-title" style="margin-bottom:10px">Serviço</div>
+          <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
+            <div class="info-item"><label>Tipo</label><span>${os.tipo || "—"}</span></div>
+            <div class="info-item"><label>Endereço de Execução</label><span>${endCliente}</span></div>
+            <div class="info-item"><label>Equipamento</label><span>${equipText}</span></div>
+            <div class="info-item"><label>Técnico Responsável</label><span>${os.tecnicoNome || "—"}</span></div>
+          </div>
+        </div>
+      </div>
     </div>
-    <div>
-      <div class="section-title">Detalhes do Serviço</div>
-      <div class="info-item" style="margin-bottom:10px"><label>Tipo de Serviço</label><span>${os.tipo || "—"}</span></div>
-      <div class="info-item" style="margin-bottom:10px"><label>Endereço de Execução</label><span>${endCliente}</span></div>
-      ${os.equipamentoModelo || os.equipamentoCapacidade ? (() => {
-        // Monta descrição dinâmica do equipamento conforme o tipo salvo na OS
-        const tipoKey = os.equipamentoTipo || "central";
-        const cfg = {
-          central: "BTUs", geladeira: "L", lavadora: "Kg", centrifuga: "Kg",
-          expositor: "L", bebedouro_industrial: "L/h", bebedouro_mesa: "",
-          bebedouro_coluna: "", camara_fria: "m³", outro: "",
-        };
-        const unidade = cfg[tipoKey] ?? "";
-        const cap = os.equipamentoCapacidade || os.equipamentoBTUs || "";
-        const suffix = cap ? (unidade ? ` — ${cap} ${unidade}` : ` — ${cap}`) : "";
-        return `<div class="info-item" style="margin-bottom:10px"><label>Equipamento</label><span>${os.equipamentoModelo || ""}${suffix}</span></div>`;
-      })() : ""}
-      <div class="info-item"><label>Técnico Responsável</label><span>${os.tecnicoNome || "—"}</span></div>
+
+    <!-- Itens do orçamento: serviços + peças em uma tabela -->
+    <div class="section">
+      <div class="section-title">Itens do Orçamento</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Descrição</th>
+            <th class="num" style="width:60px">Qtd</th>
+            <th class="num" style="width:110px">Valor Unit.</th>
+            <th class="num" style="width:120px">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rowsServicos}
+          ${rowsPecas}
+        </tbody>
+      </table>
+
+      <div class="totals">
+        <div class="totals-inner">
+          <div class="total-row"><span>Mão de obra</span><span>${_fmtBRL(totServ)}</span></div>
+          <div class="total-row"><span>Peças e Materiais</span><span>${totPecas > 0 ? _fmtBRL(totPecas) : "Incluso"}</span></div>
+          <div class="total-row grand"><span class="label">Total</span><span class="value">${_fmtBRL(total)}</span></div>
+        </div>
+      </div>
     </div>
+
+    ${os.observacoes ? `
+    <div class="section">
+      <div class="section-title">Observações</div>
+      <div class="obs-box">${os.observacoes}</div>
+    </div>` : ""}
+
+    <div class="terms">
+      <strong>Condições do Orçamento</strong>
+      Validade até <strong style="color:var(--ink-900)">${validade}</strong>. Garantia de serviço de 90 dias. Equipamentos com garantia do fabricante. Valores sujeitos a alteração após vistoria técnica no local.
+    </div>
+
+    <div class="signatures">
+      <div class="sig">
+        <div class="name">${config.nomeEmpresa || "FrostERP Refrigeração"}</div>
+        <div class="role">Responsável Técnico</div>
+      </div>
+      <div class="sig">
+        <div class="name">${cliente.nome || os.clienteNome || "Cliente"}</div>
+        <div class="role">Aceite do Orçamento</div>
+      </div>
+    </div>
+
+    <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
-
-  <div class="section">
-    <div class="section-title">Itens do Orçamento</div>
-    <table>
-      <thead><tr><th>Descrição</th><th>Qtd</th><th style="text-align:right">Valor Unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
-      <tbody>
-        ${(() => {
-          const fmt = (n) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(n || 0);
-          const servicos = Array.isArray(os.servicos) && os.servicos.length > 0
-            ? os.servicos
-            : [{ tipo: os.tipo, descricao: os.equipamentoModelo || "Serviço de Refrigeração", valor: valorServico }];
-          return servicos.map((s) => {
-            const v = Number(s.valor) || 0;
-            const desc = s.descricao ? `${s.tipo} — ${s.descricao}` : `${s.tipo}${os.equipamentoModelo ? ` — ${os.equipamentoModelo}` : ""}`;
-            return `<tr><td>${desc}</td><td>1</td><td style="text-align:right">${fmt(v)}</td><td style="text-align:right">${fmt(v)}</td></tr>`;
-          }).join("");
-        })()}
-        ${(() => {
-          // Peças/materiais com quantidade e valor unitário reais (novo modelo)
-          const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
-          const fmt = (n) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(Number(n) || 0);
-          return pecas.map((p) => {
-            const qtd = Number(p.quantidade) || 1;
-            const valU = Number(p.valorUnit) || 0;
-            const sub = qtd * valU;
-            const valStr = valU > 0 ? fmt(valU) : "—";
-            const subStr = valU > 0 ? fmt(sub) : "incluso";
-            return `<tr><td>${p.nome || "Material"}</td><td>${qtd}</td><td style="text-align:right">${valStr}</td><td style="text-align:right">${subStr}</td></tr>`;
-          }).join("");
-        })()}
-      </tbody>
-    </table>
-    ${(() => {
-      // Totais reais: soma de serviços + soma de peças (com valor unitário)
-      const fmt = (n) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(Number(n) || 0);
-      const servicos = Array.isArray(os.servicos) && os.servicos.length > 0
-        ? os.servicos
-        : [{ valor: valorServico }];
-      const totServ = servicos.reduce((acc, s) => acc + (Number(s.valor) || 0), 0);
-      const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
-      const totPecas = pecas.reduce((acc, p) => acc + (Number(p.quantidade) || 1) * (Number(p.valorUnit) || 0), 0);
-      const total = totServ + totPecas;
-      return `<div class="total-section" style="margin-top:12px">
-      <div class="total-row"><span>Mão de obra</span><span>${fmt(totServ)}</span></div>
-      <div class="total-row"><span>Peças e Materiais</span><span>${totPecas > 0 ? fmt(totPecas) : "Incluso"}</span></div>
-      <div class="total-row grand"><span>TOTAL</span><span>${fmt(total || valorServico)}</span></div>
-    </div>`;
-    })()}
-  </div>
-
-  ${os.observacoes ? `<div class="section"><div class="section-title">Observações</div><div class="obs-box">${os.observacoes}</div></div>` : ""}
-
-  <div class="terms">
-    <strong>Condições do Orçamento</strong>
-    Validade: ${validade} &nbsp;·&nbsp; Garantia de serviço: 90 dias &nbsp;·&nbsp; Equipamentos com garantia do fabricante &nbsp;·&nbsp; Valores sujeitos a alteração após vistoria.
-  </div>
-
-  <div class="signatures">
-    <div><div class="sig-line">${config.nomeEmpresa || "FrostERP Refrigeração"}<br>Responsável Técnico</div></div>
-    <div><div class="sig-line">${cliente.nome || os.clienteNome || "Cliente"}<br>Aceite do Orçamento</div></div>
-  </div>
-
-  <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
-</div>
-<button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
+</main>
+${_actionBar()}
 </body></html>`;
 }
 
-// Gera HTML da Ordem de Serviço
+// Gera HTML da Ordem de Serviço — documento de execução + ciência do cliente
 function generateOSHTML(os, clients) {
   const config = DB.get("erp:config") || {};
   const cliente = (clients || []).find((c) => c.id === os.clienteId) || {};
   const dataAbertura = os.dataAbertura ? new Date(os.dataAbertura).toLocaleDateString("pt-BR") : "—";
   const dataAgendada = os.dataAgendada
-    ? new Date(os.dataAgendada.replace("T00:00:00.000Z","T12:00:00")).toLocaleDateString("pt-BR")
+    ? new Date(os.dataAgendada.replace("T00:00:00.000Z", "T12:00:00")).toLocaleDateString("pt-BR")
     : "—";
 
-  const STATUS_LABELS_OS = {
-    aguardando:"Aguardando",em_deslocamento:"Em Deslocamento",
-    em_execucao:"Em Execução",finalizado:"Finalizado",
-    concluido:"Concluído",pendente:"Pendente",em_andamento:"Em Andamento",
+  const STATUS_LABELS = {
+    aguardando: "Aguardando", em_deslocamento: "Em Deslocamento",
+    em_execucao: "Em Execução", finalizado: "Finalizado",
+    concluido: "Concluído", pendente: "Pendente", em_andamento: "Em Andamento",
+    cancelado: "Cancelado",
   };
+  const statusLabel = STATUS_LABELS[os.status] || os.status || "—";
+  const statusClass = ["finalizado", "concluido"].includes(os.status) ? "badge-green"
+    : ["aguardando", "pendente"].includes(os.status) ? "badge-yellow"
+    : os.status === "cancelado" ? "badge-red" : "badge-blue";
 
-  const statusLabel = STATUS_LABELS_OS[os.status] || os.status || "—";
-  const statusClass = ["finalizado","concluido"].includes(os.status) ? "badge-green"
-    : os.status === "aguardando" || os.status === "pendente" ? "badge-yellow" : "badge-blue";
+  const enderecoFinal = os.endereco
+    || (cliente.endereco ? `${cliente.endereco.rua || ""}${cliente.endereco.numero ? ", " + cliente.endereco.numero : ""}${cliente.endereco.bairro ? " · " + cliente.endereco.bairro : ""}${cliente.endereco.cidade ? " — " + cliente.endereco.cidade : ""}${cliente.endereco.estado ? "/" + cliente.endereco.estado : ""}` : "—");
+
+  const equip = _equipamentoDescricao(os);
+  const hasEquipamento = equip.modelo || equip.capLabel;
+
+  const servicos = Array.isArray(os.servicos) && os.servicos.length > 0 ? os.servicos : null;
+  const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
+
+  const rowsServicos = servicos ? servicos.map((s) => {
+    const v = Number(s.valor) || 0;
+    return `<tr>
+      <td><strong style="color:var(--ink-900)">${s.tipo || "—"}</strong></td>
+      <td class="muted">${s.descricao || "—"}</td>
+      <td class="num">${_fmtBRL(v)}</td>
+    </tr>`;
+  }).join("") : "";
+
+  const rowsPecas = pecas.map((i) => {
+    const qtd = Number(i.quantidade) || 1;
+    const valU = Number(i.valorUnit) || 0;
+    const sub = qtd * valU;
+    return `<tr>
+      <td>${i.nome || "—"}</td>
+      <td class="num">${qtd}</td>
+      <td class="num">${valU > 0 ? _fmtBRL(valU) : "—"}</td>
+      <td class="num">${valU > 0 ? _fmtBRL(sub) : "—"}</td>
+    </tr>`;
+  }).join("");
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
-<head><meta charset="UTF-8"><title>OS ${os.numero}</title>
-<style>${_docStyles("#1d4ed8")}</style></head>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>OS ${os.numero}</title>
+<style>${_docStyles("#1d4ed8")}</style>
+</head>
 <body>
-<div class="page">
-  ${_docHeader(config, "ORDEM DE SERVIÇO", os.numero, `Abertura: ${dataAbertura}`)}
+<main class="page">
+  <div class="page-inner">
+    ${_docHeader(config, "Ordem de Serviço", os.numero, `Abertura: ${dataAbertura}`)}
 
-  <div class="info-grid section">
-    <div>
-      <div class="section-title">Cliente</div>
-      <div class="info-item" style="margin-bottom:10px"><label>Nome</label><span>${cliente.nome || os.clienteNome || "—"}</span></div>
-      <div class="info-item" style="margin-bottom:10px"><label>Telefone</label><span>${cliente.telefone || "—"}</span></div>
-      <div class="info-item"><label>Endereço de Atendimento</label><span>${os.endereco || (cliente.endereco ? `${cliente.endereco.rua}, ${cliente.endereco.bairro}` : "—")}</span></div>
+    <!-- Cliente + Execução em cards lado a lado -->
+    <div class="section">
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="section-title" style="margin-bottom:10px">Cliente</div>
+          <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
+            <div class="info-item"><label>Nome</label><span>${cliente.nome || os.clienteNome || "—"}</span></div>
+            <div class="info-item mono"><label>Telefone</label><span>${cliente.telefone || "—"}</span></div>
+            <div class="info-item"><label>Endereço de Atendimento</label><span>${enderecoFinal}</span></div>
+          </div>
+        </div>
+        <div class="info-card">
+          <div class="section-title" style="margin-bottom:10px">Execução</div>
+          <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
+            <div class="info-item"><label>Status</label><span><span class="badge ${statusClass}">${statusLabel}</span></span></div>
+            <div class="info-item"><label>Técnico</label><span>${os.tecnicoNome || "—"}</span></div>
+            <div class="info-item mono"><label>Data Agendada</label><span>${dataAgendada}</span></div>
+            <div class="info-item"><label>Tipo</label><span>${os.tipo || "—"}</span></div>
+          </div>
+        </div>
+      </div>
     </div>
-    <div>
-      <div class="section-title">Execução</div>
-      <div class="info-item" style="margin-bottom:10px"><label>Status</label><span><span class="badge ${statusClass}">${statusLabel}</span></span></div>
-      <div class="info-item" style="margin-bottom:10px"><label>Técnico</label><span>${os.tecnicoNome || "—"}</span></div>
-      <div class="info-item" style="margin-bottom:10px"><label>Data Agendada</label><span>${dataAgendada}</span></div>
-      <div class="info-item"><label>Tipo</label><span>${os.tipo || "—"}</span></div>
+
+    ${hasEquipamento ? `
+    <div class="section">
+      <div class="section-title">Equipamento</div>
+      <div class="info-card">
+        <div class="info-grid">
+          <div class="info-item"><label>Tipo</label><span>${equip.tipoLabel}</span></div>
+          <div class="info-item"><label>Modelo / Marca</label><span>${equip.modelo || "—"}</span></div>
+          ${equip.capLabel ? `<div class="info-item mono"><label>Capacidade</label><span>${equip.capLabel}</span></div>` : ""}
+        </div>
+      </div>
+    </div>` : ""}
+
+    ${servicos ? `
+    <div class="section">
+      <div class="section-title">Serviços Executados</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:28%">Tipo</th>
+            <th>Descrição</th>
+            <th class="num" style="width:130px">Valor</th>
+          </tr>
+        </thead>
+        <tbody>${rowsServicos}</tbody>
+      </table>
+    </div>` : `
+    <div class="section">
+      <div class="section-title">Descrição do Serviço</div>
+      <div class="obs-box">${os.descricao || os.observacoes || "Sem descrição informada."}</div>
+    </div>`}
+
+    ${pecas.length > 0 ? `
+    <div class="section">
+      <div class="section-title">Peças e Materiais</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th class="num" style="width:70px">Qtd</th>
+            <th class="num" style="width:120px">Valor Unit.</th>
+            <th class="num" style="width:130px">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>${rowsPecas}</tbody>
+      </table>
+    </div>` : ""}
+
+    <!-- Valor total em destaque -->
+    <div class="totals">
+      <div class="totals-inner">
+        <div class="total-row grand">
+          <span class="label">Valor Total</span>
+          <span class="value">${_fmtBRL(os.valor || 0)}</span>
+        </div>
+      </div>
     </div>
-  </div>
 
-  ${(os.equipamentoModelo || os.equipamentoCapacidade || os.equipamentoBTUs) ? (() => {
-    const TYPE_LABELS = {
-      central: "Central de Ar", geladeira: "Geladeira/Freezer", lavadora: "Máq. de Lavar",
-      centrifuga: "Centrífuga", expositor: "Expositor", bebedouro_industrial: "Bebedouro Industrial",
-      bebedouro_mesa: "Gelágua de Mesa", bebedouro_coluna: "Gelágua de Coluna",
-      camara_fria: "Câmara Fria", outro: "Outro",
-    };
-    const UNIT_LABELS = {
-      central: "BTUs", geladeira: "Litros", lavadora: "Kg", centrifuga: "Kg",
-      expositor: "Litros", bebedouro_industrial: "Litros/h",
-      bebedouro_mesa: "", bebedouro_coluna: "", camara_fria: "m³", outro: "",
-    };
-    const tipoKey = os.equipamentoTipo || "central";
-    const tipoLabel = TYPE_LABELS[tipoKey] || "Equipamento";
-    const unit = UNIT_LABELS[tipoKey] || "";
-    const cap = os.equipamentoCapacidade || os.equipamentoBTUs || "";
-    const capLabel = cap ? (unit ? `${cap} ${unit}` : cap) : "";
-    return `<div class="section">
-    <div class="section-title">Equipamento</div>
-    <div class="info-grid">
-      <div class="info-item"><label>Tipo</label><span>${tipoLabel}</span></div>
-      <div class="info-item"><label>Modelo</label><span>${os.equipamentoModelo || "—"}</span></div>
-      ${capLabel ? `<div class="info-item"><label>Capacidade</label><span>${capLabel}</span></div>` : ""}
+    <div class="section">
+      <div class="section-title">Relato do Técnico</div>
+      <div class="obs-box placeholder">Descreva aqui os procedimentos realizados, peças substituídas, medições e orientações ao cliente.</div>
     </div>
-  </div>`;
-  })() : ""}
 
-  ${Array.isArray(os.servicos) && os.servicos.length > 0 ? `
-  <div class="section">
-    <div class="section-title">Serviços Executados</div>
-    <table>
-      <thead><tr><th>Tipo</th><th>Descrição</th><th style="text-align:right">Valor</th></tr></thead>
-      <tbody>
-        ${os.servicos.map((s) => {
-          const fmt = (n) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(Number(n) || 0);
-          return `<tr><td>${s.tipo || "—"}</td><td>${s.descricao || "—"}</td><td style="text-align:right">${fmt(s.valor)}</td></tr>`;
-        }).join("")}
-      </tbody>
-    </table>
-    <div class="total-section" style="margin-top:12px">
-      <div class="total-row grand"><span>TOTAL</span><span>${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(os.valor || 0)}</span></div>
+    ${os.observacoes ? `
+    <div class="section">
+      <div class="section-title">Observações</div>
+      <div class="obs-box">${os.observacoes}</div>
+    </div>` : ""}
+
+    <div class="signatures">
+      <div class="sig">
+        <div class="name">${os.tecnicoNome || "—"}</div>
+        <div class="role">Técnico Responsável</div>
+      </div>
+      <div class="sig">
+        <div class="name">${cliente.nome || os.clienteNome || "Cliente"}</div>
+        <div class="role">Ciente do Serviço</div>
+      </div>
     </div>
-  </div>
-  ` : `
-  <div class="section">
-    <div class="section-title">Descrição do Serviço</div>
-    <div class="obs-box">${os.descricao || os.observacoes || "Sem descrição informada."}</div>
-  </div>
-  `}
 
-  ${(() => {
-    // Seção de Peças e Materiais na OS impressa — renderiza nome, qtd, valor unit. e subtotal
-    const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
-    if (!pecas || pecas.length === 0) return "";
-    const fmt = (n) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(Number(n) || 0);
-    const rows = pecas.map((i) => {
-      const qtd = Number(i.quantidade) || 1;
-      const valU = Number(i.valorUnit) || 0;
-      const sub = qtd * valU;
-      const valStr = valU > 0 ? fmt(valU) : "—";
-      const subStr = valU > 0 ? fmt(sub) : "—";
-      return `<tr><td>${i.nome||"—"}</td><td>${qtd}</td><td style="text-align:right">${valStr}</td><td style="text-align:right">${subStr}</td></tr>`;
-    }).join("");
-    return `<div class="section">
-    <div class="section-title">Peças e Materiais</div>
-    <table>
-      <thead><tr><th>Item</th><th>Qtd</th><th style="text-align:right">Valor Unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </div>`;
-  })()}
-
-  <div class="section">
-    <div class="section-title">Relato do Técnico</div>
-    <div class="obs-box" style="min-height:80px;color:#a0aec0;font-style:italic">Descreva aqui os procedimentos realizados...</div>
+    <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
-
-  <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px;background:#eff6ff;border-radius:8px;border:1px solid #bfdbfe">
-    <span style="font-size:13px;color:#4a5568">Valor do Serviço</span>
-    <span style="font-size:20px;font-weight:800;color:#1d4ed8">${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(os.valor||0)}</span>
-  </div>
-
-  <div class="signatures">
-    <div><div class="sig-line">Técnico Responsável<br>${os.tecnicoNome || "—"}</div></div>
-    <div><div class="sig-line">Responsável do Cliente<br>Ciente do Serviço</div></div>
-  </div>
-
-  <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
-</div>
-<button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
+</main>
+${_actionBar()}
 </body></html>`;
 }
 
-// Gera HTML do Recibo de Serviço
+// Gera HTML do Recibo — documento final com valor em destaque
 function generateReciboHTML(os, clients) {
   const config = DB.get("erp:config") || {};
   const cliente = (clients || []).find((c) => c.id === os.clienteId) || {};
@@ -2748,57 +2922,81 @@ function generateReciboHTML(os, clients) {
   const valor = os.valor || 0;
   const valorExtenso = valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 });
 
+  const enderecoFinal = os.endereco
+    || (cliente.endereco ? `${cliente.endereco.rua || ""}${cliente.endereco.numero ? ", " + cliente.endereco.numero : ""}${cliente.endereco.bairro ? " · " + cliente.endereco.bairro : ""}${cliente.endereco.cidade ? " — " + cliente.endereco.cidade : ""}${cliente.endereco.estado ? "/" + cliente.endereco.estado : ""}` : "—");
+
+  const equip = _equipamentoDescricao(os);
+  const equipText = [equip.modelo, equip.capLabel].filter(Boolean).join(" · ");
+
   return `<!DOCTYPE html>
 <html lang="pt-BR">
-<head><meta charset="UTF-8"><title>Recibo ${os.numero}</title>
-<style>${_docStyles("#10b981")}</style></head>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Recibo ${os.numero}</title>
+<style>${_docStyles("#047857")}</style>
+</head>
 <body>
-<div class="page">
-  ${_docHeader(config, "RECIBO DE SERVIÇO", os.numero, `Data: ${dataConclusao}`)}
+<main class="page">
+  <div class="page-inner">
+    ${_docHeader(config, "Recibo de Serviço", os.numero, `Data: ${dataConclusao}`)}
 
-  <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:20px 24px;margin-bottom:28px;text-align:center">
-    <div style="font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:#6b7280;margin-bottom:4px">Valor Total do Serviço</div>
-    <div style="font-size:36px;font-weight:800;color:#10b981">${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(valor)}</div>
-    <div style="font-size:12px;color:#6b7280;margin-top:4px">R$ ${valorExtenso}</div>
-  </div>
-
-  <div class="info-grid section">
-    <div>
-      <div class="section-title">Recebemos de</div>
-      <div class="info-item" style="margin-bottom:10px"><label>Nome / Razão Social</label><span>${cliente.nome || os.clienteNome || "—"}</span></div>
-      <div class="info-item" style="margin-bottom:10px"><label>Telefone</label><span>${cliente.telefone || "—"}</span></div>
-      <div class="info-item"><label>Endereço</label><span>${os.endereco || (cliente.endereco ? `${cliente.endereco.rua}, ${cliente.endereco.bairro}` : "—")}</span></div>
+    <!-- Hero: valor em destaque -->
+    <div class="hero-amount">
+      <div class="hero-label">Valor Total do Serviço</div>
+      <div class="hero-value">${_fmtBRL(valor)}</div>
+      <div class="hero-hint">R$ ${valorExtenso}</div>
     </div>
-    <div>
-      <div class="section-title">Referente a</div>
-      <div class="info-item" style="margin-bottom:10px"><label>Serviço</label><span>${os.tipo || "—"}</span></div>
-      ${os.equipamentoModelo ? `<div class="info-item" style="margin-bottom:10px"><label>Equipamento</label><span>${os.equipamentoModelo}</span></div>` : ""}
-      <div class="info-item" style="margin-bottom:10px"><label>Técnico</label><span>${os.tecnicoNome || "—"}</span></div>
-      <div class="info-item"><label>Data de Conclusão</label><span>${dataConclusao}</span></div>
+
+    <!-- Partes + referência -->
+    <div class="section">
+      <div class="info-grid">
+        <div class="info-card">
+          <div class="section-title" style="margin-bottom:10px">Recebemos de</div>
+          <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
+            <div class="info-item"><label>Nome / Razão Social</label><span>${cliente.nome || os.clienteNome || "—"}</span></div>
+            <div class="info-item mono"><label>Telefone</label><span>${cliente.telefone || "—"}</span></div>
+            <div class="info-item"><label>Endereço</label><span>${enderecoFinal}</span></div>
+          </div>
+        </div>
+        <div class="info-card">
+          <div class="section-title" style="margin-bottom:10px">Referente a</div>
+          <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
+            <div class="info-item"><label>Serviço</label><span>${os.tipo || "—"}</span></div>
+            ${equipText ? `<div class="info-item"><label>Equipamento</label><span>${equipText}</span></div>` : ""}
+            <div class="info-item"><label>Técnico Responsável</label><span>${os.tecnicoNome || "—"}</span></div>
+            <div class="info-item mono"><label>Data de Conclusão</label><span>${dataConclusao}</span></div>
+          </div>
+        </div>
+      </div>
     </div>
+
+    ${os.observacoes || os.descricao ? `
+    <div class="section">
+      <div class="section-title">Descrição</div>
+      <div class="obs-box">${os.descricao || os.observacoes}</div>
+    </div>` : ""}
+
+    <div class="terms">
+      <strong>Garantia</strong>
+      Este serviço possui garantia de 90 dias contados a partir da data de conclusão, cobrindo defeitos de execução. Equipamentos seguem a garantia do fabricante conforme manual do produto. A garantia não cobre danos causados por mau uso, sobrecargas elétricas, sinistros ou falta de manutenção periódica.
+    </div>
+
+    <div class="signatures">
+      <div class="sig">
+        <div class="name">${config.nomeEmpresa || "FrostERP Refrigeração"}</div>
+        <div class="role">Prestador do Serviço</div>
+      </div>
+      <div class="sig">
+        <div class="name">${cliente.nome || os.clienteNome || "Cliente"}</div>
+        <div class="role">Recebimento e Aprovação</div>
+      </div>
+    </div>
+
+    <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
-
-  ${os.observacoes || os.descricao ? `
-  <div class="section">
-    <div class="section-title">Descrição</div>
-    <div class="obs-box">${os.descricao || os.observacoes}</div>
-  </div>` : ""}
-
-  <div class="terms">
-    <strong>Garantia</strong>
-    Este serviço possui garantia de 90 dias a partir da data de conclusão contra defeitos na execução.
-    Garantia do fabricante para equipamentos conforme manual do produto.
-    A garantia não cobre danos causados por mau uso, sobrecargas elétricas, sinistros ou falta de manutenção.
-  </div>
-
-  <div class="signatures">
-    <div><div class="sig-line">${config.nomeEmpresa || "FrostERP Refrigeração"}<br>Prestador do Serviço</div></div>
-    <div><div class="sig-line">${cliente.nome || os.clienteNome || "Cliente"}<br>Recebimento e Aprovação</div></div>
-  </div>
-
-  <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
-</div>
-<button class="print-btn" onclick="window.print()">🖨️ Imprimir</button>
+</main>
+${_actionBar()}
 </body></html>`;
 }
 
