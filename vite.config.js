@@ -10,7 +10,7 @@ function cspPlugin() {
     transformIndexHtml(html, ctx) {
       if (ctx.bundle) {
         // Produção: CSP restritivo com worker-src e manifest-src para PWA, base-uri e form-action
-        const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; manifest-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://fonts.googleapis.com https://fonts.gstatic.com; img-src 'self' data: blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" />`;
+        const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; manifest-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://fonts.googleapis.com https://fonts.gstatic.com; img-src 'self' data: blob: https://api.qrserver.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" />`;
         return html.replace('<!-- CSP aplicado via servidor em produção; em dev o Vite precisa de ws: e eval para HMR -->', csp);
       }
       return html;

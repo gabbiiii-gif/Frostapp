@@ -1,7 +1,11 @@
 node_modules
 dist
+dev-dist
 .env
 .env.*
 *.local
 
 .vercel
+
+# Configurações locais do Claude Code (não devem ir pro repo)
+.claude/settings.local.json

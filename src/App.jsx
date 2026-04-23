@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
-  BarChart, Bar, LineChart, Line, PieChart, Pie,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
-  ResponsiveContainer, Cell
+  LineChart, Line,
+  XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer
 } from "recharts";
 import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
@@ -10,18 +10,10 @@ import BlurText from "./BlurText.jsx";
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────────
 
+// Paleta compartilhada por gráficos e badges
 const COLORS = ["#3b82f6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"];
 
-const CATEGORIES_RECEITA = [
-  "Instalação", "Manutenção", "Venda de Equipamento", "Venda de Peça",
-  "Higienização", "Reparo", "Contrato de Manutenção", "Outros"
-];
-
-const CATEGORIES_DESPESA = [
-  "Material", "Combustível", "Aluguel", "Salário", "Imposto",
-  "Ferramentas", "Veículo", "Marketing", "Outros"
-];
-
+// Mapeamento global de status — usado pelo StatusBadge em OS, Agenda e Cadastros
 const STATUS_MAP = {
   ativo: { label: "Ativo", color: "bg-green-500" },
   inativo: { label: "Inativo", color: "bg-gray-500" },
@@ -29,31 +21,17 @@ const STATUS_MAP = {
   pendente: { label: "Pendente", color: "bg-yellow-500" },
   em_andamento: { label: "Em Andamento", color: "bg-blue-500" },
   cancelado: { label: "Cancelado", color: "bg-red-500" },
-  atrasado: { label: "Atrasado", color: "bg-red-500" },
-  pago: { label: "Pago", color: "bg-green-500" },
   agendado: { label: "Agendado", color: "bg-cyan-500" },
-  aberto: { label: "Aberto", color: "bg-yellow-500" },
-  fechado: { label: "Fechado", color: "bg-gray-500" },
-  orcamento: { label: "Orçamento", color: "bg-purple-500" },
+  confirmado: { label: "Confirmado", color: "bg-blue-500" },
 };
 
+// Matriz de permissões por role — após remoção dos módulos financeiros, fiscais e de mensageria
 const ROLE_PERMISSIONS = {
   admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "estoque", "os", "agenda", "tickets", "relatorios", "config"],
-  tecnico: ["dashboard", "os", "agenda", "estoque_view", "tickets"],
-  atendente: ["dashboard", "clientes", "os", "agenda", "tickets"],
+  gerente: ["dashboard", "clientes", "funcionarios", "os", "agenda", "config"],
+  tecnico: ["dashboard", "os", "agenda"],
+  atendente: ["dashboard", "clientes", "os", "agenda"],
 };
-
-const MSG_TEMPLATES = {
-  os_criada: (num) => `Ordem de Serviço ${num} criada com sucesso.`,
-  os_concluida: (num) => `Ordem de Serviço ${num} concluída.`,
-  cliente_criado: (nome) => `Cliente ${nome} cadastrado com sucesso.`,
-  item_baixo: (nome) => `Estoque baixo: ${nome}. Reabastecer.`,
-  ticket_aberto: (num) => `Ticket #${num} aberto.`,
-  pagamento_registrado: (desc) => `Pagamento registrado: ${desc}.`,
-};
-
-const PAYMENT_METHODS = ["PIX", "Cartão de Crédito", "Cartão de Débito", "Boleto", "Dinheiro", "Transferência"];
 
 // ─── DB LAYER ───────────────────────────────────────────────────────────────────
 
@@ -314,10 +292,8 @@ function getNextNumber(prefix, items) {
 // Mantida em sincronia com navItems do App (remoções de sessões devem ocorrer aqui também)
 const ALL_MODULES = [
   { id: "dashboard", label: "Dashboard" },
-  { id: "financeiro", label: "Financeiro" },
   { id: "processos", label: "Ordens de Serviço" },
   { id: "agenda", label: "Agenda" },
-  { id: "mensagens", label: "Mensagens" },
   { id: "cadastro", label: "Cadastros" },
   { id: "config", label: "Configurações (admin)" },
 ];
@@ -437,21 +413,6 @@ async function seedDatabase() {
   ];
   employees.forEach((e) => DB.set("erp:employee:" + e.id, e));
 
-  // Inventory
-  const inventory = [
-    { id: genId(), nome: "Split Hi-Wall 9000 BTUs Inverter", categoria: "Equipamento", sku: "EQ-001", unidade: "un", quantidade: 8, quantidadeMinima: 3, precoCompra: 1450, precoVenda: 2200, fornecedor: "Samsung", localizacao: "Galpão A1", createdAt: new Date().toISOString(), status: "ativo" },
-    { id: genId(), nome: "Split Hi-Wall 12000 BTUs Inverter", categoria: "Equipamento", sku: "EQ-002", unidade: "un", quantidade: 5, quantidadeMinima: 3, precoCompra: 1800, precoVenda: 2800, fornecedor: "LG", localizacao: "Galpão A1", createdAt: new Date().toISOString(), status: "ativo" },
-    { id: genId(), nome: "Split Hi-Wall 18000 BTUs Inverter", categoria: "Equipamento", sku: "EQ-003", unidade: "un", quantidade: 3, quantidadeMinima: 2, precoCompra: 2600, precoVenda: 3900, fornecedor: "Daikin", localizacao: "Galpão A2", createdAt: new Date().toISOString(), status: "ativo" },
-    { id: genId(), nome: "Split Hi-Wall 24000 BTUs Inverter", categoria: "Equipamento", sku: "EQ-004", unidade: "un", quantidade: 2, quantidadeMinima: 2, precoCompra: 3200, precoVenda: 4800, fornecedor: "Fujitsu", localizacao: "Galpão A2", createdAt: new Date().toISOString(), status: "ativo" },
-    { id: genId(), nome: "Tubo de Cobre 1/4\" x 3/8\" (rolo 15m)", categoria: "Material", sku: "MT-001", unidade: "rolo", quantidade: 12, quantidadeMinima: 5, precoCompra: 280, precoVenda: 420, fornecedor: "Eluma", localizacao: "Prateleira B1", createdAt: new Date().toISOString(), status: "ativo" },
-    { id: genId(), nome: "Suporte para Condensadora 500mm", categoria: "Acessório", sku: "AC-001", unidade: "par", quantidade: 15, quantidadeMinima: 5, precoCompra: 45, precoVenda: 85, fornecedor: "Gallant", localizacao: "Prateleira C1", createdAt: new Date().toISOString(), status: "ativo" },
-    { id: genId(), nome: "Gás Refrigerante R410a (11.3kg)", categoria: "Material", sku: "MT-002", unidade: "cilindro", quantidade: 4, quantidadeMinima: 3, precoCompra: 520, precoVenda: 780, fornecedor: "Chemours", localizacao: "Depósito D1", createdAt: new Date().toISOString(), status: "ativo" },
-    { id: genId(), nome: "Fita Autofusão 19mm x 10m", categoria: "Material", sku: "MT-003", unidade: "rolo", quantidade: 25, quantidadeMinima: 10, precoCompra: 12, precoVenda: 25, fornecedor: "3M", localizacao: "Prateleira B2", createdAt: new Date().toISOString(), status: "ativo" },
-    { id: genId(), nome: "Tubo Dreno PVC 1/2\" (barra 6m)", categoria: "Material", sku: "MT-004", unidade: "barra", quantidade: 18, quantidadeMinima: 8, precoCompra: 8, precoVenda: 18, fornecedor: "Tigre", localizacao: "Prateleira B3", createdAt: new Date().toISOString(), status: "ativo" },
-    { id: genId(), nome: "Cabo Elétrico PP 3x2.5mm (rolo 50m)", categoria: "Material", sku: "MT-005", unidade: "rolo", quantidade: 6, quantidadeMinima: 3, precoCompra: 185, precoVenda: 290, fornecedor: "Prysmian", localizacao: "Prateleira B4", createdAt: new Date().toISOString(), status: "ativo" },
-  ];
-  inventory.forEach((item) => DB.set("erp:inventory:" + item.id, item));
-
   // Service Orders
   const clientIds = clients.map((c) => c.id);
   const empIds = employees.filter((e) => e.tipo === "tecnico").map((e) => e.id);
@@ -466,7 +427,6 @@ async function seedDatabase() {
       dataAbertura: monthsAgo(1) + "T08:00:00.000Z",
       dataConclusao: monthsAgo(1) + "T17:00:00.000Z",
       observacoes: "Instalação concluída sem intercorrências. Cliente satisfeita.",
-      itensUtilizados: [{ itemId: inventory[4].id, nome: inventory[4].nome, quantidade: 1 }],
       createdAt: monthsAgo(1) + "T08:00:00.000Z",
     },
     {
@@ -478,7 +438,6 @@ async function seedDatabase() {
       dataAbertura: daysFromNow(-2) + "T09:00:00.000Z",
       dataConclusao: null,
       observacoes: "Equipamento 1 e 2 concluídos. Falta equipamento 3.",
-      itensUtilizados: [],
       createdAt: daysFromNow(-2) + "T09:00:00.000Z",
     },
     {
@@ -490,56 +449,10 @@ async function seedDatabase() {
       dataAbertura: daysFromNow(0) + "T10:00:00.000Z",
       dataConclusao: null,
       observacoes: "Agendado para amanhã pela manhã.",
-      itensUtilizados: [],
       createdAt: daysFromNow(0) + "T10:00:00.000Z",
     },
   ];
   serviceOrders.forEach((os) => DB.set("erp:os:" + os.id, os));
-
-  // Financial Transactions
-  const transactions = [
-    {
-      id: genId(), descricao: "Instalação Split 12000 BTUs - Maria Silva",
-      valor: 2800 + 450, tipo: "receita", categoria: "Instalação",
-      data: monthsAgo(1) + "T00:00:00.000Z", status: "pago",
-      formaPagamento: "PIX", observacoes: "Equipamento + mão de obra",
-      osId: serviceOrders[0].id, numero: "NF-001",
-      createdAt: monthsAgo(1) + "T00:00:00.000Z",
-    },
-    {
-      id: genId(), descricao: "Manutenção preventiva - Restaurante Sabor & Arte",
-      valor: 350, tipo: "receita", categoria: "Manutenção",
-      data: daysFromNow(-2) + "T00:00:00.000Z", status: "pendente",
-      formaPagamento: "Boleto", observacoes: "Faturar ao final do serviço",
-      osId: serviceOrders[1].id, numero: "NF-002",
-      createdAt: daysFromNow(-2) + "T00:00:00.000Z",
-    },
-    {
-      id: genId(), descricao: "Compra de 2 cilindros Gás R410a",
-      valor: 1040, tipo: "despesa", categoria: "Material",
-      data: monthsAgo(0) + "T00:00:00.000Z", status: "pago",
-      formaPagamento: "Transferência", observacoes: "Fornecedor Chemours",
-      osId: null, numero: "DP-001",
-      createdAt: monthsAgo(0) + "T00:00:00.000Z",
-    },
-    {
-      id: genId(), descricao: "Aluguel do galpão - mês atual",
-      valor: 3500, tipo: "despesa", categoria: "Aluguel",
-      data: monthsAgo(0) + "T00:00:00.000Z", status: "pago",
-      formaPagamento: "Boleto", observacoes: "Ref. mês corrente",
-      osId: null, numero: "DP-002",
-      createdAt: monthsAgo(0) + "T00:00:00.000Z",
-    },
-    {
-      id: genId(), descricao: "Venda Split 9000 BTUs - João Pedro",
-      valor: 2200, tipo: "receita", categoria: "Venda de Equipamento",
-      data: monthsAgo(0) + "T00:00:00.000Z", status: "pago",
-      formaPagamento: "Cartão de Crédito", observacoes: "Parcela única",
-      osId: null, numero: "NF-003",
-      createdAt: monthsAgo(0) + "T00:00:00.000Z",
-    },
-  ];
-  transactions.forEach((t) => DB.set("erp:finance:" + t.id, t));
 
   // Schedule
   const scheduleEntries = [
@@ -572,38 +485,6 @@ async function seedDatabase() {
     },
   ];
   scheduleEntries.forEach((s) => DB.set("erp:schedule:" + s.id, s));
-
-  // Tickets
-  const tickets = [
-    {
-      id: genId(), numero: "TK-001", titulo: "Ar condicionado fazendo barulho estranho",
-      assunto: "Barulho na unidade externa",
-      descricao: "Cliente relata que o equipamento instalado há 2 semanas começou a fazer um barulho de vibração na unidade externa.",
-      clienteId: clientIds[0], clienteNome: clients[0].nome,
-      prioridade: "media", status: "aberto", categoria: "Reclamação",
-      dataAbertura: daysFromNow(-1) + "T10:30:00.000Z",
-      responsavelId: empIds[0], responsavelNome: employees[0].nome,
-      mensagens: [
-        { id: genId(), autor: clients[0].nome, texto: "O barulho aumenta quando liga o compressor.", data: daysFromNow(-1) + "T10:35:00.000Z" },
-        { id: genId(), autor: employees[0].nome, texto: "Vamos agendar uma visita para verificar. Pode ser folga no suporte.", data: daysFromNow(-1) + "T11:00:00.000Z" },
-      ],
-      createdAt: daysFromNow(-1) + "T10:30:00.000Z",
-    },
-    {
-      id: genId(), numero: "TK-002", titulo: "Solicitar orçamento para sistema VRF",
-      assunto: "Orçamento sistema VRF 200m²",
-      descricao: "Empresa solicita orçamento para instalação de sistema VRF em escritório de 200m² com 8 evaporadoras.",
-      clienteId: clientIds[3], clienteNome: clients[3].nome,
-      prioridade: "alta", status: "aberto", categoria: "Orçamento",
-      dataAbertura: daysFromNow(0) + "T09:00:00.000Z",
-      responsavelId: null, responsavelNome: null,
-      mensagens: [
-        { id: genId(), autor: clients[3].nome, texto: "Precisamos do orçamento até sexta-feira, por favor.", data: daysFromNow(0) + "T09:05:00.000Z" },
-      ],
-      createdAt: daysFromNow(0) + "T09:00:00.000Z",
-    },
-  ];
-  tickets.forEach((t) => DB.set("erp:ticket:" + t.id, t));
 
   // Company Config
   DB.set("erp:config", {
@@ -868,20 +749,29 @@ function DataTable({ columns, data, onEdit, onDelete, actions, pagination = true
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-gray-700">
-              {columns.map((col) => (
-                <th
-                  key={col.key}
-                  onClick={() => col.sortable !== false && handleSort(col.key)}
-                  className={`px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider ${col.sortable !== false ? "cursor-pointer hover:text-white select-none" : ""} ${col.width || ""}`}
-                >
-                  <div className="flex items-center gap-1">
-                    {col.label}
-                    {sortKey === col.key && (
-                      <span className="text-blue-400">{sortDir === "asc" ? "↑" : "↓"}</span>
-                    )}
-                  </div>
-                </th>
-              ))}
+              {columns.map((col) => {
+                const sortable = col.sortable !== false;
+                const isSorted = sortKey === col.key;
+                const ariaSort = !sortable ? undefined : isSorted ? (sortDir === "asc" ? "ascending" : "descending") : "none";
+                return (
+                  <th
+                    key={col.key}
+                    onClick={() => sortable && handleSort(col.key)}
+                    onKeyDown={(e) => { if (sortable && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); handleSort(col.key); } }}
+                    tabIndex={sortable ? 0 : undefined}
+                    role={sortable ? "button" : undefined}
+                    aria-sort={ariaSort}
+                    className={`px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider ${sortable ? "cursor-pointer hover:text-white select-none" : ""} ${col.width || ""}`}
+                  >
+                    <div className="flex items-center gap-1">
+                      {col.label}
+                      {isSorted && (
+                        <span className="text-blue-400" aria-hidden="true">{sortDir === "asc" ? "↑" : "↓"}</span>
+                      )}
+                    </div>
+                  </th>
+                );
+              })}
               {(onEdit || onDelete || actions) && (
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase tracking-wider w-28">Ações</th>
               )}
@@ -897,15 +787,25 @@ function DataTable({ columns, data, onEdit, onDelete, actions, pagination = true
                 ))}
                 {(onEdit || onDelete || actions) && (
                   <td className="px-4 py-3 text-right whitespace-nowrap">
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="flex items-center justify-end gap-0.5 sm:gap-1">
                       {actions && actions(row)}
                       {onEdit && (
-                        <button onClick={() => onEdit(row)} className="p-1.5 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-gray-700 transition" title="Editar">
+                        <button
+                          onClick={() => onEdit(row)}
+                          className="p-2 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-gray-700 transition inline-flex items-center justify-center min-h-[36px] min-w-[36px]"
+                          title="Editar"
+                          aria-label="Editar"
+                        >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
                         </button>
                       )}
                       {onDelete && (
-                        <button onClick={() => onDelete(row)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-400 hover:bg-gray-700 transition" title="Excluir">
+                        <button
+                          onClick={() => onDelete(row)}
+                          className="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-gray-700 transition inline-flex items-center justify-center min-h-[36px] min-w-[36px]"
+                          title="Excluir"
+                          aria-label="Excluir"
+                        >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
                         </button>
                       )}
@@ -918,33 +818,61 @@ function DataTable({ columns, data, onEdit, onDelete, actions, pagination = true
         </table>
       </div>
       {pagination && sorted.length > perPage && (
-        <div className="flex items-center justify-between px-4 py-3 border-t border-gray-700">
-          <p className="text-sm text-gray-400">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-gray-700">
+          <p className="text-xs sm:text-sm text-gray-400">
             {startIdx}-{endIdx} de {sorted.length}
           </p>
-          <div className="flex gap-1">
+          <div className="flex items-center gap-1">
             <button
               onClick={() => setPage((p) => Math.max(1, p - 1))}
               disabled={page === 1}
-              className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              aria-label="Página anterior"
+              className="px-2.5 sm:px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition min-h-[36px]"
             >
-              Anterior
+              ‹
             </button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
-              <button
-                key={p}
-                onClick={() => setPage(p)}
-                className={`px-3 py-1.5 text-sm rounded-lg transition ${p === page ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
-              >
-                {p}
-              </button>
-            ))}
+            {/* Em mobile mostra só página atual; em sm+ mostra até 5 páginas com ellipsis */}
+            <span className="sm:hidden px-3 py-1.5 text-sm text-gray-300 min-w-[60px] text-center">
+              {page} / {totalPages}
+            </span>
+            <div className="hidden sm:flex gap-1">
+              {(() => {
+                const pages = [];
+                const maxVisible = 5;
+                if (totalPages <= maxVisible) {
+                  for (let i = 1; i <= totalPages; i++) pages.push(i);
+                } else {
+                  pages.push(1);
+                  let start = Math.max(2, page - 1);
+                  let end = Math.min(totalPages - 1, page + 1);
+                  if (start > 2) pages.push("…");
+                  for (let i = start; i <= end; i++) pages.push(i);
+                  if (end < totalPages - 1) pages.push("…");
+                  pages.push(totalPages);
+                }
+                return pages.map((p, i) =>
+                  p === "…" ? (
+                    <span key={"el-" + i} className="px-2 py-1.5 text-sm text-gray-500">…</span>
+                  ) : (
+                    <button
+                      key={p}
+                      onClick={() => setPage(p)}
+                      aria-current={p === page ? "page" : undefined}
+                      className={`px-3 py-1.5 text-sm rounded-lg transition min-h-[36px] min-w-[36px] ${p === page ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
+                    >
+                      {p}
+                    </button>
+                  )
+                );
+              })()}
+            </div>
             <button
               onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
               disabled={page === totalPages}
-              className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition"
+              aria-label="Próxima página"
+              className="px-2.5 sm:px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 disabled:opacity-40 disabled:cursor-not-allowed transition min-h-[36px]"
             >
-              Próximo
+              ›
             </button>
           </div>
         </div>
@@ -1248,10 +1176,10 @@ function LoginScreen({ onLogin }) {
         />
       </div>
       <div className="w-full max-w-md animate-slideIn" style={{ position: 'relative', zIndex: 1 }}>
-        <div className="bg-gray-800/80 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-700 p-8">
+        <div className="bg-gray-800/70 backdrop-blur-2xl rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.4)] border border-white/10 p-6 sm:p-8 ring-1 ring-white/5">
           <div className="text-center mb-8">
-            <div className="text-6xl mb-3">❄️</div>
-            <h2 className="text-2xl font-bold text-white">FrostERP</h2>
+            <div className="text-6xl mb-3 drop-shadow-[0_4px_12px_rgba(96,165,250,0.35)]">❄️</div>
+            <h2 className="text-2xl font-bold text-white tracking-tight">FrostERP</h2>
             <p className="text-gray-400 text-sm mt-1">Sistema de Gestão Integrada</p>
           </div>
 
@@ -1300,11 +1228,11 @@ function LoginScreen({ onLogin }) {
             <button
               type="submit"
               disabled={loading || lockoutSeconds > 0}
-              className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              className="w-full bg-gradient-to-b from-blue-500 to-blue-600 text-white py-3 rounded-lg font-medium hover:from-blue-400 hover:to-blue-500 active:scale-[0.98] transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg shadow-blue-600/25 min-h-[44px]"
             >
               {loading ? (
                 <>
-                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
@@ -1557,93 +1485,67 @@ function FirstUserSetup({ onComplete }) {
 
 // ─── DASHBOARD ──────────────────────────────────────────────────────────────────
 
+// Dashboard simplificado — foca em OS, Agenda e Cadastros (após remoção de Financeiro/Estoque/etc)
 function Dashboard({ user, dateFilter, onNavigate }) {
   const [data, setData] = useState({
-    transactions: [],
     serviceOrders: [],
     schedule: [],
-    inventory: [],
-    tickets: [],
+    clients: [],
   });
 
   const loadData = useCallback(() => {
     setData({
-      transactions: DB.list("erp:finance:"),
       serviceOrders: DB.list("erp:os:"),
       schedule: DB.list("erp:schedule:"),
-      inventory: DB.list("erp:inventory:"),
-      tickets: DB.list("erp:ticket:"),
+      clients: DB.list("erp:client:"),
     });
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const { transactions, serviceOrders, schedule, inventory, tickets } = data;
+  const { serviceOrders, schedule, clients } = data;
 
   // useMemo garante que 'now' não quebre o cache dos memos que dependem dele
   const now = useMemo(() => new Date(), []);
-  const currentMonth = now.getMonth();
-  const currentYear = now.getFullYear();
+  const todayStr = toISODate(now);
 
-  const thisMonthTx = useMemo(
-    () => transactions.filter((t) => {
-      const d = new Date(t.data);
-      return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
-    }),
-    [transactions, currentMonth, currentYear]
-  );
-
-  const faturamentoMes = useMemo(
-    () => thisMonthTx.filter((t) => t.tipo === "receita").reduce((s, t) => s + (t.valor || 0), 0),
-    [thisMonthTx]
-  );
-
-  const despesasMes = useMemo(
-    () => thisMonthTx.filter((t) => t.tipo === "despesa").reduce((s, t) => s + (t.valor || 0), 0),
-    [thisMonthTx]
-  );
-
-  const servicosRealizados = useMemo(
-    () => serviceOrders.filter((os) => os.status === "concluido").length,
+  // KPIs centrados em OS e Agenda
+  const osEmAndamento = useMemo(
+    () => serviceOrders.filter((os) => os.status === "em_andamento").length,
     [serviceOrders]
   );
 
-  const todayStr = toISODate(now);
-  const agendamentosHoje = useMemo(
-    () => schedule.filter((s) => s.data && s.data.startsWith(todayStr)).length,
-    [schedule, todayStr]
+  const osPendentes = useMemo(
+    () => serviceOrders.filter((os) => os.status === "pendente").length,
+    [serviceOrders]
   );
 
-  const estoqueAlerta = useMemo(
-    () => inventory.filter((i) => i.quantidade <= i.quantidadeMinima).length,
-    [inventory]
+  const osConcluidasMes = useMemo(() => {
+    const m = now.getMonth();
+    const y = now.getFullYear();
+    return serviceOrders.filter((os) => {
+      if (os.status !== "concluido" || !os.dataConclusao) return false;
+      const d = new Date(os.dataConclusao);
+      return d.getMonth() === m && d.getFullYear() === y;
+    }).length;
+  }, [serviceOrders, now]);
+
+  // Une agendamentos do módulo Agenda + OS do dia — reflete a nova visão unificada
+  const agendamentosHoje = useMemo(() => {
+    const schedHoje = schedule.filter((s) => s.data && s.data.startsWith(todayStr)).length;
+    const osHoje = serviceOrders.filter((os) => {
+      const d = os.dataAbertura || os.dataAgendada;
+      return d && String(d).startsWith(todayStr) && os.status !== "concluido" && os.status !== "cancelado";
+    }).length;
+    return schedHoje + osHoje;
+  }, [schedule, serviceOrders, todayStr]);
+
+  const clientesAtivos = useMemo(
+    () => clients.filter((c) => c.status !== "inativo").length,
+    [clients]
   );
 
-  const ticketsAbertos = useMemo(
-    () => tickets.filter((t) => t.status === "aberto").length,
-    [tickets]
-  );
-
-  // Chart data: Faturamento últimos 6 meses
-  const barChartData = useMemo(() => {
-    const months = [];
-    for (let i = 5; i >= 0; i--) {
-      const d = new Date(currentYear, currentMonth - i, 1);
-      const m = d.getMonth();
-      const y = d.getFullYear();
-      const monthNames = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
-      const receitas = transactions
-        .filter((t) => t.tipo === "receita" && new Date(t.data).getMonth() === m && new Date(t.data).getFullYear() === y)
-        .reduce((s, t) => s + (t.valor || 0), 0);
-      const despesas = transactions
-        .filter((t) => t.tipo === "despesa" && new Date(t.data).getMonth() === m && new Date(t.data).getFullYear() === y)
-        .reduce((s, t) => s + (t.valor || 0), 0);
-      months.push({ name: monthNames[m], receitas, despesas });
-    }
-    return months;
-  }, [transactions, currentMonth, currentYear]);
-
-  // Line chart: OS concluídas por semana (últimas 8 semanas)
+  // Gráfico de linha: OS concluídas por semana (últimas 8 semanas)
   const lineChartData = useMemo(() => {
     const weeks = [];
     for (let i = 7; i >= 0; i--) {
@@ -1661,40 +1563,48 @@ function Dashboard({ user, dateFilter, onNavigate }) {
     return weeks;
   }, [serviceOrders, now]);
 
-  // Pie chart: distribuição receita por categoria
-  const pieChartData = useMemo(() => {
-    const catMap = {};
-    transactions
-      .filter((t) => t.tipo === "receita")
-      .forEach((t) => {
-        const cat = t.categoria || "Outros";
-        catMap[cat] = (catMap[cat] || 0) + (t.valor || 0);
-      });
-    return Object.entries(catMap).map(([name, value]) => ({ name, value }));
-  }, [transactions]);
-
-  // Próximas atividades
+  // Próximas atividades: mescla schedule + OS agendadas/pendentes, ordena por data
   const proximasAtividades = useMemo(() => {
-    return schedule
-      .filter((s) => new Date(s.data) >= now && s.status === "agendado")
+    const schedItems = schedule
+      .filter((s) => new Date(s.data) >= now && s.status !== "cancelado" && s.status !== "concluido")
+      .map((s) => ({
+        id: `sched-${s.id}`,
+        titulo: s.titulo,
+        data: s.data,
+        clienteNome: s.clienteNome,
+        tecnicoNome: s.tecnicoNome,
+        status: s.status,
+        origem: "agenda",
+      }));
+    const osItems = serviceOrders
+      .filter((os) => {
+        const dRef = os.dataAbertura || os.dataAgendada;
+        if (!dRef) return false;
+        if (os.status === "concluido" || os.status === "cancelado") return false;
+        return new Date(dRef) >= now;
+      })
+      .map((os) => ({
+        id: `os-${os.id}`,
+        titulo: `${os.numero} — ${os.tipo}`,
+        data: os.dataAbertura || os.dataAgendada,
+        clienteNome: os.clienteNome,
+        tecnicoNome: os.tecnicoNome,
+        status: os.status,
+        origem: "os",
+      }));
+    return [...schedItems, ...osItems]
       .sort((a, b) => new Date(a.data) - new Date(b.data))
-      .slice(0, 5);
-  }, [schedule, now]);
+      .slice(0, 6);
+  }, [schedule, serviceOrders, now]);
 
-  // Alertas
-  const alertas = useMemo(() => {
-    const list = [];
-    inventory.filter((i) => i.quantidade <= i.quantidadeMinima).forEach((i) => {
-      list.push({ tipo: "estoque", icon: "📦", text: `Estoque baixo: ${i.nome} (${i.quantidade} ${i.unidade})`, severity: "warning" });
-    });
-    transactions.filter((t) => t.status === "pendente" && t.tipo === "receita").forEach((t) => {
-      list.push({ tipo: "financeiro", icon: "💰", text: `Pagamento pendente: ${t.descricao} - ${formatCurrency(t.valor)}`, severity: "warning" });
-    });
-    tickets.filter((t) => t.status === "aberto").forEach((t) => {
-      list.push({ tipo: "ticket", icon: "🎫", text: `Ticket aberto: ${t.titulo}`, severity: "info" });
-    });
-    return list;
-  }, [inventory, transactions, tickets]);
+  // Alertas: OS pendentes há muito tempo (sem movimentação)
+  const osAtencao = useMemo(() => {
+    const doisDiasAtras = new Date(now);
+    doisDiasAtras.setDate(doisDiasAtras.getDate() - 2);
+    return serviceOrders
+      .filter((os) => os.status === "pendente" && new Date(os.dataAbertura) < doisDiasAtras)
+      .slice(0, 5);
+  }, [serviceOrders, now]);
 
   return (
     <div className="space-y-6">
@@ -1705,18 +1615,18 @@ function Dashboard({ user, dateFilter, onNavigate }) {
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      {/* KPI Cards — centrados em OS e Agenda */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard
-          title="Faturamento do Mês"
-          value={formatCurrency(faturamentoMes)}
-          icon="💰"
-          onClick={() => onNavigate("financeiro")}
+          title="OS em Andamento"
+          value={osEmAndamento}
+          icon="🔧"
+          onClick={() => onNavigate("processos")}
         />
         <KPICard
-          title="Serviços Realizados"
-          value={servicosRealizados}
-          icon="🔧"
+          title="OS Pendentes"
+          value={osPendentes}
+          icon="⏳"
           onClick={() => onNavigate("processos")}
         />
         <KPICard
@@ -1726,43 +1636,20 @@ function Dashboard({ user, dateFilter, onNavigate }) {
           onClick={() => onNavigate("agenda")}
         />
         <KPICard
-          title="Estoque em Alerta"
-          value={estoqueAlerta}
-          icon="📦"
-          onClick={() => onNavigate("estoque")}
-        />
-        <KPICard
-          title="Tickets Abertos"
-          value={ticketsAbertos}
-          icon="🎫"
-          onClick={() => onNavigate("webdesk")}
+          title="Clientes Ativos"
+          value={clientesAtivos}
+          icon="👥"
+          onClick={() => onNavigate("cadastro")}
         />
       </div>
 
-      {/* Charts Row */}
+      {/* Gráfico + Próximas Atividades */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Bar Chart - Faturamento */}
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <h3 className="text-white font-semibold mb-4">Faturamento Últimos 6 Meses</h3>
-          <ResponsiveContainer width="100%" height={280}>
-            <BarChart data={barChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis dataKey="name" stroke="#9ca3af" fontSize={12} />
-              <YAxis stroke="#9ca3af" fontSize={12} tickFormatter={(v) => `R$${(v / 1000).toFixed(0)}k`} />
-              <Tooltip
-                contentStyle={{ backgroundColor: "#1f2937", border: "1px solid #374151", borderRadius: "8px", color: "#fff" }}
-                formatter={(value) => [formatCurrency(value)]}
-              />
-              <Legend />
-              <Bar dataKey="receitas" name="Receitas" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-              <Bar dataKey="despesas" name="Despesas" fill="#ef4444" radius={[4, 4, 0, 0]} />
-            </BarChart>
-          </ResponsiveContainer>
-        </div>
-
-        {/* Line Chart - OS concluídas */}
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <h3 className="text-white font-semibold mb-4">OS Concluídas por Semana</h3>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-white font-semibold">OS Concluídas por Semana</h3>
+            <span className="text-xs text-gray-400">{osConcluidasMes} este mês</span>
+          </div>
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={lineChartData}>
               <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
@@ -1775,58 +1662,33 @@ function Dashboard({ user, dateFilter, onNavigate }) {
             </LineChart>
           </ResponsiveContainer>
         </div>
-      </div>
 
-      {/* Pie Chart + Próximas Atividades */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Pie Chart */}
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <h3 className="text-white font-semibold mb-4">Distribuição de Receita por Categoria</h3>
-          {pieChartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie
-                  data={pieChartData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={3}
-                  dataKey="value"
-                  label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
-                >
-                  {pieChartData.map((_, idx) => (
-                    <Cell key={idx} fill={COLORS[idx % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  contentStyle={{ backgroundColor: "#1f2937", border: "1px solid #374151", borderRadius: "8px", color: "#fff" }}
-                  formatter={(value) => [formatCurrency(value)]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex items-center justify-center h-[280px] text-gray-500">Sem dados de receita</div>
-          )}
-        </div>
-
-        {/* Próximas Atividades */}
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
           <h3 className="text-white font-semibold mb-4">Próximas Atividades</h3>
           {proximasAtividades.length > 0 ? (
             <div className="space-y-3">
               {proximasAtividades.map((ativ) => (
-                <div key={ativ.id} className="flex items-start gap-3 p-3 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition">
-                  <div className="w-10 h-10 rounded-lg bg-cyan-500/20 flex items-center justify-center text-cyan-400 text-sm flex-shrink-0">
-                    📅
+                <button
+                  key={ativ.id}
+                  onClick={() => onNavigate(ativ.origem === "os" ? "processos" : "agenda")}
+                  className="w-full flex items-start gap-3 p-3 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition text-left"
+                >
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${
+                    ativ.origem === "os"
+                      ? "bg-purple-500/20 text-purple-400"
+                      : "bg-cyan-500/20 text-cyan-400"
+                  }`}>
+                    {ativ.origem === "os" ? "🔧" : "📅"}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">{ativ.titulo}</p>
                     <p className="text-gray-400 text-xs mt-0.5">{formatDateTime(ativ.data)}</p>
-                    <p className="text-gray-500 text-xs">{ativ.tecnicoNome} • {ativ.clienteNome}</p>
+                    <p className="text-gray-500 text-xs truncate">
+                      {ativ.tecnicoNome || "—"} • {ativ.clienteNome || "—"}
+                    </p>
                   </div>
                   <StatusBadge status={ativ.status} />
-                </div>
+                </button>
               ))}
             </div>
           ) : (
@@ -1837,2964 +1699,40 @@ function Dashboard({ user, dateFilter, onNavigate }) {
         </div>
       </div>
 
-      {/* Alertas + Resumo Financeiro */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Alertas */}
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <h3 className="text-white font-semibold mb-4">Alertas</h3>
-          {alertas.length > 0 ? (
-            <div className="space-y-2">
-              {alertas.map((alerta, idx) => (
-                <div
-                  key={idx}
-                  className={`flex items-center gap-3 p-3 rounded-lg border ${
-                    alerta.severity === "warning"
-                      ? "bg-yellow-500/5 border-yellow-500/20"
-                      : "bg-blue-500/5 border-blue-500/20"
-                  }`}
-                >
-                  <span className="text-lg">{alerta.icon}</span>
-                  <p className="text-gray-300 text-sm flex-1">{alerta.text}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="flex items-center justify-center h-[120px] text-green-400 text-sm">
-              ✓ Nenhum alerta no momento
-            </div>
-          )}
-        </div>
-
-        {/* Resumo Financeiro */}
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <h3 className="text-white font-semibold mb-4">Resumo Financeiro do Mês</h3>
-          <div className="space-y-4">
-            <div className="flex items-center justify-between p-3 bg-green-500/10 border border-green-500/20 rounded-lg">
-              <div className="flex items-center gap-3">
-                <span className="text-green-400 text-lg">↑</span>
-                <span className="text-gray-300 text-sm">Receitas</span>
-              </div>
-              <span className="text-green-400 font-semibold">{formatCurrency(faturamentoMes)}</span>
-            </div>
-            <div className="flex items-center justify-between p-3 bg-red-500/10 border border-red-500/20 rounded-lg">
-              <div className="flex items-center gap-3">
-                <span className="text-red-400 text-lg">↓</span>
-                <span className="text-gray-300 text-sm">Despesas</span>
-              </div>
-              <span className="text-red-400 font-semibold">{formatCurrency(despesasMes)}</span>
-            </div>
-            <div className="border-t border-gray-700 pt-3">
-              <div className="flex items-center justify-between p-3 bg-gray-700/30 rounded-lg">
-                <span className="text-gray-300 text-sm font-medium">Saldo</span>
-                <span className={`font-bold text-lg ${faturamentoMes - despesasMes >= 0 ? "text-green-400" : "text-red-400"}`}>
-                  {formatCurrency(faturamentoMes - despesasMes)}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ─── FINANCE MODULE ─────────────────────────────────────────────────────────────
-
-function PrintableFinanceReport({ transactions, dateFilter }) {
-  const receitas = transactions.filter((t) => t.tipo === "receita");
-  const despesas = transactions.filter((t) => t.tipo === "despesa");
-  const totalReceitas = receitas.reduce((s, t) => s + (t.valor || 0), 0);
-  const totalDespesas = despesas.reduce((s, t) => s + (t.valor || 0), 0);
-
-  return (
-    <div className="print-only print-report">
-      <div style={{ textAlign: "center", marginBottom: "20px" }}>
-        <h2 style={{ fontSize: "18px", fontWeight: "bold" }}>FrostERP Refrigeração</h2>
-        <h2 style={{ fontSize: "14px", color: "#555" }}>Relatório Financeiro</h2>
-        <p style={{ fontSize: "11px", color: "#888" }}>Gerado em: {formatDateTime(new Date().toISOString())}</p>
-      </div>
-
-      <div style={{ display: "flex", gap: "20px", marginBottom: "20px" }}>
-        <div style={{ flex: 1, padding: "10px", border: "1px solid #ccc", borderRadius: "6px" }}>
-          <p style={{ fontSize: "11px", color: "#666" }}>Total Receitas</p>
-          <p style={{ fontSize: "16px", fontWeight: "bold", color: "#16a34a" }}>{formatCurrency(totalReceitas)}</p>
-        </div>
-        <div style={{ flex: 1, padding: "10px", border: "1px solid #ccc", borderRadius: "6px" }}>
-          <p style={{ fontSize: "11px", color: "#666" }}>Total Despesas</p>
-          <p style={{ fontSize: "16px", fontWeight: "bold", color: "#dc2626" }}>{formatCurrency(totalDespesas)}</p>
-        </div>
-        <div style={{ flex: 1, padding: "10px", border: "1px solid #ccc", borderRadius: "6px" }}>
-          <p style={{ fontSize: "11px", color: "#666" }}>Saldo</p>
-          <p style={{ fontSize: "16px", fontWeight: "bold", color: totalReceitas - totalDespesas >= 0 ? "#16a34a" : "#dc2626" }}>
-            {formatCurrency(totalReceitas - totalDespesas)}
-          </p>
-        </div>
-      </div>
-
-      <h3 style={{ fontSize: "13px", fontWeight: "bold", marginBottom: "8px" }}>Transações</h3>
-      <table>
-        <thead>
-          <tr>
-            <th>Data</th>
-            <th>Descrição</th>
-            <th>Categoria</th>
-            <th>Tipo</th>
-            <th>Forma Pgto</th>
-            <th>Status</th>
-            <th style={{ textAlign: "right" }}>Valor</th>
-          </tr>
-        </thead>
-        <tbody>
-          {transactions.sort((a, b) => new Date(b.data) - new Date(a.data)).map((t) => (
-            <tr key={t.id}>
-              <td>{formatDate(t.data)}</td>
-              <td>{t.descricao}</td>
-              <td>{t.categoria}</td>
-              <td>{t.tipo === "receita" ? "Receita" : "Despesa"}</td>
-              <td>{t.formaPagamento}</td>
-              <td>{STATUS_MAP[t.status]?.label || t.status}</td>
-              <td style={{ textAlign: "right", color: t.tipo === "receita" ? "#16a34a" : "#dc2626" }}>
-                {formatCurrency(t.valor)}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function FinanceModule({ user, dateFilter, addToast }) {
-  const [transactions, setTransactions] = useState([]);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const [search, setSearch] = useState("");
-  const [filterType, setFilterType] = useState("all");
-  const [filterCategory, setFilterCategory] = useState("all");
-
-  const loadTransactions = useCallback(() => {
-    setTransactions(DB.list("erp:finance:"));
-  }, []);
-
-  useEffect(() => { loadTransactions(); }, [loadTransactions]);
-
-  const emptyForm = {
-    descricao: "", valor: "", tipo: "receita", categoria: "",
-    data: toISODate(new Date()), status: "pendente", formaPagamento: "PIX", observacoes: "",
-  };
-
-  const [form, setForm] = useState(emptyForm);
-
-  const filteredTransactions = useMemo(() => {
-    let list = filterByDate(transactions, "data", dateFilter);
-    if (filterType !== "all") list = list.filter((t) => t.tipo === filterType);
-    if (filterCategory !== "all") list = list.filter((t) => t.categoria === filterCategory);
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      list = list.filter(
-        (t) =>
-          (t.descricao || "").toLowerCase().includes(s) ||
-          (t.categoria || "").toLowerCase().includes(s) ||
-          (t.numero || "").toLowerCase().includes(s)
-      );
-    }
-    return list.sort((a, b) => new Date(b.data) - new Date(a.data));
-  }, [transactions, dateFilter, filterType, filterCategory, search]);
-
-  const totalReceitas = useMemo(
-    () => filteredTransactions.filter((t) => t.tipo === "receita").reduce((s, t) => s + (t.valor || 0), 0),
-    [filteredTransactions]
-  );
-  const totalDespesas = useMemo(
-    () => filteredTransactions.filter((t) => t.tipo === "despesa").reduce((s, t) => s + (t.valor || 0), 0),
-    [filteredTransactions]
-  );
-
-  const allCategories = useMemo(() => {
-    const cats = new Set();
-    transactions.forEach((t) => { if (t.categoria) cats.add(t.categoria); });
-    return [...cats].sort();
-  }, [transactions]);
-
-  const openCreate = useCallback(() => {
-    setEditing(null);
-    setForm(emptyForm);
-    setModalOpen(true);
-  }, []);
-
-  const openEdit = useCallback((row) => {
-    setEditing(row);
-    setForm({
-      descricao: row.descricao || "",
-      valor: row.valor || "",
-      tipo: row.tipo || "receita",
-      categoria: row.categoria || "",
-      data: row.data ? row.data.split("T")[0] : toISODate(new Date()),
-      status: row.status || "pendente",
-      formaPagamento: row.formaPagamento || "PIX",
-      observacoes: row.observacoes || "",
-    });
-    setModalOpen(true);
-  }, []);
-
-  const handleSave = useCallback(() => {
-    if (!form.descricao.trim() || !form.valor || !form.data) {
-      addToast("Preencha os campos obrigatórios.", "error");
-      return;
-    }
-
-    const valor = parseFloat(String(form.valor).replace(",", "."));
-    if (isNaN(valor) || valor <= 0) {
-      addToast("Informe um valor válido.", "error");
-      return;
-    }
-
-    if (editing) {
-      const updated = {
-        ...editing,
-        descricao: form.descricao.trim(),
-        valor,
-        tipo: form.tipo,
-        categoria: form.categoria,
-        data: form.data + "T00:00:00.000Z",
-        status: form.status,
-        formaPagamento: form.formaPagamento,
-        observacoes: form.observacoes,
-        updatedAt: new Date().toISOString(),
-      };
-      DB.set("erp:finance:" + updated.id, updated);
-      addToast("Transação atualizada com sucesso.", "success");
-    } else {
-      const prefix = form.tipo === "receita" ? "NF" : "DP";
-      const numero = getNextNumber(prefix, transactions);
-      const newTx = {
-        id: genId(),
-        numero,
-        descricao: form.descricao.trim(),
-        valor,
-        tipo: form.tipo,
-        categoria: form.categoria,
-        data: form.data + "T00:00:00.000Z",
-        status: form.status,
-        formaPagamento: form.formaPagamento,
-        observacoes: form.observacoes,
-        osId: null,
-        createdAt: new Date().toISOString(),
-      };
-      DB.set("erp:finance:" + newTx.id, newTx);
-      addToast(MSG_TEMPLATES.pagamento_registrado(newTx.descricao), "success");
-    }
-
-    setModalOpen(false);
-    loadTransactions();
-  }, [form, editing, transactions, loadTransactions, addToast]);
-
-  const handleDelete = useCallback((row) => {
-    if (!hasPermission(user, "financeiro") && user.role !== "admin" && user.role !== "gerente") {
-      addToast("Sem permissão para excluir transações.", "error");
-      return;
-    }
-    setConfirmDelete(row);
-  }, [user, addToast]);
-
-  const confirmDeleteAction = useCallback(() => {
-    if (confirmDelete) {
-      DB.delete("erp:finance:" + confirmDelete.id);
-      addToast("Transação excluída.", "success");
-      setConfirmDelete(null);
-      loadTransactions();
-    }
-  }, [confirmDelete, loadTransactions, addToast]);
-
-  const handlePrint = useCallback(() => {
-    window.print();
-  }, []);
-
-  const columns = [
-    { key: "numero", label: "Nº", width: "w-20" },
-    { key: "data", label: "Data", render: (v) => formatDate(v) },
-    { key: "descricao", label: "Descrição" },
-    { key: "categoria", label: "Categoria" },
-    {
-      key: "tipo", label: "Tipo",
-      render: (v) => (
-        <span className={`px-2 py-0.5 rounded text-xs font-medium ${v === "receita" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
-          {v === "receita" ? "Receita" : "Despesa"}
-        </span>
-      ),
-    },
-    { key: "formaPagamento", label: "Forma Pgto" },
-    { key: "status", label: "Status", render: (v) => <StatusBadge status={v} /> },
-    {
-      key: "valor", label: "Valor",
-      render: (v, row) => (
-        <span className={`font-medium ${row.tipo === "receita" ? "text-green-400" : "text-red-400"}`}>
-          {row.tipo === "despesa" ? "- " : ""}{formatCurrency(v)}
-        </span>
-      ),
-    },
-  ];
-
-  const canDelete = user.role === "admin" || user.role === "gerente";
-
-  return (
-    <div className="space-y-6">
-      <PrintableFinanceReport transactions={filteredTransactions} dateFilter={dateFilter} />
-
-      <div className="flex items-center justify-between no-print">
-        <div>
-          <h2 className="text-2xl font-bold text-white">Financeiro</h2>
-          <p className="text-gray-400 text-sm mt-1">Gestão de receitas e despesas</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={handlePrint} className="px-4 py-2 bg-gray-700 text-gray-300 rounded-lg hover:bg-gray-600 transition text-sm flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-            Imprimir
-          </button>
-          <button onClick={openCreate} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-            Nova Transação
-          </button>
-        </div>
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 no-print">
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <p className="text-gray-400 text-sm">Total Receitas</p>
-          <p className="text-2xl font-bold text-green-400 mt-1">{formatCurrency(totalReceitas)}</p>
-        </div>
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <p className="text-gray-400 text-sm">Total Despesas</p>
-          <p className="text-2xl font-bold text-red-400 mt-1">{formatCurrency(totalDespesas)}</p>
-        </div>
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <p className="text-gray-400 text-sm">Saldo</p>
-          <p className={`text-2xl font-bold mt-1 ${totalReceitas - totalDespesas >= 0 ? "text-green-400" : "text-red-400"}`}>
-            {formatCurrency(totalReceitas - totalDespesas)}
-          </p>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3 no-print">
-        <div className="flex-1 min-w-[200px] max-w-sm">
-          <SearchInput value={search} onChange={setSearch} placeholder="Buscar transação..." />
-        </div>
-        <select
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
-          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-        >
-          <option value="all">Todos os tipos</option>
-          <option value="receita">Receitas</option>
-          <option value="despesa">Despesas</option>
-        </select>
-        <select
-          value={filterCategory}
-          onChange={(e) => setFilterCategory(e.target.value)}
-          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-        >
-          <option value="all">Todas as categorias</option>
-          {allCategories.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Table */}
-      <div className="no-print">
-        <DataTable
-          columns={columns}
-          data={filteredTransactions}
-          onEdit={openEdit}
-          onDelete={canDelete ? handleDelete : undefined}
-          emptyMessage="Nenhuma transação encontrada."
-        />
-      </div>
-
-      {/* Create/Edit Modal */}
-      <Modal isOpen={modalOpen} title={editing ? "Editar Transação" : "Nova Transação"} onClose={() => setModalOpen(false)} size="md">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Descrição *</label>
-            <input
-              type="text"
-              value={form.descricao}
-              onChange={(e) => setForm({ ...form, descricao: e.target.value })}
-              placeholder="Ex: Instalação Split 12000 BTUs"
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Valor (R$) *</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.valor}
-                onChange={(e) => setForm({ ...form, valor: e.target.value })}
-                placeholder="0,00"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo</label>
-              <select
-                value={form.tipo}
-                onChange={(e) => setForm({ ...form, tipo: e.target.value, categoria: "" })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                <option value="receita">Receita</option>
-                <option value="despesa">Despesa</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Categoria</label>
-              <select
-                value={form.categoria}
-                onChange={(e) => setForm({ ...form, categoria: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                <option value="">Selecione...</option>
-                {(form.tipo === "receita" ? CATEGORIES_RECEITA : CATEGORIES_DESPESA).map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Data *</label>
-              <input
-                type="date"
-                value={form.data}
-                onChange={(e) => setForm({ ...form, data: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Status</label>
-              <select
-                value={form.status}
-                onChange={(e) => setForm({ ...form, status: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                <option value="pendente">Pendente</option>
-                <option value="pago">Pago</option>
-                <option value="atrasado">Atrasado</option>
-                <option value="cancelado">Cancelado</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Forma de Pagamento</label>
-              <select
-                value={form.formaPagamento}
-                onChange={(e) => setForm({ ...form, formaPagamento: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                {PAYMENT_METHODS.map((m) => (
-                  <option key={m} value={m}>{m}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Observações</label>
-            <textarea
-              value={form.observacoes}
-              onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
-              rows={3}
-              placeholder="Observações adicionais..."
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
-            />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
-            <button
-              onClick={() => setModalOpen(false)}
-              className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition"
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={handleSave}
-              className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
-            >
-              {editing ? "Salvar Alterações" : "Criar Transação"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Confirm Delete */}
-      {confirmDelete && (
-        <ConfirmDialog
-          message={`Tem certeza que deseja excluir a transação "${confirmDelete.descricao}"? Esta ação não pode ser desfeita.`}
-          onConfirm={confirmDeleteAction}
-          onCancel={() => setConfirmDelete(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-// ─── INVENTORY MODULE ────────────────────────────────────────────────────────
-
-function InventoryModule({ user, addToast }) {
-  const [items, setItems] = useState([]);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [movementModal, setMovementModal] = useState(null);
-  const [historyModal, setHistoryModal] = useState(null);
-  const [editing, setEditing] = useState(null);
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const [search, setSearch] = useState("");
-  const [filterCategory, setFilterCategory] = useState("all");
-  const [filterStatus, setFilterStatus] = useState("all");
-
-  const INVENTORY_CATEGORIES = ["Equipamento", "Peça", "Material", "Ferramenta", "Consumível"];
-
-  const loadItems = useCallback(() => {
-    setItems(DB.list("erp:inventory:"));
-  }, []);
-
-  useEffect(() => { loadItems(); }, [loadItems]);
-
-  const emptyForm = {
-    nome: "", sku: "", categoria: "Equipamento", quantidade: "",
-    quantidadeMinima: "", precoCompra: "", precoVenda: "", descricao: "",
-  };
-
-  const [form, setForm] = useState(emptyForm);
-
-  const [movementForm, setMovementForm] = useState({
-    tipo: "entrada", quantidade: "", motivo: "",
-  });
-
-  const getStockStatus = useCallback((item) => {
-    if (item.quantidade <= 0) return "esgotado";
-    if (item.quantidade <= (item.quantidadeMinima || 0)) return "baixo";
-    return "normal";
-  }, []);
-
-  const filteredItems = useMemo(() => {
-    let list = [...items];
-    if (filterCategory !== "all") list = list.filter((i) => i.categoria === filterCategory);
-    if (filterStatus !== "all") {
-      list = list.filter((i) => getStockStatus(i) === filterStatus);
-    }
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      list = list.filter(
-        (i) =>
-          (i.nome || "").toLowerCase().includes(s) ||
-          (i.sku || "").toLowerCase().includes(s) ||
-          (i.categoria || "").toLowerCase().includes(s)
-      );
-    }
-    return list;
-  }, [items, filterCategory, filterStatus, search, getStockStatus]);
-
-  const totalItems = items.length;
-  const totalValue = useMemo(() => items.reduce((s, i) => s + (i.quantidade || 0) * (i.precoCompra || 0), 0), [items]);
-  const lowStockCount = useMemo(() => items.filter((i) => i.quantidade <= (i.quantidadeMinima || 0) && i.quantidade > 0).length, [items]);
-  const outOfStockCount = useMemo(() => items.filter((i) => i.quantidade <= 0).length, [items]);
-  const categoriesCount = useMemo(() => new Set(items.map((i) => i.categoria)).size, [items]);
-
-  const isReadOnly = user.role === "tecnico";
-
-  const openCreate = useCallback(() => {
-    setEditing(null);
-    setForm(emptyForm);
-    setModalOpen(true);
-  }, []);
-
-  const openEdit = useCallback((row) => {
-    setEditing(row);
-    setForm({
-      nome: row.nome || "",
-      sku: row.sku || "",
-      categoria: row.categoria || "Equipamento",
-      quantidade: row.quantidade ?? "",
-      quantidadeMinima: row.quantidadeMinima ?? "",
-      precoCompra: row.precoCompra ?? "",
-      precoVenda: row.precoVenda ?? "",
-      descricao: row.descricao || "",
-    });
-    setModalOpen(true);
-  }, []);
-
-  const handleSave = useCallback(() => {
-    if (!form.nome.trim() || !form.sku.trim()) {
-      addToast("Preencha nome e SKU.", "error");
-      return;
-    }
-    const quantidade = parseInt(form.quantidade) || 0;
-    const quantidadeMinima = parseInt(form.quantidadeMinima) || 0;
-    const precoCompra = parseFloat(String(form.precoCompra).replace(",", ".")) || 0;
-    const precoVenda = parseFloat(String(form.precoVenda).replace(",", ".")) || 0;
-
-    if (editing) {
-      const updated = {
-        ...editing,
-        nome: form.nome.trim(),
-        sku: form.sku.trim(),
-        categoria: form.categoria,
-        quantidade,
-        quantidadeMinima,
-        precoCompra,
-        precoVenda,
-        descricao: form.descricao,
-        updatedAt: new Date().toISOString(),
-      };
-      DB.set("erp:inventory:" + updated.id, updated);
-      addToast("Item atualizado com sucesso.", "success");
-    } else {
-      const newItem = {
-        id: genId(),
-        nome: form.nome.trim(),
-        sku: form.sku.trim(),
-        categoria: form.categoria,
-        unidade: "un",
-        quantidade,
-        quantidadeMinima,
-        precoCompra,
-        precoVenda,
-        descricao: form.descricao,
-        fornecedor: "",
-        localizacao: "",
-        status: "ativo",
-        createdAt: new Date().toISOString(),
-      };
-      DB.set("erp:inventory:" + newItem.id, newItem);
-      addToast("Item cadastrado com sucesso.", "success");
-    }
-    setModalOpen(false);
-    loadItems();
-  }, [form, editing, loadItems, addToast]);
-
-  const handleDelete = useCallback((row) => {
-    setConfirmDelete(row);
-  }, []);
-
-  const confirmDeleteAction = useCallback(() => {
-    if (confirmDelete) {
-      DB.delete("erp:inventory:" + confirmDelete.id);
-      addToast("Item excluído.", "success");
-      setConfirmDelete(null);
-      loadItems();
-    }
-  }, [confirmDelete, loadItems, addToast]);
-
-  const openMovement = useCallback((item) => {
-    setMovementModal(item);
-    setMovementForm({ tipo: "entrada", quantidade: "", motivo: "" });
-  }, []);
-
-  const handleMovement = useCallback(() => {
-    if (!movementForm.quantidade || parseInt(movementForm.quantidade) <= 0) {
-      addToast("Informe uma quantidade válida.", "error");
-      return;
-    }
-    const qty = parseInt(movementForm.quantidade);
-    const item = movementModal;
-    let newQty = item.quantidade;
-
-    if (movementForm.tipo === "entrada") {
-      newQty += qty;
-    } else {
-      if (qty > item.quantidade) {
-        addToast("Quantidade insuficiente em estoque.", "error");
-        return;
-      }
-      newQty -= qty;
-    }
-
-    const movement = {
-      id: genId(),
-      itemId: item.id,
-      itemNome: item.nome,
-      tipo: movementForm.tipo,
-      quantidade: qty,
-      quantidadeAnterior: item.quantidade,
-      quantidadeNova: newQty,
-      motivo: movementForm.motivo || "—",
-      usuario: user.nome,
-      data: new Date().toISOString(),
-    };
-
-    const movements = DB.get("erp:movement:" + item.id) || [];
-    movements.push(movement);
-    DB.set("erp:movement:" + item.id, movements);
-
-    const updated = { ...item, quantidade: newQty, updatedAt: new Date().toISOString() };
-    DB.set("erp:inventory:" + item.id, updated);
-
-    addToast(`Movimentação registrada: ${movementForm.tipo === "entrada" ? "+" : "-"}${qty} ${item.nome}`, "success");
-
-    if (newQty <= (item.quantidadeMinima || 0)) {
-      addToast(MSG_TEMPLATES.item_baixo(item.nome), "warning");
-    }
-
-    setMovementModal(null);
-    loadItems();
-  }, [movementModal, movementForm, user, loadItems, addToast]);
-
-  const openHistory = useCallback((item) => {
-    const movements = DB.get("erp:movement:" + item.id) || [];
-    setHistoryModal({ item, movements });
-  }, []);
-
-  const calcMargin = useCallback((custo, venda) => {
-    if (!custo || custo === 0) return 0;
-    return ((venda - custo) / custo * 100);
-  }, []);
-
-  const columns = [
-    { key: "nome", label: "Nome" },
-    { key: "sku", label: "SKU", width: "w-24" },
-    { key: "categoria", label: "Categoria" },
-    {
-      key: "quantidade", label: "Qtd",
-      render: (v, row) => {
-        const status = getStockStatus(row);
-        return (
-          <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-            status === "esgotado" ? "bg-red-500/20 text-red-400" :
-            status === "baixo" ? "bg-yellow-500/20 text-yellow-400" :
-            "text-gray-300"
-          }`}>
-            {v} {status === "baixo" && `(min: ${row.quantidadeMinima})`}
-            {status === "esgotado" && " (esgotado)"}
-          </span>
-        );
-      },
-    },
-    { key: "precoCompra", label: "Custo", render: (v) => formatCurrency(v) },
-    { key: "precoVenda", label: "Preço Venda", render: (v) => formatCurrency(v) },
-    {
-      key: "margem", label: "Margem %", sortable: false,
-      render: (_, row) => {
-        const m = calcMargin(row.precoCompra, row.precoVenda);
-        return (
-          <span className={m >= 30 ? "text-green-400" : m >= 15 ? "text-yellow-400" : "text-red-400"}>
-            {m.toFixed(1)}%
-          </span>
-        );
-      },
-    },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-white">Estoque</h2>
-          <p className="text-gray-400 text-sm mt-1">Gestão de inventário e movimentações</p>
-        </div>
-        {!isReadOnly && (
-          <button onClick={openCreate} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-2">
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-            Novo Item
-          </button>
-        )}
-      </div>
-
-      {/* Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <KPICard title="Total de Itens" value={totalItems} icon="📦" />
-        <KPICard title="Valor em Estoque" value={formatCurrency(totalValue)} icon="💰" />
-        <KPICard title="Estoque Baixo" value={lowStockCount} icon="⚠" />
-        <KPICard title="Esgotados" value={outOfStockCount} icon="🚫" />
-        <KPICard title="Categorias" value={categoriesCount} icon="🏷" />
-      </div>
-
-      {/* Low Stock Alerts */}
-      {items.filter((i) => getStockStatus(i) !== "normal").length > 0 && (
-        <div className="bg-yellow-500/5 border border-yellow-500/20 rounded-xl p-4">
-          <h3 className="text-yellow-400 font-medium text-sm mb-2">Alertas de Estoque</h3>
-          <div className="flex flex-wrap gap-2">
-            {items.filter((i) => getStockStatus(i) !== "normal").map((item) => (
-              <span key={item.id} className={`px-3 py-1 rounded-full text-xs font-medium ${
-                getStockStatus(item) === "esgotado" ? "bg-red-500/20 text-red-400" : "bg-yellow-500/20 text-yellow-400"
-              }`}>
-                {item.nome}: {item.quantidade} un
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex-1 min-w-[200px] max-w-sm">
-          <SearchInput value={search} onChange={setSearch} placeholder="Buscar item..." />
-        </div>
-        <select
-          value={filterCategory}
-          onChange={(e) => setFilterCategory(e.target.value)}
-          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-        >
-          <option value="all">Todas categorias</option>
-          {INVENTORY_CATEGORIES.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-        >
-          <option value="all">Todos os status</option>
-          <option value="normal">Normal</option>
-          <option value="baixo">Estoque Baixo</option>
-          <option value="esgotado">Esgotado</option>
-        </select>
-      </div>
-
-      {/* Table */}
-      <DataTable
-        columns={columns}
-        data={filteredItems}
-        onEdit={isReadOnly ? undefined : openEdit}
-        onDelete={isReadOnly ? undefined : handleDelete}
-        actions={isReadOnly ? undefined : (row) => (
-          <>
-            <button onClick={() => openMovement(row)} className="p-1.5 rounded-lg text-gray-400 hover:text-cyan-400 hover:bg-gray-700 transition" title="Movimentação">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>
-            </button>
-            <button onClick={() => openHistory(row)} className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition" title="Histórico">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-            </button>
-          </>
-        )}
-        emptyMessage="Nenhum item encontrado no estoque."
-      />
-
-      {/* Create/Edit Modal */}
-      <Modal isOpen={modalOpen} title={editing ? "Editar Item" : "Novo Item"} onClose={() => setModalOpen(false)} size="md">
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Nome *</label>
-              <input
-                type="text"
-                value={form.nome}
-                onChange={(e) => setForm({ ...form, nome: e.target.value })}
-                placeholder="Nome do item"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">SKU *</label>
-              <input
-                type="text"
-                value={form.sku}
-                onChange={(e) => setForm({ ...form, sku: e.target.value })}
-                placeholder="Ex: EQ-005"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Categoria</label>
-              <select
-                value={form.categoria}
-                onChange={(e) => setForm({ ...form, categoria: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                {INVENTORY_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Quantidade</label>
-              <input
-                type="number"
-                min="0"
-                value={form.quantidade}
-                onChange={(e) => setForm({ ...form, quantidade: e.target.value })}
-                placeholder="0"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Qtd Mínima</label>
-              <input
-                type="number"
-                min="0"
-                value={form.quantidadeMinima}
-                onChange={(e) => setForm({ ...form, quantidadeMinima: e.target.value })}
-                placeholder="0"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Custo (R$)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.precoCompra}
-                onChange={(e) => setForm({ ...form, precoCompra: e.target.value })}
-                placeholder="0,00"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Preço de Venda (R$)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.precoVenda}
-                onChange={(e) => setForm({ ...form, precoVenda: e.target.value })}
-                placeholder="0,00"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-          </div>
-
-          {form.precoCompra && form.precoVenda && (
-            <div className="bg-gray-700/30 rounded-lg p-3">
-              <p className="text-sm text-gray-400">
-                Margem de lucro:{" "}
-                <span className={`font-semibold ${calcMargin(parseFloat(form.precoCompra), parseFloat(form.precoVenda)) >= 30 ? "text-green-400" : "text-yellow-400"}`}>
-                  {calcMargin(parseFloat(form.precoCompra) || 0, parseFloat(form.precoVenda) || 0).toFixed(1)}%
-                </span>
-              </p>
-            </div>
-          )}
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Descrição</label>
-            <textarea
-              value={form.descricao}
-              onChange={(e) => setForm({ ...form, descricao: e.target.value })}
-              rows={3}
-              placeholder="Descrição do item..."
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
-            />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
-            <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition">
-              Cancelar
-            </button>
-            <button onClick={handleSave} className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
-              {editing ? "Salvar Alterações" : "Cadastrar Item"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Movement Modal */}
-      <Modal isOpen={!!movementModal} title={`Movimentação - ${movementModal?.nome || ""}`} onClose={() => setMovementModal(null)} size="sm">
-        <div className="space-y-4">
-          <div className="bg-gray-700/30 rounded-lg p-3">
-            <p className="text-sm text-gray-400">Estoque atual: <span className="text-white font-semibold">{movementModal?.quantidade || 0}</span></p>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo</label>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setMovementForm({ ...movementForm, tipo: "entrada" })}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${movementForm.tipo === "entrada" ? "bg-green-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
-              >
-                Entrada
-              </button>
-              <button
-                onClick={() => setMovementForm({ ...movementForm, tipo: "saida" })}
-                className={`flex-1 py-2 rounded-lg text-sm font-medium transition ${movementForm.tipo === "saida" ? "bg-red-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
-              >
-                Saída
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Quantidade *</label>
-            <input
-              type="number"
-              min="1"
-              value={movementForm.quantidade}
-              onChange={(e) => setMovementForm({ ...movementForm, quantidade: e.target.value })}
-              placeholder="0"
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Motivo</label>
-            <input
-              type="text"
-              value={movementForm.motivo}
-              onChange={(e) => setMovementForm({ ...movementForm, motivo: e.target.value })}
-              placeholder="Ex: Compra de fornecedor, Uso em OS..."
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-            />
-          </div>
-
-          {movementForm.quantidade && (
-            <div className="bg-gray-700/30 rounded-lg p-3">
-              <p className="text-sm text-gray-400">
-                Estoque após movimentação:{" "}
-                <span className="text-white font-semibold">
-                  {movementForm.tipo === "entrada"
-                    ? (movementModal?.quantidade || 0) + parseInt(movementForm.quantidade || 0)
-                    : (movementModal?.quantidade || 0) - parseInt(movementForm.quantidade || 0)}
-                </span>
-              </p>
-            </div>
-          )}
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
-            <button onClick={() => setMovementModal(null)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition">
-              Cancelar
-            </button>
-            <button onClick={handleMovement} className={`px-6 py-2 text-sm rounded-lg text-white transition ${movementForm.tipo === "entrada" ? "bg-green-600 hover:bg-green-700" : "bg-red-600 hover:bg-red-700"}`}>
-              Registrar {movementForm.tipo === "entrada" ? "Entrada" : "Saída"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* History Modal */}
-      <Modal isOpen={!!historyModal} title={`Histórico - ${historyModal?.item?.nome || ""}`} onClose={() => setHistoryModal(null)} size="lg">
-        {historyModal && historyModal.movements.length > 0 ? (
+      {/* OS que precisam de atenção */}
+      <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
+        <h3 className="text-white font-semibold mb-4">OS que precisam de atenção</h3>
+        {osAtencao.length > 0 ? (
           <div className="space-y-2">
-            {historyModal.movements.sort((a, b) => new Date(b.data) - new Date(a.data)).map((mov) => (
-              <div key={mov.id} className="flex items-center gap-3 p-3 rounded-lg bg-gray-700/30">
-                <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold ${mov.tipo === "entrada" ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
-                  {mov.tipo === "entrada" ? "+" : "-"}
-                </div>
-                <div className="flex-1">
-                  <p className="text-white text-sm">
-                    {mov.tipo === "entrada" ? "Entrada" : "Saída"}: <span className="font-semibold">{mov.quantidade} un</span>
+            {osAtencao.map((os) => (
+              <button
+                key={os.id}
+                onClick={() => onNavigate("processos")}
+                className="w-full flex items-center gap-3 p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/20 hover:bg-yellow-500/10 transition text-left"
+              >
+                <span className="text-lg">⚠️</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-white text-sm font-medium truncate">
+                    {os.numero} — {os.tipo} ({os.clienteNome})
                   </p>
-                  <p className="text-gray-400 text-xs">{mov.motivo} | {formatDateTime(mov.data)} | {mov.usuario}</p>
+                  <p className="text-gray-400 text-xs mt-0.5">
+                    Aberta em {formatDate(os.dataAbertura)} — sem movimentação há 2+ dias
+                  </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-gray-400 text-xs">{mov.quantidadeAnterior} → {mov.quantidadeNova}</p>
-                </div>
-              </div>
+                <StatusBadge status={os.status} />
+              </button>
             ))}
           </div>
         ) : (
-          <EmptyState icon="📋" title="Nenhuma movimentação" description="Este item ainda não possui histórico de movimentações." />
+          <div className="flex items-center justify-center h-[100px] text-green-400 text-sm">
+            ✓ Todas as OS estão sob controle
+          </div>
         )}
-      </Modal>
-
-      {/* Confirm Delete */}
-      {confirmDelete && (
-        <ConfirmDialog
-          message={`Tem certeza que deseja excluir "${confirmDelete.nome}" do estoque?`}
-          onConfirm={confirmDeleteAction}
-          onCancel={() => setConfirmDelete(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-// ─── INVOICE MODULE ─────────────────────────────────────────────────────────
-
-function PrintableInvoice({ invoice, config }) {
-  if (!invoice) return null;
-  return (
-    <div className="print-only print-report">
-      <div style={{ textAlign: "center", marginBottom: "20px", borderBottom: "2px solid #333", paddingBottom: "15px" }}>
-        <h2 style={{ fontSize: "18px", fontWeight: "bold" }}>{config?.nomeEmpresa || "FrostERP Refrigeração"}</h2>
-        <p style={{ fontSize: "11px", color: "#666" }}>CNPJ: {config?.cnpj || "—"} | Tel: {config?.telefone || "—"}</p>
-        <p style={{ fontSize: "11px", color: "#666" }}>{config?.endereco || "—"}</p>
-      </div>
-
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "20px" }}>
-        <div>
-          <h2 style={{ fontSize: "14px", fontWeight: "bold" }}>NOTA FISCAL DE SERVIÇO</h2>
-          <p style={{ fontSize: "12px" }}>Número: {invoice.numero}</p>
-          <p style={{ fontSize: "12px" }}>Data: {formatDate(invoice.data)}</p>
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <p style={{ fontSize: "12px", fontWeight: "bold" }}>Status: {STATUS_MAP[invoice.status]?.label || invoice.status}</p>
-        </div>
-      </div>
-
-      <div style={{ marginBottom: "20px", padding: "10px", border: "1px solid #ccc", borderRadius: "4px" }}>
-        <h3 style={{ fontSize: "12px", fontWeight: "bold", marginBottom: "5px" }}>DADOS DO CLIENTE</h3>
-        <p style={{ fontSize: "11px" }}>Nome: {invoice.clienteNome}</p>
-        <p style={{ fontSize: "11px" }}>Documento: {invoice.clienteDocumento || "—"}</p>
-      </div>
-
-      <table style={{ width: "100%", marginBottom: "15px" }}>
-        <thead>
-          <tr>
-            <th style={{ textAlign: "left" }}>Item</th>
-            <th style={{ textAlign: "center" }}>Qtd</th>
-            <th style={{ textAlign: "right" }}>Valor Unit.</th>
-            <th style={{ textAlign: "right" }}>Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {(invoice.itens || []).map((item, idx) => (
-            <tr key={idx}>
-              <td>{item.descricao}</td>
-              <td style={{ textAlign: "center" }}>{item.quantidade}</td>
-              <td style={{ textAlign: "right" }}>{formatCurrency(item.valorUnitario)}</td>
-              <td style={{ textAlign: "right" }}>{formatCurrency(item.quantidade * item.valorUnitario)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <div style={{ width: "250px" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-            <span style={{ fontSize: "11px" }}>Subtotal:</span>
-            <span style={{ fontSize: "11px" }}>{formatCurrency(invoice.subtotal)}</span>
-          </div>
-          {invoice.issPercent > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-              <span style={{ fontSize: "11px" }}>ISS ({invoice.issPercent}%):</span>
-              <span style={{ fontSize: "11px" }}>{formatCurrency(invoice.issValor)}</span>
-            </div>
-          )}
-          {invoice.icmsPercent > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-              <span style={{ fontSize: "11px" }}>ICMS ({invoice.icmsPercent}%):</span>
-              <span style={{ fontSize: "11px" }}>{formatCurrency(invoice.icmsValor)}</span>
-            </div>
-          )}
-          {invoice.desconto > 0 && (
-            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "4px" }}>
-              <span style={{ fontSize: "11px" }}>Desconto:</span>
-              <span style={{ fontSize: "11px", color: "#dc2626" }}>-{formatCurrency(invoice.desconto)}</span>
-            </div>
-          )}
-          <div style={{ display: "flex", justifyContent: "space-between", borderTop: "2px solid #333", paddingTop: "6px", marginTop: "6px" }}>
-            <span style={{ fontSize: "13px", fontWeight: "bold" }}>TOTAL:</span>
-            <span style={{ fontSize: "13px", fontWeight: "bold" }}>{formatCurrency(invoice.total)}</span>
-          </div>
-        </div>
-      </div>
-
-      {invoice.observacoes && (
-        <div style={{ marginTop: "20px", padding: "10px", border: "1px solid #ccc", borderRadius: "4px" }}>
-          <h3 style={{ fontSize: "11px", fontWeight: "bold" }}>Observações:</h3>
-          <p style={{ fontSize: "11px" }}>{invoice.observacoes}</p>
-        </div>
-      )}
-
-      <div style={{ marginTop: "40px", textAlign: "center", borderTop: "1px solid #ccc", paddingTop: "10px" }}>
-        <p style={{ fontSize: "10px", color: "#888" }}>{config?.nomeEmpresa || "FrostERP Refrigeração"} - {config?.email || ""}</p>
       </div>
     </div>
   );
 }
 
-function PrintableBoleto({ boleto, config }) {
-  if (!boleto) return null;
-  return (
-    <div className="print-only print-report">
-      <div style={{ border: "2px solid #333", padding: "20px", marginBottom: "20px" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", borderBottom: "1px solid #ccc", paddingBottom: "10px", marginBottom: "15px" }}>
-          <div>
-            <h2 style={{ fontSize: "16px", fontWeight: "bold" }}>{config?.nomeEmpresa || "FrostERP Refrigeração"}</h2>
-            <p style={{ fontSize: "10px", color: "#666" }}>CNPJ: {config?.cnpj || "—"}</p>
-          </div>
-          <div style={{ textAlign: "right" }}>
-            <p style={{ fontSize: "11px" }}>Boleto Nº: {boleto.numero}</p>
-            <p style={{ fontSize: "11px" }}>Vencimento: {formatDate(boleto.vencimento)}</p>
-          </div>
-        </div>
-
-        <div style={{ marginBottom: "15px" }}>
-          <p style={{ fontSize: "11px" }}><strong>Sacado:</strong> {boleto.clienteNome}</p>
-          <p style={{ fontSize: "11px" }}><strong>Valor:</strong> {formatCurrency(boleto.valor)}</p>
-          {boleto.observacoes && <p style={{ fontSize: "11px" }}><strong>Ref:</strong> {boleto.observacoes}</p>}
-        </div>
-
-        {/* Barcode simulation */}
-        <div style={{ display: "flex", height: "50px", gap: "1px", justifyContent: "center", marginTop: "20px" }}>
-          {Array.from({ length: 40 }).map((_, i) => (
-            <div
-              key={i}
-              style={{
-                width: i % 3 === 0 ? "3px" : i % 2 === 0 ? "2px" : "1px",
-                height: "100%",
-                backgroundColor: i % 4 === 3 ? "transparent" : "#000",
-              }}
-            />
-          ))}
-        </div>
-        <p style={{ textAlign: "center", fontSize: "10px", fontFamily: "monospace", marginTop: "5px", letterSpacing: "2px" }}>
-          {boleto.numero?.replace(/\D/g, "").padEnd(20, "0").slice(0, 20).replace(/(.{5})/g, "$1.")}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// Gera HTML da NFS-e no padrão visual SEFAZ
-function generateNFSeHTML(invoice, config, clients) {
-  const fmt = (v) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v || 0);
-  const cliente = (clients || []).find((c) => c.id === invoice.clienteId) || {};
-  const dataEmissao = invoice.data ? (() => { const p = String(invoice.data).slice(0,10).split("-"); return `${p[2]}/${p[1]}/${p[0]}`; })() : "—";
-  const hora = invoice.data ? new Date(invoice.data).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : "—";
-  const competencia = invoice.data ? (() => { const p = String(invoice.data).slice(0,10).split("-"); return `${p[1]}/${p[0]}`; })() : "—";
-
-  const docCliente = cliente.tipo === "pj"
-    ? `CNPJ: ${cliente.cnpj || invoice.clienteDocumento || "—"}`
-    : `CPF: ${cliente.cpf || invoice.clienteDocumento || "—"}`;
-
-  const endCliente = cliente.endereco
-    ? `${cliente.endereco.rua || ""}, ${cliente.endereco.bairro || ""} — ${cliente.endereco.cidade || ""}/${cliente.endereco.estado || ""} — CEP ${cliente.endereco.cep || "—"}`
-    : "—";
-
-  const chaveVerif = invoice.numero
-    ? invoice.numero.replace(/\D/g, "").padStart(9, "0") + String(Date.now()).slice(-5)
-    : "000000000000000";
-
-  const codVerificacao = [
-    chaveVerif.slice(0, 4),
-    chaveVerif.slice(4, 8),
-    chaveVerif.slice(8, 12),
-    chaveVerif.slice(12, 16),
-  ].join("-");
-
-  const itensTR = (invoice.itens || []).map((item, i) => {
-    const total = (parseFloat(item.quantidade) || 0) * (parseFloat(item.valorUnitario) || 0);
-    return `
-      <tr>
-        <td style="text-align:center">${i + 1}</td>
-        <td>1.07.00</td>
-        <td style="text-align:left;padding-left:8px">${item.descricao || "—"}</td>
-        <td style="text-align:center">${item.quantidade || 1}</td>
-        <td style="text-align:right">${fmt(item.valorUnitario)}</td>
-        <td style="text-align:right">${fmt(total)}</td>
-      </tr>`;
-  }).join("");
-
-  const campo = (label, value, width = "auto") =>
-    `<div style="flex:${width === "auto" ? 1 : "0 0 " + width};min-width:0">
-      <div style="font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#555;margin-bottom:2px">${label}</div>
-      <div style="font-size:12px;color:#111;word-break:break-word">${value || "—"}</div>
-    </div>`;
-
-  return `<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-<meta charset="UTF-8">
-<title>NFS-e ${invoice.numero}</title>
-<style>
-  *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:Arial,sans-serif;font-size:11px;background:#e8e8e8;color:#111}
-  .page{width:210mm;min-height:297mm;margin:12px auto;background:#fff;border:1px solid #999}
-  .topo{background:#1a3a6b;color:#fff;padding:10px 16px;display:flex;align-items:center;justify-content:space-between}
-  .topo-title{font-size:14px;font-weight:700;letter-spacing:.05em}
-  .topo-sub{font-size:10px;opacity:.85;margin-top:2px}
-  .topo-num{text-align:right}
-  .topo-num .nf-num{font-size:22px;font-weight:800;letter-spacing:.04em}
-  .topo-num .nf-serie{font-size:10px;opacity:.8}
-  .secao{border:1px solid #999;margin:0}
-  .secao+.secao{border-top:none}
-  .secao-titulo{background:#e8edf5;border-bottom:1px solid #aab;padding:4px 10px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#1a3a6b}
-  .secao-corpo{padding:8px 10px;display:flex;gap:16px;flex-wrap:wrap}
-  .secao-corpo-col{padding:8px 10px}
-  table.itens{width:100%;border-collapse:collapse;font-size:11px}
-  table.itens thead tr{background:#1a3a6b;color:#fff}
-  table.itens th{padding:6px 8px;text-align:center;font-size:9px;font-weight:700;letter-spacing:.05em;border:1px solid #aab}
-  table.itens td{padding:5px 8px;border:1px solid #dde;vertical-align:top}
-  table.itens tr:nth-child(even) td{background:#f5f7fb}
-  .totais{display:grid;grid-template-columns:1fr 1fr;border:1px solid #999;border-top:none}
-  .totais-col{padding:8px 10px}
-  .totais-col+.totais-col{border-left:1px solid #999}
-  .totais-titulo{background:#e8edf5;border-bottom:1px solid #aab;padding:4px 10px;font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#1a3a6b}
-  .linha-total{display:flex;justify-content:space-between;padding:3px 0;font-size:11px;border-bottom:1px dotted #ddd}
-  .linha-total:last-child{border-bottom:none}
-  .linha-total.destaque{font-weight:700;font-size:13px;color:#1a3a6b;border-top:2px solid #1a3a6b;margin-top:4px;padding-top:6px}
-  .rodape{border:1px solid #999;border-top:none;padding:8px 10px;display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
-  .chave-box{border:1px solid #bbb;padding:6px 10px;border-radius:4px;background:#f8f8f8;flex:1}
-  .chave-label{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#555;margin-bottom:3px}
-  .chave-val{font-family:monospace;font-size:13px;font-weight:700;letter-spacing:.15em;color:#1a3a6b}
-  .aviso{flex:1;border:2px solid #c00;padding:8px 10px;border-radius:4px}
-  .aviso-txt{font-size:9px;font-weight:700;text-transform:uppercase;color:#c00;text-align:center;line-height:1.6}
-  .discrim{border:1px solid #999;border-top:none;padding:8px 10px}
-  .discrim-titulo{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#1a3a6b;margin-bottom:4px}
-  .discrim-txt{font-size:10px;line-height:1.6;color:#333}
-  .print-btn{position:fixed;bottom:20px;right:20px;background:#1a3a6b;color:#fff;border:none;padding:10px 22px;border-radius:6px;font-size:13px;font-weight:700;cursor:pointer;box-shadow:0 3px 10px rgba(0,0,0,.3)}
-  @media print{body{background:#fff}.page{margin:0;border:none;width:100%}.print-btn{display:none}}
-</style>
-</head>
-<body>
-<div class="page">
-
-  <!-- TOPO -->
-  <div class="topo">
-    <div>
-      <div class="topo-title">❄️ ${config?.nomeEmpresa || "FrostERP Refrigeração"}</div>
-      <div class="topo-sub">CNPJ: ${config?.cnpj || "—"} &nbsp;|&nbsp; ${config?.endereco || "—"}</div>
-      <div class="topo-sub" style="margin-top:4px;font-size:12px;font-weight:700;letter-spacing:.05em">NOTA FISCAL DE SERVIÇOS ELETRÔNICA — NFS-e</div>
-    </div>
-    <div class="topo-num">
-      <div class="nf-num">${invoice.numero || "—"}</div>
-      <div class="nf-serie">Série: 1 &nbsp;|&nbsp; ${dataEmissao} ${hora}</div>
-      <div class="nf-serie" style="margin-top:4px">Competência: ${competencia}</div>
-    </div>
-  </div>
-
-  <!-- PRESTADOR -->
-  <div class="secao">
-    <div class="secao-titulo">1 — Prestador de Serviços</div>
-    <div class="secao-corpo">
-      ${campo("CNPJ", config?.cnpj || "—", "160px")}
-      ${campo("Inscrição Municipal", config?.inscricaoMunicipal || "—", "160px")}
-      ${campo("Razão Social / Nome", config?.nomeEmpresa || "—")}
-      ${campo("Telefone / Email", [config?.telefone, config?.email].filter(Boolean).join(" | "))}
-    </div>
-    <div class="secao-corpo" style="padding-top:0">
-      ${campo("Endereço", config?.endereco || "—")}
-      ${campo("Regime Tributário", "Simples Nacional", "200px")}
-    </div>
-  </div>
-
-  <!-- IDENTIFICAÇÃO -->
-  <div class="secao">
-    <div class="secao-titulo">2 — Identificação da NFS-e</div>
-    <div class="secao-corpo">
-      ${campo("Número NFS-e", invoice.numero || "—", "120px")}
-      ${campo("Série", "1", "80px")}
-      ${campo("Tipo", "NFS-e", "80px")}
-      ${campo("Situação", (invoice.status === "cancelado" ? "CANCELADA" : "EMITIDA"), "120px")}
-      ${campo("Data/Hora Emissão", `${dataEmissao} ${hora}`, "160px")}
-      ${campo("Competência", competencia, "120px")}
-      ${campo("Natureza da Operação", "Tributação no Município")}
-    </div>
-  </div>
-
-  <!-- TOMADOR -->
-  <div class="secao">
-    <div class="secao-titulo">3 — Tomador de Serviços (Cliente)</div>
-    <div class="secao-corpo">
-      ${campo(cliente.tipo === "pj" ? "CNPJ" : "CPF", cliente.tipo === "pj" ? (cliente.cnpj || "—") : (cliente.cpf || "—"), "180px")}
-      ${campo("Inscrição Municipal", "—", "160px")}
-      ${campo("Razão Social / Nome", cliente.nome || invoice.clienteNome || "—")}
-      ${campo("Telefone", cliente.telefone || "—", "160px")}
-    </div>
-    <div class="secao-corpo" style="padding-top:0">
-      ${campo("Endereço", endCliente)}
-      ${campo("Email", cliente.email || "—", "220px")}
-    </div>
-  </div>
-
-  <!-- ITENS -->
-  <div class="secao">
-    <div class="secao-titulo">4 — Serviços Prestados</div>
-    <div style="padding:8px 10px">
-      <table class="itens">
-        <thead>
-          <tr>
-            <th style="width:36px">Item</th>
-            <th style="width:80px">Cód. Serviço</th>
-            <th>Descrição do Serviço</th>
-            <th style="width:50px">Qtd.</th>
-            <th style="width:100px">Valor Unit.</th>
-            <th style="width:100px">Valor Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${itensTR || `<tr><td colspan="6" style="text-align:center;color:#888;padding:12px">Nenhum item</td></tr>`}
-        </tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- TOTAIS -->
-  <div class="totais">
-    <div>
-      <div class="totais-titulo">5 — Valores dos Serviços</div>
-      <div class="totais-col">
-        <div class="linha-total"><span>Subtotal dos Serviços</span><span>${fmt(invoice.subtotal)}</span></div>
-        <div class="linha-total"><span>Deduções</span><span>${fmt(0)}</span></div>
-        <div class="linha-total"><span>Desconto Incondicionado</span><span>${fmt(invoice.desconto)}</span></div>
-        <div class="linha-total destaque"><span>BASE DE CÁLCULO ISS</span><span>${fmt((invoice.subtotal || 0) - (invoice.desconto || 0))}</span></div>
-      </div>
-    </div>
-    <div>
-      <div class="totais-titulo">6 — Impostos e Retenções</div>
-      <div class="totais-col">
-        <div class="linha-total"><span>ISS (${invoice.issPercent || 5}%)</span><span>${fmt(invoice.issValor)}</span></div>
-        <div class="linha-total"><span>PIS (0,65%)</span><span>${fmt((invoice.subtotal || 0) * 0.0065)}</span></div>
-        <div class="linha-total"><span>COFINS (3%)</span><span>${fmt((invoice.subtotal || 0) * 0.03)}</span></div>
-        <div class="linha-total"><span>CSLL (1%)</span><span>${fmt((invoice.subtotal || 0) * 0.01)}</span></div>
-        <div class="linha-total destaque"><span>VALOR LÍQUIDO NFS-e</span><span>${fmt(invoice.total)}</span></div>
-      </div>
-    </div>
-  </div>
-
-  <!-- DISCRIMINAÇÃO -->
-  <div class="discrim">
-    <div class="discrim-titulo">7 — Discriminação dos Serviços</div>
-    <div class="discrim-txt">${
-      (invoice.itens || []).map((item, i) =>
-        `${i + 1}. ${item.descricao} — Qtd: ${item.quantidade} x ${new Intl.NumberFormat("pt-BR", {style:"currency",currency:"BRL"}).format(item.valorUnitario)} = ${new Intl.NumberFormat("pt-BR", {style:"currency",currency:"BRL"}).format((item.quantidade||0)*(item.valorUnitario||0))}`
-      ).join("<br>") || "—"
-    }${invoice.observacoes ? `<br><br><strong>Observações:</strong> ${invoice.observacoes}` : ""}</div>
-  </div>
-
-  <!-- RODAPÉ -->
-  <div class="rodape">
-    <div class="chave-box">
-      <div class="chave-label">Código de Verificação</div>
-      <div class="chave-val">${codVerificacao}</div>
-    </div>
-    <div class="chave-box">
-      <div class="chave-label">Inscrição Municipal Prestador</div>
-      <div class="chave-val">${config?.inscricaoMunicipal || "000000-0"}</div>
-      <div style="font-size:9px;color:#888;margin-top:4px">Data/Hora Geração: ${dataEmissao} ${hora}</div>
-    </div>
-    <div class="aviso">
-      <div class="aviso-txt">
-        ⚠ ESTE DOCUMENTO NÃO TEM VALIDADE FISCAL<br>
-        Emitido por sistema de gestão interno.<br>
-        Para nota fiscal com validade legal, utilize<br>
-        o sistema oficial da prefeitura.
-      </div>
-    </div>
-  </div>
-
-</div>
-<button class="print-btn" onclick="window.print()">🖨️ Imprimir NFS-e</button>
-</body></html>`;
-}
-
-function InvoiceModule({ user, dateFilter, addToast, clients }) {
-  const [activeTab, setActiveTab] = useState("nf");
-  const [invoices, setInvoices] = useState([]);
-  const [boletos, setBoletos] = useState([]);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [boletoModalOpen, setBoletoModalOpen] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [editingBoleto, setEditingBoleto] = useState(null);
-  const [confirmDelete, setConfirmDelete] = useState(null);
-  const [search, setSearch] = useState("");
-  const [printInvoice, setPrintInvoice] = useState(null);
-  const [printBoleto, setPrintBoleto] = useState(null);
-
-  const config = useMemo(() => DB.get("erp:config") || {}, []);
-
-  const loadData = useCallback(() => {
-    setInvoices(DB.list("erp:invoice:"));
-    setBoletos(DB.list("erp:boleto:"));
-  }, []);
-
-  useEffect(() => { loadData(); }, [loadData]);
-
-  // NF Form
-  const emptyNFForm = {
-    clienteId: "", itens: [{ descricao: "", quantidade: 1, valorUnitario: "" }],
-    issPercent: 5, icmsPercent: 0, desconto: 0, observacoes: "",
-  };
-  const [nfForm, setNfForm] = useState(emptyNFForm);
-
-  // Boleto Form
-  const emptyBoletoForm = {
-    clienteId: "", valor: "", vencimento: daysFromNow(30), observacoes: "",
-  };
-  const [boletoForm, setBoletoForm] = useState(emptyBoletoForm);
-
-  const calcNFTotals = useCallback((form) => {
-    const subtotal = (form.itens || []).reduce((s, item) => {
-      return s + (parseFloat(item.quantidade) || 0) * (parseFloat(String(item.valorUnitario).replace(",", ".")) || 0);
-    }, 0);
-    const issValor = subtotal * ((form.issPercent || 0) / 100);
-    const icmsValor = subtotal * ((form.icmsPercent || 0) / 100);
-    const desconto = parseFloat(form.desconto) || 0;
-    const total = subtotal + issValor + icmsValor - desconto;
-    return { subtotal, issValor, icmsValor, desconto, total };
-  }, []);
-
-  const addNFItem = useCallback(() => {
-    setNfForm((prev) => ({
-      ...prev,
-      itens: [...prev.itens, { descricao: "", quantidade: 1, valorUnitario: "" }],
-    }));
-  }, []);
-
-  const removeNFItem = useCallback((idx) => {
-    setNfForm((prev) => ({
-      ...prev,
-      itens: prev.itens.filter((_, i) => i !== idx),
-    }));
-  }, []);
-
-  const updateNFItem = useCallback((idx, field, value) => {
-    setNfForm((prev) => ({
-      ...prev,
-      itens: prev.itens.map((item, i) => (i === idx ? { ...item, [field]: value } : item)),
-    }));
-  }, []);
-
-  // Filtered lists
-  const filteredInvoices = useMemo(() => {
-    let list = filterByDate(invoices, "data", dateFilter);
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      list = list.filter(
-        (i) =>
-          (i.numero || "").toLowerCase().includes(s) ||
-          (i.clienteNome || "").toLowerCase().includes(s)
-      );
-    }
-    return list.sort((a, b) => new Date(b.data) - new Date(a.data));
-  }, [invoices, dateFilter, search]);
-
-  const filteredBoletos = useMemo(() => {
-    let list = filterByDate(boletos, "vencimento", dateFilter);
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      list = list.filter(
-        (b) =>
-          (b.numero || "").toLowerCase().includes(s) ||
-          (b.clienteNome || "").toLowerCase().includes(s)
-      );
-    }
-    // Auto-detect vencido
-    const today = toISODate(new Date());
-    list = list.map((b) => {
-      if (b.status === "aberto" && b.vencimento < today) {
-        return { ...b, status: "vencido" };
-      }
-      return b;
-    });
-    return list.sort((a, b) => new Date(b.vencimento) - new Date(a.vencimento));
-  }, [boletos, dateFilter, search]);
-
-  // NF CRUD
-  const openCreateNF = useCallback(() => {
-    setEditing(null);
-    setNfForm(emptyNFForm);
-    setModalOpen(true);
-  }, []);
-
-  const openEditNF = useCallback((row) => {
-    setEditing(row);
-    setNfForm({
-      clienteId: row.clienteId || "",
-      itens: row.itens && row.itens.length > 0 ? row.itens : [{ descricao: "", quantidade: 1, valorUnitario: "" }],
-      issPercent: row.issPercent ?? 5,
-      icmsPercent: row.icmsPercent ?? 0,
-      desconto: row.desconto ?? 0,
-      observacoes: row.observacoes || "",
-    });
-    setModalOpen(true);
-  }, []);
-
-  const handleSaveNF = useCallback(() => {
-    if (!nfForm.clienteId) {
-      addToast("Selecione um cliente.", "error");
-      return;
-    }
-    const validItems = nfForm.itens.filter((i) => i.descricao.trim() && i.valorUnitario);
-    if (validItems.length === 0) {
-      addToast("Adicione pelo menos um item.", "error");
-      return;
-    }
-
-    const cliente = (clients || []).find((c) => c.id === nfForm.clienteId);
-    const totals = calcNFTotals(nfForm);
-
-    if (editing) {
-      const updated = {
-        ...editing,
-        clienteId: nfForm.clienteId,
-        clienteNome: cliente?.nome || "—",
-        clienteDocumento: cliente?.cpf || cliente?.cnpj || "",
-        itens: validItems.map((i) => ({
-          descricao: i.descricao.trim(),
-          quantidade: parseFloat(i.quantidade) || 1,
-          valorUnitario: parseFloat(String(i.valorUnitario).replace(",", ".")) || 0,
-        })),
-        issPercent: parseFloat(nfForm.issPercent) || 0,
-        icmsPercent: parseFloat(nfForm.icmsPercent) || 0,
-        issValor: totals.issValor,
-        icmsValor: totals.icmsValor,
-        subtotal: totals.subtotal,
-        desconto: totals.desconto,
-        total: totals.total,
-        valor: totals.total,
-        observacoes: nfForm.observacoes,
-        updatedAt: new Date().toISOString(),
-      };
-      DB.set("erp:invoice:" + updated.id, updated);
-      addToast("Nota fiscal atualizada.", "success");
-    } else {
-      const numero = getNextNumber("NF", invoices);
-      const newNF = {
-        id: genId(),
-        numero,
-        clienteId: nfForm.clienteId,
-        clienteNome: cliente?.nome || "—",
-        clienteDocumento: cliente?.cpf || cliente?.cnpj || "",
-        data: new Date().toISOString(),
-        status: "emitida",
-        itens: validItems.map((i) => ({
-          descricao: i.descricao.trim(),
-          quantidade: parseFloat(i.quantidade) || 1,
-          valorUnitario: parseFloat(String(i.valorUnitario).replace(",", ".")) || 0,
-        })),
-        issPercent: parseFloat(nfForm.issPercent) || 0,
-        icmsPercent: parseFloat(nfForm.icmsPercent) || 0,
-        issValor: totals.issValor,
-        icmsValor: totals.icmsValor,
-        subtotal: totals.subtotal,
-        desconto: totals.desconto,
-        total: totals.total,
-        valor: totals.total,
-        observacoes: nfForm.observacoes,
-        createdAt: new Date().toISOString(),
-      };
-      DB.set("erp:invoice:" + newNF.id, newNF);
-      addToast(`Nota fiscal ${numero} emitida com sucesso.`, "success");
-    }
-
-    setModalOpen(false);
-    loadData();
-  }, [nfForm, editing, invoices, clients, calcNFTotals, loadData, addToast]);
-
-  const handleCancelNF = useCallback((nf) => {
-    if (user.role !== "admin" && user.role !== "gerente") {
-      addToast("Apenas admin/gerente pode cancelar NF.", "error");
-      return;
-    }
-    const updated = { ...nf, status: "cancelada", updatedAt: new Date().toISOString() };
-    DB.set("erp:invoice:" + updated.id, updated);
-
-    // Financial reversal
-    const reversalId = genId();
-    const reversal = {
-      id: reversalId,
-      numero: "EST-" + nf.numero,
-      descricao: `Estorno NF ${nf.numero} - ${nf.clienteNome}`,
-      valor: nf.total || nf.valor || 0,
-      tipo: "despesa",
-      categoria: "Estorno",
-      data: new Date().toISOString(),
-      status: "pago",
-      formaPagamento: "Estorno",
-      observacoes: `Estorno ref. cancelamento da NF ${nf.numero}`,
-      osId: null,
-      createdAt: new Date().toISOString(),
-    };
-    DB.set("erp:finance:" + reversalId, reversal);
-
-    addToast(`NF ${nf.numero} cancelada. Estorno financeiro gerado.`, "warning");
-    loadData();
-  }, [user, loadData, addToast]);
-
-  const handlePrintNF = useCallback((nf) => {
-    openHTMLDoc(generateNFSeHTML(nf, config, clients));
-  }, [config, clients]);
-
-  // Boleto CRUD
-  const openCreateBoleto = useCallback(() => {
-    setEditingBoleto(null);
-    setBoletoForm(emptyBoletoForm);
-    setBoletoModalOpen(true);
-  }, []);
-
-  const openEditBoleto = useCallback((row) => {
-    setEditingBoleto(row);
-    setBoletoForm({
-      clienteId: row.clienteId || "",
-      valor: row.valor || "",
-      vencimento: row.vencimento ? row.vencimento.split("T")[0] : daysFromNow(30),
-      observacoes: row.observacoes || "",
-    });
-    setBoletoModalOpen(true);
-  }, []);
-
-  const handleSaveBoleto = useCallback(() => {
-    if (!boletoForm.clienteId || !boletoForm.valor || !boletoForm.vencimento) {
-      addToast("Preencha todos os campos obrigatórios.", "error");
-      return;
-    }
-    const valor = parseFloat(String(boletoForm.valor).replace(",", "."));
-    if (isNaN(valor) || valor <= 0) {
-      addToast("Valor inválido.", "error");
-      return;
-    }
-
-    const cliente = (clients || []).find((c) => c.id === boletoForm.clienteId);
-
-    if (editingBoleto) {
-      const updated = {
-        ...editingBoleto,
-        clienteId: boletoForm.clienteId,
-        clienteNome: cliente?.nome || "—",
-        valor,
-        vencimento: boletoForm.vencimento + "T00:00:00.000Z",
-        observacoes: boletoForm.observacoes,
-        updatedAt: new Date().toISOString(),
-      };
-      DB.set("erp:boleto:" + updated.id, updated);
-      addToast("Boleto atualizado.", "success");
-    } else {
-      const numero = getNextNumber("BOL", boletos);
-      const newBoleto = {
-        id: genId(),
-        numero,
-        clienteId: boletoForm.clienteId,
-        clienteNome: cliente?.nome || "—",
-        valor,
-        vencimento: boletoForm.vencimento + "T00:00:00.000Z",
-        status: "aberto",
-        observacoes: boletoForm.observacoes,
-        createdAt: new Date().toISOString(),
-      };
-      DB.set("erp:boleto:" + newBoleto.id, newBoleto);
-      addToast(`Boleto ${numero} gerado.`, "success");
-    }
-
-    setBoletoModalOpen(false);
-    loadData();
-  }, [boletoForm, editingBoleto, boletos, clients, loadData, addToast]);
-
-  const handleMarkPaid = useCallback((boleto) => {
-    const updated = { ...boleto, status: "pago", dataPagamento: new Date().toISOString(), updatedAt: new Date().toISOString() };
-    DB.set("erp:boleto:" + updated.id, updated);
-
-    // Create financial entry
-    const finId = genId();
-    const finEntry = {
-      id: finId,
-      numero: "REC-" + boleto.numero,
-      descricao: `Pagamento boleto ${boleto.numero} - ${boleto.clienteNome}`,
-      valor: boleto.valor,
-      tipo: "receita",
-      categoria: "Boleto",
-      data: new Date().toISOString(),
-      status: "pago",
-      formaPagamento: "Boleto",
-      observacoes: boleto.observacoes || "",
-      osId: null,
-      createdAt: new Date().toISOString(),
-    };
-    DB.set("erp:finance:" + finId, finEntry);
-
-    addToast(`Boleto ${boleto.numero} marcado como pago.`, "success");
-    loadData();
-  }, [loadData, addToast]);
-
-  const handlePrintBoleto = useCallback((bol) => {
-    setPrintBoleto(bol);
-    setTimeout(() => window.print(), 300);
-  }, []);
-
-  const handleDeleteInvoice = useCallback((row) => {
-    setConfirmDelete({ type: activeTab === "nf" ? "nf" : "boleto", item: row });
-  }, [activeTab]);
-
-  const confirmDeleteAction = useCallback(() => {
-    if (!confirmDelete) return;
-    if (confirmDelete.type === "nf") {
-      DB.delete("erp:invoice:" + confirmDelete.item.id);
-    } else {
-      DB.delete("erp:boleto:" + confirmDelete.item.id);
-    }
-    addToast("Registro excluído.", "success");
-    setConfirmDelete(null);
-    loadData();
-  }, [confirmDelete, loadData, addToast]);
-
-  const nfColumns = [
-    { key: "numero", label: "Número", width: "w-24" },
-    { key: "clienteNome", label: "Cliente" },
-    { key: "data", label: "Data", render: (v) => formatDate(v) },
-    { key: "valor", label: "Valor", render: (v) => formatCurrency(v) },
-    {
-      key: "status", label: "Status",
-      render: (v) => {
-        const colors = { emitida: "bg-green-500", cancelada: "bg-red-500", pendente: "bg-yellow-500" };
-        const labels = { emitida: "Emitida", cancelada: "Cancelada", pendente: "Pendente" };
-        return (
-          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white ${colors[v] || "bg-gray-500"}`}>
-            {labels[v] || v}
-          </span>
-        );
-      },
-    },
-  ];
-
-  const boletoColumns = [
-    { key: "numero", label: "Número", width: "w-24" },
-    { key: "clienteNome", label: "Cliente" },
-    { key: "valor", label: "Valor", render: (v) => formatCurrency(v) },
-    { key: "vencimento", label: "Vencimento", render: (v) => formatDate(v) },
-    {
-      key: "status", label: "Status",
-      render: (v) => {
-        const colors = { aberto: "bg-yellow-500", pago: "bg-green-500", vencido: "bg-red-500", cancelado: "bg-gray-500" };
-        const labels = { aberto: "Aberto", pago: "Pago", vencido: "Vencido", cancelado: "Cancelado" };
-        return (
-          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white ${colors[v] || "bg-gray-500"}`}>
-            {labels[v] || v}
-          </span>
-        );
-      },
-    },
-  ];
-
-  const totals = calcNFTotals(nfForm);
-  const canManage = user.role === "admin" || user.role === "gerente";
-
-  return (
-    <div className="space-y-6">
-      <PrintableInvoice invoice={printInvoice} config={config} />
-      <PrintableBoleto boleto={printBoleto} config={config} />
-
-      <div className="flex items-center justify-between no-print">
-        <div>
-          <h2 className="text-2xl font-bold text-white">Faturamento</h2>
-          <p className="text-gray-400 text-sm mt-1">Notas fiscais e boletos</p>
-        </div>
-        <div className="flex gap-2">
-          {activeTab === "nf" ? (
-            <button onClick={openCreateNF} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              Nova NF
-            </button>
-          ) : (
-            <button onClick={openCreateBoleto} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-2">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-              Novo Boleto
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="flex gap-1 bg-gray-800 rounded-lg p-1 border border-gray-700 no-print">
-        <button
-          onClick={() => setActiveTab("nf")}
-          className={`flex-1 py-2 text-sm font-medium rounded-md transition ${activeTab === "nf" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
-        >
-          Notas Fiscais ({invoices.length})
-        </button>
-        <button
-          onClick={() => setActiveTab("boletos")}
-          className={`flex-1 py-2 text-sm font-medium rounded-md transition ${activeTab === "boletos" ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}
-        >
-          Boletos ({boletos.length})
-        </button>
-      </div>
-
-      {/* Search */}
-      <div className="flex-1 min-w-[200px] max-w-sm no-print">
-        <SearchInput value={search} onChange={setSearch} placeholder={activeTab === "nf" ? "Buscar NF..." : "Buscar boleto..."} />
-      </div>
-
-      {/* NF Tab */}
-      {activeTab === "nf" && (
-        <div className="no-print">
-          <DataTable
-            columns={nfColumns}
-            data={filteredInvoices}
-            onEdit={openEditNF}
-            onDelete={canManage ? handleDeleteInvoice : undefined}
-            actions={(row) => (
-              <>
-                <button onClick={() => handlePrintNF(row)} className="p-1.5 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-gray-700 transition" title="Imprimir">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-                </button>
-                {row.status === "emitida" && canManage && (
-                  <button onClick={() => handleCancelNF(row)} className="p-1.5 rounded-lg text-gray-400 hover:text-red-400 hover:bg-gray-700 transition" title="Cancelar NF">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" /></svg>
-                  </button>
-                )}
-              </>
-            )}
-            emptyMessage="Nenhuma nota fiscal encontrada."
-          />
-        </div>
-      )}
-
-      {/* Boletos Tab */}
-      {activeTab === "boletos" && (
-        <div className="no-print">
-          <DataTable
-            columns={boletoColumns}
-            data={filteredBoletos}
-            onEdit={openEditBoleto}
-            onDelete={canManage ? handleDeleteInvoice : undefined}
-            actions={(row) => (
-              <>
-                <button onClick={() => handlePrintBoleto(row)} className="p-1.5 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-gray-700 transition" title="Imprimir">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z" /></svg>
-                </button>
-                {(row.status === "aberto" || row.status === "vencido") && (
-                  <button onClick={() => handleMarkPaid(row)} className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition" title="Marcar como pago">
-                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-                  </button>
-                )}
-              </>
-            )}
-            emptyMessage="Nenhum boleto encontrado."
-          />
-        </div>
-      )}
-
-      {/* NF Modal */}
-      <Modal isOpen={modalOpen} title={editing ? "Editar Nota Fiscal" : "Nova Nota Fiscal"} onClose={() => setModalOpen(false)} size="lg">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Cliente *</label>
-            <select
-              value={nfForm.clienteId}
-              onChange={(e) => setNfForm({ ...nfForm, clienteId: e.target.value })}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-            >
-              <option value="">Selecione um cliente...</option>
-              {(clients || []).map((c) => (
-                <option key={c.id} value={c.id}>{c.nome}</option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-sm font-medium text-gray-300">Itens *</label>
-              <button onClick={addNFItem} className="text-xs text-blue-400 hover:text-blue-300 transition">+ Adicionar item</button>
-            </div>
-            <div className="space-y-2">
-              {nfForm.itens.map((item, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  <input
-                    type="text"
-                    value={item.descricao}
-                    onChange={(e) => updateNFItem(idx, "descricao", e.target.value)}
-                    placeholder="Descrição"
-                    className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-                  />
-                  <input
-                    type="number"
-                    min="1"
-                    value={item.quantidade}
-                    onChange={(e) => updateNFItem(idx, "quantidade", e.target.value)}
-                    placeholder="Qtd"
-                    className="w-20 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-                  />
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={item.valorUnitario}
-                    onChange={(e) => updateNFItem(idx, "valorUnitario", e.target.value)}
-                    placeholder="Valor unit."
-                    className="w-32 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-                  />
-                  <span className="text-gray-400 text-sm w-24 text-right">
-                    {formatCurrency((parseFloat(item.quantidade) || 0) * (parseFloat(String(item.valorUnitario).replace(",", ".")) || 0))}
-                  </span>
-                  {nfForm.itens.length > 1 && (
-                    <button onClick={() => removeNFItem(idx)} className="p-1 text-red-400 hover:text-red-300">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">ISS %</label>
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                value={nfForm.issPercent}
-                onChange={(e) => setNfForm({ ...nfForm, issPercent: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">ICMS %</label>
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                value={nfForm.icmsPercent}
-                onChange={(e) => setNfForm({ ...nfForm, icmsPercent: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Desconto (R$)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={nfForm.desconto}
-                onChange={(e) => setNfForm({ ...nfForm, desconto: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-          </div>
-
-          {/* Totals summary */}
-          <div className="bg-gray-700/30 rounded-lg p-4 space-y-1">
-            <div className="flex justify-between text-sm"><span className="text-gray-400">Subtotal:</span><span className="text-white">{formatCurrency(totals.subtotal)}</span></div>
-            {totals.issValor > 0 && <div className="flex justify-between text-sm"><span className="text-gray-400">ISS ({nfForm.issPercent}%):</span><span className="text-white">{formatCurrency(totals.issValor)}</span></div>}
-            {totals.icmsValor > 0 && <div className="flex justify-between text-sm"><span className="text-gray-400">ICMS ({nfForm.icmsPercent}%):</span><span className="text-white">{formatCurrency(totals.icmsValor)}</span></div>}
-            {totals.desconto > 0 && <div className="flex justify-between text-sm"><span className="text-gray-400">Desconto:</span><span className="text-red-400">-{formatCurrency(totals.desconto)}</span></div>}
-            <div className="flex justify-between text-sm font-bold border-t border-gray-600 pt-2 mt-2"><span className="text-gray-300">Total:</span><span className="text-white text-lg">{formatCurrency(totals.total)}</span></div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Observações</label>
-            <textarea
-              value={nfForm.observacoes}
-              onChange={(e) => setNfForm({ ...nfForm, observacoes: e.target.value })}
-              rows={2}
-              placeholder="Observações..."
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
-            />
-          </div>
-
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
-            <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition">Cancelar</button>
-            <button onClick={handleSaveNF} className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
-              {editing ? "Salvar Alterações" : "Emitir Nota Fiscal"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Boleto Modal */}
-      <Modal isOpen={boletoModalOpen} title={editingBoleto ? "Editar Boleto" : "Novo Boleto"} onClose={() => setBoletoModalOpen(false)} size="md">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Cliente *</label>
-            <select
-              value={boletoForm.clienteId}
-              onChange={(e) => setBoletoForm({ ...boletoForm, clienteId: e.target.value })}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-            >
-              <option value="">Selecione um cliente...</option>
-              {(clients || []).map((c) => (
-                <option key={c.id} value={c.id}>{c.nome}</option>
-              ))}
-            </select>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Valor (R$) *</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={boletoForm.valor}
-                onChange={(e) => setBoletoForm({ ...boletoForm, valor: e.target.value })}
-                placeholder="0,00"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Vencimento *</label>
-              <input
-                type="date"
-                value={boletoForm.vencimento}
-                onChange={(e) => setBoletoForm({ ...boletoForm, vencimento: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Observações</label>
-            <textarea
-              value={boletoForm.observacoes}
-              onChange={(e) => setBoletoForm({ ...boletoForm, observacoes: e.target.value })}
-              rows={2}
-              placeholder="Referência, detalhes..."
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
-            />
-          </div>
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
-            <button onClick={() => setBoletoModalOpen(false)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition">Cancelar</button>
-            <button onClick={handleSaveBoleto} className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
-              {editingBoleto ? "Salvar Alterações" : "Gerar Boleto"}
-            </button>
-          </div>
-        </div>
-      </Modal>
-
-      {/* Confirm Delete */}
-      {confirmDelete && (
-        <ConfirmDialog
-          message={`Tem certeza que deseja excluir "${confirmDelete.item.numero}"?`}
-          onConfirm={confirmDeleteAction}
-          onCancel={() => setConfirmDelete(null)}
-        />
-      )}
-    </div>
-  );
-}
-
-// ─── PDV MODULE ─────────────────────────────────────────────────────────────
-
-function PDVModule({ user, addToast, inventory, reloadData }) {
-  const [cart, setCart] = useState([]);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [showDropdown, setShowDropdown] = useState(false);
-  const [discount, setDiscount] = useState("");
-  const [discountType, setDiscountType] = useState("percent");
-  const [paymentMethod, setPaymentMethod] = useState("PIX");
-  const [valorRecebido, setValorRecebido] = useState("");
-  const [todaySales, setTodaySales] = useState([]);
-  const dropdownRef = useRef(null);
-
-  const inventoryItems = useMemo(() => {
-    return (inventory || DB.list("erp:inventory:")).filter((i) => i.quantidade > 0);
-  }, [inventory]);
-
-  const loadTodaySales = useCallback(() => {
-    const all = DB.list("erp:pdv:");
-    const today = toISODate(new Date());
-    setTodaySales(all.filter((s) => s.data && s.data.startsWith(today)).sort((a, b) => new Date(b.data) - new Date(a.data)));
-  }, []);
-
-  useEffect(() => { loadTodaySales(); }, [loadTodaySales]);
-
-  const searchResults = useMemo(() => {
-    if (!searchTerm.trim()) return [];
-    const s = searchTerm.toLowerCase();
-    return inventoryItems
-      .filter((i) => (i.nome || "").toLowerCase().includes(s) || (i.sku || "").toLowerCase().includes(s))
-      .slice(0, 8);
-  }, [searchTerm, inventoryItems]);
-
-  const addToCart = useCallback((item) => {
-    setCart((prev) => {
-      const existing = prev.find((c) => c.itemId === item.id);
-      if (existing) {
-        if (existing.quantidade >= item.quantidade) {
-          addToast("Quantidade máxima em estoque atingida.", "warning");
-          return prev;
-        }
-        return prev.map((c) =>
-          c.itemId === item.id ? { ...c, quantidade: c.quantidade + 1 } : c
-        );
-      }
-      return [...prev, {
-        itemId: item.id,
-        nome: item.nome,
-        sku: item.sku,
-        precoUnitario: item.precoVenda || 0,
-        quantidade: 1,
-        estoqueDisponivel: item.quantidade,
-      }];
-    });
-    setSearchTerm("");
-    setShowDropdown(false);
-  }, [addToast]);
-
-  const updateCartQty = useCallback((itemId, delta) => {
-    setCart((prev) => prev.map((c) => {
-      if (c.itemId !== itemId) return c;
-      const newQty = c.quantidade + delta;
-      if (newQty <= 0) return null;
-      if (newQty > c.estoqueDisponivel) {
-        addToast("Estoque insuficiente.", "warning");
-        return c;
-      }
-      return { ...c, quantidade: newQty };
-    }).filter(Boolean));
-  }, [addToast]);
-
-  const removeFromCart = useCallback((itemId) => {
-    setCart((prev) => prev.filter((c) => c.itemId !== itemId));
-  }, []);
-
-  const subtotal = useMemo(() => cart.reduce((s, c) => s + c.precoUnitario * c.quantidade, 0), [cart]);
-
-  const discountValue = useMemo(() => {
-    const d = parseFloat(String(discount).replace(",", ".")) || 0;
-    if (discountType === "percent") return subtotal * (d / 100);
-    return d;
-  }, [subtotal, discount, discountType]);
-
-  const total = useMemo(() => Math.max(0, subtotal - discountValue), [subtotal, discountValue]);
-
-  const troco = useMemo(() => {
-    if (paymentMethod !== "Dinheiro") return 0;
-    const recebido = parseFloat(String(valorRecebido).replace(",", ".")) || 0;
-    return Math.max(0, recebido - total);
-  }, [paymentMethod, valorRecebido, total]);
-
-  const finalizeSale = useCallback(() => {
-    if (cart.length === 0) {
-      addToast("Adicione itens ao carrinho.", "error");
-      return;
-    }
-
-    if (paymentMethod === "Dinheiro") {
-      const recebido = parseFloat(String(valorRecebido).replace(",", ".")) || 0;
-      if (recebido < total) {
-        addToast("Valor recebido insuficiente.", "error");
-        return;
-      }
-    }
-
-    // Create PDV record
-    const saleId = genId();
-    const allSales = DB.list("erp:pdv:");
-    const numero = getNextNumber("PDV", allSales);
-
-    const sale = {
-      id: saleId,
-      numero,
-      itens: cart.map((c) => ({
-        itemId: c.itemId,
-        nome: c.nome,
-        sku: c.sku,
-        precoUnitario: c.precoUnitario,
-        quantidade: c.quantidade,
-        subtotal: c.precoUnitario * c.quantidade,
-      })),
-      subtotal,
-      desconto: discountValue,
-      total,
-      formaPagamento: paymentMethod,
-      valorRecebido: paymentMethod === "Dinheiro" ? parseFloat(String(valorRecebido).replace(",", ".")) || 0 : total,
-      troco: paymentMethod === "Dinheiro" ? troco : 0,
-      vendedor: user.nome,
-      data: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-    };
-    DB.set("erp:pdv:" + saleId, sale);
-
-    // Deduct inventory
-    cart.forEach((c) => {
-      const item = DB.get("erp:inventory:" + c.itemId);
-      if (item) {
-        const updated = { ...item, quantidade: Math.max(0, item.quantidade - c.quantidade), updatedAt: new Date().toISOString() };
-        DB.set("erp:inventory:" + item.id, updated);
-
-        // Record movement
-        const movements = DB.get("erp:movement:" + item.id) || [];
-        movements.push({
-          id: genId(),
-          itemId: item.id,
-          itemNome: item.nome,
-          tipo: "saida",
-          quantidade: c.quantidade,
-          quantidadeAnterior: item.quantidade,
-          quantidadeNova: updated.quantidade,
-          motivo: `Venda PDV ${numero}`,
-          usuario: user.nome,
-          data: new Date().toISOString(),
-        });
-        DB.set("erp:movement:" + item.id, movements);
-      }
-    });
-
-    // Create financial entry
-    const finId = genId();
-    DB.set("erp:finance:" + finId, {
-      id: finId,
-      numero: "VND-" + numero,
-      descricao: `Venda PDV ${numero}`,
-      valor: total,
-      tipo: "receita",
-      categoria: "Venda de Equipamento",
-      data: new Date().toISOString(),
-      status: "pago",
-      formaPagamento: paymentMethod,
-      observacoes: `${cart.length} item(ns) vendido(s)`,
-      osId: null,
-      createdAt: new Date().toISOString(),
-    });
-
-    addToast(`Venda ${numero} finalizada! Total: ${formatCurrency(total)}`, "success");
-
-    // Reset
-    setCart([]);
-    setDiscount("");
-    setValorRecebido("");
-    loadTodaySales();
-    if (reloadData) reloadData();
-  }, [cart, subtotal, discountValue, total, paymentMethod, valorRecebido, troco, user, addToast, loadTodaySales, reloadData]);
-
-  // Daily summary
-  const dailySummary = useMemo(() => {
-    const totalVendas = todaySales.reduce((s, sale) => s + (sale.total || 0), 0);
-    const qtdVendas = todaySales.length;
-    const ticketMedio = qtdVendas > 0 ? totalVendas / qtdVendas : 0;
-    return { totalVendas, qtdVendas, ticketMedio };
-  }, [todaySales]);
-
-  // Close dropdown on outside click
-  useEffect(() => {
-    const handler = (e) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
-        setShowDropdown(false);
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-white">Ponto de Venda</h2>
-          <p className="text-gray-400 text-sm mt-1">PDV - Vendas rápidas</p>
-        </div>
-      </div>
-
-      {/* Daily Summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <KPICard title="Total Vendas Hoje" value={formatCurrency(dailySummary.totalVendas)} icon="💰" />
-        <KPICard title="Ticket Médio" value={formatCurrency(dailySummary.ticketMedio)} icon="📊" />
-        <KPICard title="Qtd Vendas" value={dailySummary.qtdVendas} icon="🛒" />
-      </div>
-
-      {/* POS Interface */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left: Product Search + Cart */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* Product Search */}
-          <div className="relative" ref={dropdownRef}>
-            <div className="relative">
-              <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-              </svg>
-              <input
-                type="text"
-                value={searchTerm}
-                onChange={(e) => { setSearchTerm(e.target.value); setShowDropdown(true); }}
-                onFocus={() => setShowDropdown(true)}
-                placeholder="Buscar produto por nome ou SKU..."
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg pl-10 pr-4 py-3 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition text-sm"
-              />
-            </div>
-            {showDropdown && searchResults.length > 0 && (
-              <div className="absolute z-20 w-full mt-1 bg-gray-800 border border-gray-600 rounded-lg shadow-xl max-h-64 overflow-y-auto">
-                {searchResults.map((item) => (
-                  <button
-                    key={item.id}
-                    onClick={() => addToCart(item)}
-                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-gray-700 transition text-left border-b border-gray-700/50 last:border-0"
-                  >
-                    <div>
-                      <p className="text-white text-sm font-medium">{item.nome}</p>
-                      <p className="text-gray-400 text-xs">{item.sku} | Estoque: {item.quantidade}</p>
-                    </div>
-                    <span className="text-green-400 font-semibold text-sm">{formatCurrency(item.precoVenda)}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Cart */}
-          <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
-            <div className="px-4 py-3 border-b border-gray-700">
-              <h3 className="text-white font-semibold text-sm">Carrinho ({cart.length} itens)</h3>
-            </div>
-            {cart.length === 0 ? (
-              <div className="p-8 text-center">
-                <p className="text-gray-500 text-sm">Busque e adicione produtos ao carrinho</p>
-              </div>
-            ) : (
-              <div className="divide-y divide-gray-700/50">
-                {cart.map((item) => (
-                  <div key={item.itemId} className="flex items-center gap-3 px-4 py-3">
-                    <div className="flex-1 min-w-0">
-                      <p className="text-white text-sm font-medium truncate">{item.nome}</p>
-                      <p className="text-gray-400 text-xs">{item.sku} | {formatCurrency(item.precoUnitario)} un</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => updateCartQty(item.itemId, -1)}
-                        className="w-7 h-7 rounded-md bg-gray-700 text-gray-300 hover:bg-gray-600 flex items-center justify-center transition text-sm"
-                      >
-                        -
-                      </button>
-                      <span className="text-white font-medium text-sm w-8 text-center">{item.quantidade}</span>
-                      <button
-                        onClick={() => updateCartQty(item.itemId, 1)}
-                        className="w-7 h-7 rounded-md bg-gray-700 text-gray-300 hover:bg-gray-600 flex items-center justify-center transition text-sm"
-                      >
-                        +
-                      </button>
-                    </div>
-                    <span className="text-white font-semibold text-sm w-24 text-right">
-                      {formatCurrency(item.precoUnitario * item.quantidade)}
-                    </span>
-                    <button
-                      onClick={() => removeFromCart(item.itemId)}
-                      className="p-1 text-gray-400 hover:text-red-400 transition"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Right: Totals + Payment */}
-        <div className="space-y-4">
-          <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 space-y-4">
-            <h3 className="text-white font-semibold">Resumo</h3>
-
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span className="text-gray-400">Subtotal:</span>
-                <span className="text-white">{formatCurrency(subtotal)}</span>
-              </div>
-
-              {/* Discount */}
-              <div>
-                <label className="block text-xs text-gray-400 mb-1">Desconto</label>
-                <div className="flex gap-1">
-                  <input
-                    type="number"
-                    min="0"
-                    value={discount}
-                    onChange={(e) => setDiscount(e.target.value)}
-                    placeholder="0"
-                    className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-                  />
-                  <button
-                    onClick={() => setDiscountType(discountType === "percent" ? "value" : "percent")}
-                    className="px-3 py-2 bg-gray-700 border border-gray-600 rounded-lg text-sm text-gray-300 hover:bg-gray-600 transition min-w-[40px]"
-                  >
-                    {discountType === "percent" ? "%" : "R$"}
-                  </button>
-                </div>
-                {discountValue > 0 && (
-                  <p className="text-xs text-red-400 mt-1">-{formatCurrency(discountValue)}</p>
-                )}
-              </div>
-
-              <div className="flex justify-between text-lg font-bold border-t border-gray-700 pt-3 mt-3">
-                <span className="text-gray-300">Total:</span>
-                <span className="text-green-400">{formatCurrency(total)}</span>
-              </div>
-            </div>
-
-            {/* Payment Method */}
-            <div>
-              <label className="block text-xs text-gray-400 mb-2">Forma de Pagamento</label>
-              <div className="grid grid-cols-2 gap-1.5">
-                {["PIX", "Cartão Crédito", "Cartão Débito", "Dinheiro", "Boleto"].map((method) => (
-                  <button
-                    key={method}
-                    onClick={() => setPaymentMethod(method)}
-                    className={`py-2 px-2 rounded-lg text-xs font-medium transition ${
-                      paymentMethod === method
-                        ? "bg-blue-600 text-white"
-                        : "bg-gray-700 text-gray-300 hover:bg-gray-600"
-                    }`}
-                  >
-                    {method}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Cash change */}
-            {paymentMethod === "Dinheiro" && (
-              <div className="space-y-2">
-                <div>
-                  <label className="block text-xs text-gray-400 mb-1">Valor Recebido (R$)</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    value={valorRecebido}
-                    onChange={(e) => setValorRecebido(e.target.value)}
-                    placeholder="0,00"
-                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-                  />
-                </div>
-                {troco > 0 && (
-                  <div className="flex justify-between text-sm bg-green-500/10 border border-green-500/20 rounded-lg p-2">
-                    <span className="text-green-400">Troco:</span>
-                    <span className="text-green-400 font-bold">{formatCurrency(troco)}</span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Finalize */}
-            <button
-              onClick={finalizeSale}
-              disabled={cart.length === 0}
-              className="w-full py-3 bg-green-600 text-white rounded-lg font-semibold hover:bg-green-700 transition disabled:opacity-40 disabled:cursor-not-allowed text-sm"
-            >
-              Finalizar Venda - {formatCurrency(total)}
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Today's Sales History */}
-      {todaySales.length > 0 && (
-        <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-700">
-            <h3 className="text-white font-semibold text-sm">Vendas de Hoje</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-gray-700">
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Nº</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Hora</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Itens</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-400 uppercase">Pagamento</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-400 uppercase">Total</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-700/50">
-                {todaySales.map((sale) => (
-                  <tr key={sale.id} className="hover:bg-gray-700/30 transition-colors">
-                    <td className="px-4 py-3 text-gray-300">{sale.numero}</td>
-                    <td className="px-4 py-3 text-gray-300">{new Date(sale.data).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</td>
-                    <td className="px-4 py-3 text-gray-300">{(sale.itens || []).length} item(ns)</td>
-                    <td className="px-4 py-3 text-gray-300">{sale.formaPagamento}</td>
-                    <td className="px-4 py-3 text-green-400 font-medium text-right">{formatCurrency(sale.total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ─── WEBDESK MODULE ─────────────────────────────────────────────────────────
-
-function WebdeskModule({ user, dateFilter, addToast, clients }) {
-  const [tickets, setTickets] = useState([]);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [selectedTicket, setSelectedTicket] = useState(null);
-  const [search, setSearch] = useState("");
-  const [filterStatus, setFilterStatus] = useState("all");
-  const [filterPriority, setFilterPriority] = useState("all");
-  const [filterCategory, setFilterCategory] = useState("all");
-  const [replyText, setReplyText] = useState("");
-
-  const TICKET_CATEGORIES = ["Instalação", "Manutenção", "Garantia", "Dúvida", "Reclamação"];
-  const PRIORITIES = ["baixa", "media", "alta", "urgente"];
-  const PRIORITY_COLORS = {
-    baixa: "bg-green-500",
-    media: "bg-yellow-500",
-    alta: "bg-orange-500",
-    urgente: "bg-red-500",
-  };
-  const PRIORITY_LABELS = {
-    baixa: "Baixa",
-    media: "Média",
-    alta: "Alta",
-    urgente: "Urgente",
-  };
-
-  const loadTickets = useCallback(() => {
-    setTickets(DB.list("erp:ticket:"));
-  }, []);
-
-  useEffect(() => { loadTickets(); }, [loadTickets]);
-
-  const emptyForm = {
-    clienteId: "", assunto: "", categoria: "Dúvida", prioridade: "media", mensagemInicial: "",
-  };
-  const [form, setForm] = useState(emptyForm);
-
-  const filteredTickets = useMemo(() => {
-    let list = filterByDate(tickets, "dataAbertura", dateFilter);
-    if (filterStatus !== "all") list = list.filter((t) => t.status === filterStatus);
-    if (filterPriority !== "all") list = list.filter((t) => t.prioridade === filterPriority);
-    if (filterCategory !== "all") list = list.filter((t) => t.categoria === filterCategory);
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      list = list.filter(
-        (t) =>
-          (t.numero || "").toLowerCase().includes(s) ||
-          (t.assunto || "").toLowerCase().includes(s) ||
-          (t.clienteNome || "").toLowerCase().includes(s)
-      );
-    }
-    return list.sort((a, b) => new Date(b.dataAbertura) - new Date(a.dataAbertura));
-  }, [tickets, dateFilter, filterStatus, filterPriority, filterCategory, search]);
-
-  const stats = useMemo(() => ({
-    total: tickets.length,
-    abertos: tickets.filter((t) => t.status === "aberto").length,
-    em_andamento: tickets.filter((t) => t.status === "em_andamento").length,
-    resolvidos: tickets.filter((t) => t.status === "resolvido" || t.status === "fechado").length,
-  }), [tickets]);
-
-  const openCreate = useCallback(() => {
-    setForm(emptyForm);
-    setModalOpen(true);
-  }, []);
-
-  const handleSave = useCallback(() => {
-    if (!form.clienteId || !form.assunto.trim()) {
-      addToast("Preencha cliente e assunto.", "error");
-      return;
-    }
-
-    const cliente = (clients || []).find((c) => c.id === form.clienteId);
-    const numero = getNextNumber("TK", tickets);
-
-    const newTicket = {
-      id: genId(),
-      numero,
-      assunto: form.assunto.trim(),
-      clienteId: form.clienteId,
-      clienteNome: cliente?.nome || "—",
-      categoria: form.categoria,
-      prioridade: form.prioridade,
-      status: "aberto",
-      dataAbertura: new Date().toISOString(),
-      responsavelId: null,
-      responsavelNome: null,
-      mensagens: form.mensagemInicial.trim() ? [{
-        id: genId(),
-        autor: cliente?.nome || "Cliente",
-        tipo: "cliente",
-        texto: form.mensagemInicial.trim(),
-        data: new Date().toISOString(),
-      }] : [],
-      createdAt: new Date().toISOString(),
-    };
-
-    DB.set("erp:ticket:" + newTicket.id, newTicket);
-    addToast(MSG_TEMPLATES.ticket_aberto(numero), "success");
-    setModalOpen(false);
-    loadTickets();
-  }, [form, tickets, clients, loadTickets, addToast]);
-
-  const handleReply = useCallback(() => {
-    if (!replyText.trim() || !selectedTicket) return;
-
-    const msg = {
-      id: genId(),
-      autor: user.nome,
-      tipo: "staff",
-      texto: replyText.trim(),
-      data: new Date().toISOString(),
-    };
-
-    const updated = {
-      ...selectedTicket,
-      mensagens: [...(selectedTicket.mensagens || []), msg],
-      updatedAt: new Date().toISOString(),
-    };
-
-    if (updated.status === "aberto") {
-      updated.status = "em_andamento";
-      updated.responsavelId = user.id;
-      updated.responsavelNome = user.nome;
-    }
-
-    DB.set("erp:ticket:" + updated.id, updated);
-    setSelectedTicket(updated);
-    setReplyText("");
-    loadTickets();
-    addToast("Resposta enviada.", "success");
-  }, [replyText, selectedTicket, user, loadTickets, addToast]);
-
-  const changeTicketStatus = useCallback((status) => {
-    if (!selectedTicket) return;
-    const updated = {
-      ...selectedTicket,
-      status,
-      updatedAt: new Date().toISOString(),
-    };
-    if (status === "resolvido" || status === "fechado") {
-      updated.dataFechamento = new Date().toISOString();
-    }
-    DB.set("erp:ticket:" + updated.id, updated);
-    setSelectedTicket(updated);
-    loadTickets();
-    addToast(`Ticket atualizado para ${STATUS_MAP[status]?.label || status}.`, "success");
-  }, [selectedTicket, loadTickets, addToast]);
-
-  // Detail view
-  if (selectedTicket) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setSelectedTicket(null)}
-            className="p-2 rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-          </button>
-          <div className="flex-1">
-            <h2 className="text-xl font-bold text-white">{selectedTicket.numero} - {selectedTicket.assunto}</h2>
-            <p className="text-gray-400 text-sm">{selectedTicket.clienteNome} | {selectedTicket.categoria} | Aberto em {formatDateTime(selectedTicket.dataAbertura)}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white ${PRIORITY_COLORS[selectedTicket.prioridade] || "bg-gray-500"}`}>
-              {PRIORITY_LABELS[selectedTicket.prioridade] || selectedTicket.prioridade}
-            </span>
-            <StatusBadge status={selectedTicket.status} />
-          </div>
-        </div>
-
-        {/* Status Buttons */}
-        <div className="flex flex-wrap gap-2">
-          {selectedTicket.status !== "aberto" && (
-            <button onClick={() => changeTicketStatus("aberto")} className="px-3 py-1.5 text-xs rounded-lg bg-yellow-600 text-white hover:bg-yellow-700 transition">Reabrir</button>
-          )}
-          {selectedTicket.status !== "em_andamento" && selectedTicket.status !== "resolvido" && selectedTicket.status !== "fechado" && (
-            <button onClick={() => changeTicketStatus("em_andamento")} className="px-3 py-1.5 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">Em Andamento</button>
-          )}
-          {selectedTicket.status !== "resolvido" && selectedTicket.status !== "fechado" && (
-            <button onClick={() => changeTicketStatus("resolvido")} className="px-3 py-1.5 text-xs rounded-lg bg-green-600 text-white hover:bg-green-700 transition">Resolver</button>
-          )}
-          {selectedTicket.status !== "fechado" && (
-            <button onClick={() => changeTicketStatus("fechado")} className="px-3 py-1.5 text-xs rounded-lg bg-gray-600 text-white hover:bg-gray-700 transition">Fechar</button>
-          )}
-        </div>
-
-        {/* Timeline / Messages */}
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <h3 className="text-white font-semibold mb-4">Conversa</h3>
-          <div className="space-y-4 max-h-[400px] overflow-y-auto mb-4">
-            {(selectedTicket.mensagens || []).length === 0 ? (
-              <p className="text-gray-500 text-sm text-center py-4">Nenhuma mensagem ainda.</p>
-            ) : (
-              (selectedTicket.mensagens || []).map((msg) => {
-                const isStaff = msg.tipo === "staff";
-                return (
-                  <div key={msg.id} className={`flex ${isStaff ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[70%] rounded-xl p-3 ${isStaff ? "bg-blue-600/20 border border-blue-500/30" : "bg-gray-700/50 border border-gray-600/30"}`}>
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className={`text-xs font-medium ${isStaff ? "text-blue-400" : "text-gray-400"}`}>{msg.autor}</span>
-                        <span className="text-gray-500 text-xs">{formatDateTime(msg.data)}</span>
-                      </div>
-                      <p className="text-gray-200 text-sm whitespace-pre-wrap">{msg.texto}</p>
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-
-          {/* Reply */}
-          {selectedTicket.status !== "fechado" && (
-            <div className="flex gap-2 border-t border-gray-700 pt-4">
-              <textarea
-                value={replyText}
-                onChange={(e) => setReplyText(e.target.value)}
-                rows={2}
-                placeholder="Digite sua resposta..."
-                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none text-sm"
-              />
-              <button
-                onClick={handleReply}
-                disabled={!replyText.trim()}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition disabled:opacity-40 disabled:cursor-not-allowed text-sm self-end"
-              >
-                Enviar
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  const columns = [
-    { key: "numero", label: "Nº", width: "w-20" },
-    { key: "clienteNome", label: "Cliente" },
-    { key: "assunto", label: "Assunto" },
-    { key: "categoria", label: "Categoria" },
-    {
-      key: "prioridade", label: "Prioridade",
-      render: (v) => (
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white ${PRIORITY_COLORS[v] || "bg-gray-500"}`}>
-          {PRIORITY_LABELS[v] || v}
-        </span>
-      ),
-    },
-    { key: "status", label: "Status", render: (v) => <StatusBadge status={v} /> },
-    { key: "dataAbertura", label: "Abertura", render: (v) => formatDate(v) },
-  ];
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-white">Webdesk</h2>
-          <p className="text-gray-400 text-sm mt-1">Central de atendimento e tickets</p>
-        </div>
-        <button onClick={openCreate} className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-2">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-          Novo Ticket
-        </button>
-      </div>
-
-      {/* Summary */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <KPICard title="Total Tickets" value={stats.total} icon="🎫" />
-        <KPICard title="Abertos" value={stats.abertos} icon="📬" />
-        <KPICard title="Em Andamento" value={stats.em_andamento} icon="🔄" />
-        <KPICard title="Resolvidos" value={stats.resolvidos} icon="✅" />
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex-1 min-w-[200px] max-w-sm">
-          <SearchInput value={search} onChange={setSearch} placeholder="Buscar ticket..." />
-        </div>
-        <select
-          value={filterStatus}
-          onChange={(e) => setFilterStatus(e.target.value)}
-          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-        >
-          <option value="all">Todos status</option>
-          <option value="aberto">Aberto</option>
-          <option value="em_andamento">Em Andamento</option>
-          <option value="resolvido">Resolvido</option>
-          <option value="fechado">Fechado</option>
-        </select>
-        <select
-          value={filterPriority}
-          onChange={(e) => setFilterPriority(e.target.value)}
-          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-        >
-          <option value="all">Todas prioridades</option>
-          {PRIORITIES.map((p) => (
-            <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>
-          ))}
-        </select>
-        <select
-          value={filterCategory}
-          onChange={(e) => setFilterCategory(e.target.value)}
-          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-        >
-          <option value="all">Todas categorias</option>
-          {TICKET_CATEGORIES.map((c) => (
-            <option key={c} value={c}>{c}</option>
-          ))}
-        </select>
-      </div>
-
-      {/* Table */}
-      <DataTable
-        columns={columns}
-        data={filteredTickets}
-        actions={(row) => (
-          <button
-            onClick={() => { setSelectedTicket(row); setReplyText(""); }}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-gray-700 transition"
-            title="Ver detalhes"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-          </button>
-        )}
-        emptyMessage="Nenhum ticket encontrado."
-      />
-
-      {/* Create Modal */}
-      <Modal isOpen={modalOpen} title="Novo Ticket" onClose={() => setModalOpen(false)} size="md">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Cliente *</label>
-            <select
-              value={form.clienteId}
-              onChange={(e) => setForm({ ...form, clienteId: e.target.value })}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-            >
-              <option value="">Selecione um cliente...</option>
-              {(clients || []).map((c) => (
-                <option key={c.id} value={c.id}>{c.nome}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Assunto *</label>
-            <input
-              type="text"
-              value={form.assunto}
-              onChange={(e) => setForm({ ...form, assunto: e.target.value })}
-              placeholder="Resumo do ticket"
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Categoria</label>
-              <select
-                value={form.categoria}
-                onChange={(e) => setForm({ ...form, categoria: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                {TICKET_CATEGORIES.map((c) => (
-                  <option key={c} value={c}>{c}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Prioridade</label>
-              <select
-                value={form.prioridade}
-                onChange={(e) => setForm({ ...form, prioridade: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                {PRIORITIES.map((p) => (
-                  <option key={p} value={p}>{PRIORITY_LABELS[p]}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Mensagem Inicial</label>
-            <textarea
-              value={form.mensagemInicial}
-              onChange={(e) => setForm({ ...form, mensagemInicial: e.target.value })}
-              rows={4}
-              placeholder="Descreva o problema ou solicitação..."
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
-            />
-          </div>
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
-            <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition">Cancelar</button>
-            <button onClick={handleSave} className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">Abrir Ticket</button>
-          </div>
-        </div>
-      </Modal>
-    </div>
-  );
-}
 
 // ─── GERADOR DE DOCUMENTOS HTML ─────────────────────────────────────────────
 
@@ -4919,7 +1857,17 @@ function generateOrcamentoHTML(os, clients) {
     <table>
       <thead><tr><th>Descrição</th><th>Qtd</th><th style="text-align:right">Valor Unit.</th><th style="text-align:right">Subtotal</th></tr></thead>
       <tbody>
-        <tr><td>${os.tipo} — ${os.equipamentoModelo || "Serviço de Refrigeração"}</td><td>1</td><td style="text-align:right">${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(valorServico)}</td><td style="text-align:right">${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(valorServico)}</td></tr>
+        ${(() => {
+          const fmt = (n) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(n || 0);
+          const servicos = Array.isArray(os.servicos) && os.servicos.length > 0
+            ? os.servicos
+            : [{ tipo: os.tipo, descricao: os.equipamentoModelo || "Serviço de Refrigeração", valor: valorServico }];
+          return servicos.map((s) => {
+            const v = Number(s.valor) || 0;
+            const desc = s.descricao ? `${s.tipo} — ${s.descricao}` : `${s.tipo}${os.equipamentoModelo ? ` — ${os.equipamentoModelo}` : ""}`;
+            return `<tr><td>${desc}</td><td>1</td><td style="text-align:right">${fmt(v)}</td><td style="text-align:right">${fmt(v)}</td></tr>`;
+          }).join("");
+        })()}
         ${(os.itensUtilizados||[]).map(item=>`<tr><td>${item.nome||"Material"}</td><td>${item.quantidade||1}</td><td style="text-align:right">—</td><td style="text-align:right">incluso</td></tr>`).join("")}
       </tbody>
     </table>
@@ -4959,12 +1907,12 @@ function generateOSHTML(os, clients) {
 
   const STATUS_LABELS_OS = {
     aguardando:"Aguardando",em_deslocamento:"Em Deslocamento",
-    em_execucao:"Em Execução",finalizado:"Finalizado",faturado:"Faturado",
+    em_execucao:"Em Execução",finalizado:"Finalizado",
     concluido:"Concluído",pendente:"Pendente",em_andamento:"Em Andamento",
   };
 
   const statusLabel = STATUS_LABELS_OS[os.status] || os.status || "—";
-  const statusClass = ["finalizado","faturado","concluido"].includes(os.status) ? "badge-green"
+  const statusClass = ["finalizado","concluido"].includes(os.status) ? "badge-green"
     : os.status === "aguardando" || os.status === "pendente" ? "badge-yellow" : "badge-blue";
 
   return `<!DOCTYPE html>
@@ -5000,10 +1948,28 @@ function generateOSHTML(os, clients) {
     </div>
   </div>` : ""}
 
+  ${Array.isArray(os.servicos) && os.servicos.length > 0 ? `
+  <div class="section">
+    <div class="section-title">Serviços Executados</div>
+    <table>
+      <thead><tr><th>Tipo</th><th>Descrição</th><th style="text-align:right">Valor</th></tr></thead>
+      <tbody>
+        ${os.servicos.map((s) => {
+          const fmt = (n) => new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(Number(n) || 0);
+          return `<tr><td>${s.tipo || "—"}</td><td>${s.descricao || "—"}</td><td style="text-align:right">${fmt(s.valor)}</td></tr>`;
+        }).join("")}
+      </tbody>
+    </table>
+    <div class="total-section" style="margin-top:12px">
+      <div class="total-row grand"><span>TOTAL</span><span>${new Intl.NumberFormat("pt-BR",{style:"currency",currency:"BRL"}).format(os.valor || 0)}</span></div>
+    </div>
+  </div>
+  ` : `
   <div class="section">
     <div class="section-title">Descrição do Serviço</div>
     <div class="obs-box">${os.descricao || os.observacoes || "Sem descrição informada."}</div>
   </div>
+  `}
 
   ${(os.itensUtilizados||[]).length > 0 ? `
   <div class="section">
@@ -5112,20 +2078,19 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
   const [viewMode, setViewMode] = useState("lista");
 
   const SERVICE_TYPES = ["Instalação", "Manutenção", "Higienização", "Reparo", "Desinstalação"];
-  const STATUS_FLOW = ["aguardando", "em_deslocamento", "em_execucao", "finalizado", "faturado"];
+  // Fluxo de status simplificado após remoção do módulo financeiro — não há mais "faturado"
+  const STATUS_FLOW = ["aguardando", "em_deslocamento", "em_execucao", "finalizado"];
   const STATUS_LABELS_OS = {
     aguardando: "Aguardando",
     em_deslocamento: "Em Deslocamento",
     em_execucao: "Em Execução",
     finalizado: "Finalizado",
-    faturado: "Faturado",
   };
   const STATUS_COLORS_OS = {
     aguardando: "bg-yellow-500",
     em_deslocamento: "bg-cyan-500",
     em_execucao: "bg-blue-500",
     finalizado: "bg-green-500",
-    faturado: "bg-purple-500",
   };
 
   // Carrega clientes e funcionários do DB diretamente para garantir dados atualizados
@@ -5146,12 +2111,42 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
 
+  // Cada OS pode conter múltiplos serviços — cada linha tem tipo, descrição (opcional) e valor.
+  // valorTotal é calculado como soma dos valores individuais.
+  const emptyServico = { tipo: "Instalação", descricao: "", valor: "" };
   const emptyForm = {
-    clienteId: "", endereco: "", tipo: "Instalação",
+    clienteId: "", endereco: "",
+    servicos: [{ ...emptyServico }],
     equipamentoModelo: "", equipamentoBTUs: "",
-    tecnicoId: "", dataAgendada: toISODate(new Date()), observacoes: "", valor: "",
+    tecnicoId: "", dataAgendada: toISODate(new Date()), observacoes: "",
   };
   const [form, setForm] = useState(emptyForm);
+
+  // Soma reativa dos valores dos serviços do formulário
+  const valorTotalForm = useMemo(() => {
+    return (form.servicos || []).reduce((acc, s) => {
+      const v = parseFloat(String(s.valor || "0").replace(",", ".")) || 0;
+      return acc + v;
+    }, 0);
+  }, [form.servicos]);
+
+  const addServico = useCallback(() => {
+    setForm((f) => ({ ...f, servicos: [...(f.servicos || []), { ...emptyServico }] }));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const updateServico = useCallback((index, patch) => {
+    setForm((f) => ({
+      ...f,
+      servicos: (f.servicos || []).map((s, i) => (i === index ? { ...s, ...patch } : s)),
+    }));
+  }, []);
+
+  const removeServico = useCallback((index) => {
+    setForm((f) => {
+      const next = (f.servicos || []).filter((_, i) => i !== index);
+      return { ...f, servicos: next.length > 0 ? next : [{ ...emptyServico }] };
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const filteredOrders = useMemo(() => {
     let list = filterByDate(orders, "dataAbertura", dateFilter);
@@ -5182,7 +2177,6 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     em_deslocamento: filteredOrders.filter((os) => os.status === "em_deslocamento").length,
     em_execucao: filteredOrders.filter((os) => os.status === "em_execucao").length,
     finalizado: filteredOrders.filter((os) => os.status === "finalizado").length,
-    faturado: filteredOrders.filter((os) => os.status === "faturado").length,
   }), [filteredOrders]);
 
   const openCreate = useCallback(() => {
@@ -5193,29 +2187,57 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
   const openEdit = useCallback((row) => {
     setEditing(row);
+    // Migração: OS antigas têm tipo/valor soltos — convertemos para o array de serviços
+    const servicos = Array.isArray(row.servicos) && row.servicos.length > 0
+      ? row.servicos.map((s) => ({
+          tipo: s.tipo || "Instalação",
+          descricao: s.descricao || "",
+          valor: s.valor !== undefined && s.valor !== null ? String(s.valor) : "",
+        }))
+      : [{
+          tipo: row.tipo || "Instalação",
+          descricao: row.descricao || "",
+          valor: row.valor !== undefined && row.valor !== null ? String(row.valor) : "",
+        }];
     setForm({
       clienteId: row.clienteId || "",
       endereco: row.endereco || "",
-      tipo: row.tipo || "Instalação",
+      servicos,
       equipamentoModelo: row.equipamentoModelo || "",
       equipamentoBTUs: row.equipamentoBTUs || "",
       tecnicoId: row.tecnicoId || "",
       dataAgendada: row.dataAgendada ? row.dataAgendada.split("T")[0] : toISODate(new Date()),
       observacoes: row.observacoes || "",
-      valor: row.valor || "",
     });
     setModalOpen(true);
   }, []);
 
   const handleSave = useCallback(() => {
-    if (!form.clienteId || !form.tipo) {
-      addToast("Preencha os campos obrigatórios.", "error");
+    // Normaliza os serviços removendo entradas totalmente vazias
+    const servicosLimpos = (form.servicos || [])
+      .map((s) => ({
+        tipo: (s.tipo || "").trim(),
+        descricao: (s.descricao || "").trim(),
+        valor: parseFloat(String(s.valor || "0").replace(",", ".")) || 0,
+      }))
+      .filter((s) => s.tipo);
+
+    if (!form.clienteId || servicosLimpos.length === 0) {
+      addToast("Preencha o cliente e pelo menos um serviço.", "error");
       return;
     }
 
     const cliente = (allClients || []).find((c) => c.id === form.clienteId);
     const tecnico = tecnicos.find((t) => t.id === form.tecnicoId);
-    const valor = parseFloat(String(form.valor).replace(",", ".")) || 0;
+    const valorTotal = servicosLimpos.reduce((acc, s) => acc + s.valor, 0);
+
+    // Campos de retrocompatibilidade: tipo recebe resumo, descricao monta um texto
+    const tipoResumo = servicosLimpos.length === 1
+      ? servicosLimpos[0].tipo
+      : `Múltiplos (${servicosLimpos.length})`;
+    const descricaoResumo = servicosLimpos
+      .map((s) => s.descricao ? `${s.tipo}: ${s.descricao}` : s.tipo)
+      .join(" • ");
 
     if (editing) {
       const updated = {
@@ -5223,14 +2245,16 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         clienteId: form.clienteId,
         clienteNome: cliente?.nome || "—",
         endereco: form.endereco,
-        tipo: form.tipo,
+        servicos: servicosLimpos,
+        tipo: tipoResumo,
+        descricao: descricaoResumo,
         equipamentoModelo: form.equipamentoModelo,
         equipamentoBTUs: form.equipamentoBTUs,
         tecnicoId: form.tecnicoId,
         tecnicoNome: tecnico?.nome || "—",
         dataAgendada: form.dataAgendada + "T00:00:00.000Z",
         observacoes: form.observacoes,
-        valor,
+        valor: valorTotal,
         updatedAt: new Date().toISOString(),
       };
       DB.set("erp:os:" + updated.id, updated);
@@ -5243,8 +2267,9 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         clienteId: form.clienteId,
         clienteNome: cliente?.nome || "—",
         endereco: form.endereco || (cliente?.endereco ? `${cliente.endereco.rua}, ${cliente.endereco.bairro} - ${cliente.endereco.cidade}/${cliente.endereco.estado}` : ""),
-        tipo: form.tipo,
-        descricao: `${form.tipo} - ${form.equipamentoModelo || "Equipamento"}`,
+        servicos: servicosLimpos,
+        tipo: tipoResumo,
+        descricao: descricaoResumo,
         equipamentoModelo: form.equipamentoModelo,
         equipamentoBTUs: form.equipamentoBTUs,
         tecnicoId: form.tecnicoId,
@@ -5254,12 +2279,12 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         dataAgendada: form.dataAgendada + "T00:00:00.000Z",
         dataConclusao: null,
         observacoes: form.observacoes,
-        valor,
+        valor: valorTotal,
         itensUtilizados: [],
         createdAt: new Date().toISOString(),
       };
       DB.set("erp:os:" + newOS.id, newOS);
-      addToast(MSG_TEMPLATES.os_criada(numero), "success");
+      addToast(`Ordem de Serviço ${numero} criada com sucesso.`, "success");
     }
 
     setModalOpen(false);
@@ -5289,35 +2314,6 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     loadOrders();
   }, [loadOrders, addToast]);
 
-  const faturarOS = useCallback((os) => {
-    if (os.status !== "finalizado") {
-      addToast("Somente OS finalizadas podem ser faturadas.", "error");
-      return;
-    }
-
-    const finId = genId();
-    DB.set("erp:finance:" + finId, {
-      id: finId,
-      numero: "FAT-" + os.numero,
-      descricao: `${os.tipo} - ${os.clienteNome}`,
-      valor: os.valor || 0,
-      tipo: "receita",
-      categoria: os.tipo || "Serviço",
-      data: new Date().toISOString(),
-      status: "pendente",
-      formaPagamento: "Boleto",
-      observacoes: `Ref. OS ${os.numero}`,
-      osId: os.id,
-      createdAt: new Date().toISOString(),
-    });
-
-    const updated = { ...os, status: "faturado", updatedAt: new Date().toISOString() };
-    DB.set("erp:os:" + updated.id, updated);
-
-    addToast(`OS ${os.numero} faturada. Receita de ${formatCurrency(os.valor)} registrada.`, "success");
-    loadOrders();
-  }, [loadOrders, addToast]);
-
   const getNextStatus = useCallback((current) => {
     const idx = STATUS_FLOW.indexOf(current);
     if (idx < 0 || idx >= STATUS_FLOW.length - 1) return null;
@@ -5327,7 +2323,23 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
   const columns = [
     { key: "numero", label: "Nº", width: "w-24" },
     { key: "clienteNome", label: "Cliente" },
-    { key: "tipo", label: "Tipo" },
+    {
+      key: "tipo", label: "Tipo",
+      // Quando há múltiplos serviços, mostra tag com a quantidade + tooltip com a lista
+      render: (_, row) => {
+        const servicos = Array.isArray(row.servicos) ? row.servicos : null;
+        if (servicos && servicos.length > 1) {
+          const resumo = servicos.map((s) => s.tipo).join(", ");
+          return (
+            <span className="inline-flex items-center gap-1.5" title={resumo}>
+              <span>{servicos[0].tipo}</span>
+              <span className="px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-300 text-xs">+{servicos.length - 1}</span>
+            </span>
+          );
+        }
+        return row.tipo || "—";
+      },
+    },
     { key: "tecnicoNome", label: "Técnico" },
     {
       key: "status", label: "Status",
@@ -5375,13 +2387,12 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
       </div>
 
       {/* Summary */}
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <KPICard title="Total OS" value={stats.total} icon="📋" />
         <KPICard title="Aguardando" value={stats.aguardando} icon="⏳" />
         <KPICard title="Deslocamento" value={stats.em_deslocamento} icon="🚗" />
         <KPICard title="Execução" value={stats.em_execucao} icon="🔧" />
         <KPICard title="Finalizado" value={stats.finalizado} icon="✅" />
-        <KPICard title="Faturado" value={stats.faturado} icon="💰" />
       </div>
 
       {/* Filters */}
@@ -5422,29 +2433,13 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
           onDelete={(user.role === "admin" || user.role === "gerente") ? handleDelete : undefined}
           actions={(row) => (
             <>
-              {row.status !== "faturado" && getNextStatus(row.status) && (
+              {getNextStatus(row.status) && (
                 <button
-                  onClick={() => {
-                    const next = getNextStatus(row.status);
-                    if (next === "faturado") {
-                      faturarOS(row);
-                    } else {
-                      changeStatus(row, next);
-                    }
-                  }}
+                  onClick={() => changeStatus(row, getNextStatus(row.status))}
                   className="p-1.5 rounded-lg text-gray-400 hover:text-cyan-400 hover:bg-gray-700 transition"
                   title={`Avançar para ${STATUS_LABELS_OS[getNextStatus(row.status)]}`}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
-                </button>
-              )}
-              {row.status === "finalizado" && (
-                <button
-                  onClick={() => faturarOS(row)}
-                  className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition"
-                  title="Faturar OS"
-                >
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
                 </button>
               )}
               {/* Botões de documentos HTML */}
@@ -5462,7 +2457,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
               </button>
-              {(row.status === "finalizado" || row.status === "faturado" || row.status === "concluido") && (
+              {(row.status === "finalizado" || row.status === "concluido") && (
                 <button
                   onClick={() => openHTMLDoc(generateReciboHTML(row, allClients))}
                   className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition"
@@ -5479,7 +2474,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
       {/* Kanban View */}
       {viewMode === "kanban" && (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {STATUS_FLOW.map((status) => {
             const osInCol = filteredOrders.filter((os) => os.status === status);
             return (
@@ -5502,13 +2497,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                           className="cursor-pointer"
                           onClick={() => {
                             const next = getNextStatus(os.status);
-                            if (next) {
-                              if (next === "faturado") {
-                                faturarOS(os);
-                              } else {
-                                changeStatus(os, next);
-                              }
-                            }
+                            if (next) changeStatus(os, next);
                           }}
                         >
                           <p className="text-white text-xs font-semibold">{os.numero}</p>
@@ -5523,7 +2512,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                         <div className="flex items-center gap-1 mt-2 pt-2 border-t border-gray-600/30">
                           <button onClick={() => openHTMLDoc(generateOrcamentoHTML(os, allClients))} className="flex-1 py-1 text-xs rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/40 transition text-center" title="Orçamento">Orç.</button>
                           <button onClick={() => openHTMLDoc(generateOSHTML(os, allClients))} className="flex-1 py-1 text-xs rounded bg-purple-600/20 text-purple-400 hover:bg-purple-600/40 transition text-center" title="OS">OS</button>
-                          {(os.status === "finalizado" || os.status === "faturado" || os.status === "concluido") && (
+                          {(os.status === "finalizado" || os.status === "concluido") && (
                             <button onClick={() => openHTMLDoc(generateReciboHTML(os, allClients))} className="flex-1 py-1 text-xs rounded bg-green-600/20 text-green-400 hover:bg-green-600/40 transition text-center" title="Recibo">Recibo</button>
                           )}
                         </div>
@@ -5540,40 +2529,26 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
       {/* Create/Edit Modal */}
       <Modal isOpen={modalOpen} title={editing ? "Editar OS" : "Nova Ordem de Serviço"} onClose={() => setModalOpen(false)} size="lg">
         <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Cliente *</label>
-              <select
-                value={form.clienteId}
-                onChange={(e) => {
-                  const cid = e.target.value;
-                  const c = (allClients || []).find((cl) => cl.id === cid);
-                  setForm({
-                    ...form,
-                    clienteId: cid,
-                    endereco: c?.endereco ? `${c.endereco.rua}, ${c.endereco.bairro} - ${c.endereco.cidade}/${c.endereco.estado}` : form.endereco,
-                  });
-                }}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                <option value="">Selecione...</option>
-                {(allClients || []).map((c) => (
-                  <option key={c.id} value={c.id}>{c.nome}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo de Serviço *</label>
-              <select
-                value={form.tipo}
-                onChange={(e) => setForm({ ...form, tipo: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                {SERVICE_TYPES.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-            </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">Cliente *</label>
+            <select
+              value={form.clienteId}
+              onChange={(e) => {
+                const cid = e.target.value;
+                const c = (allClients || []).find((cl) => cl.id === cid);
+                setForm({
+                  ...form,
+                  clienteId: cid,
+                  endereco: c?.endereco ? `${c.endereco.rua}, ${c.endereco.bairro} - ${c.endereco.cidade}/${c.endereco.estado}` : form.endereco,
+                });
+              }}
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+            >
+              <option value="">Selecione...</option>
+              {(allClients || []).map((c) => (
+                <option key={c.id} value={c.id}>{c.nome}</option>
+              ))}
+            </select>
           </div>
 
           <div>
@@ -5585,6 +2560,76 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
               placeholder="Endereço do serviço"
               className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
             />
+          </div>
+
+          {/* Lista dinâmica de serviços — cada OS pode ter um ou mais */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="block text-sm font-medium text-gray-300">Serviços *</label>
+              <span className="text-xs text-gray-400">
+                Total: <span className="text-white font-semibold">{formatCurrency(valorTotalForm)}</span>
+              </span>
+            </div>
+            <div className="space-y-2">
+              {(form.servicos || []).map((s, idx) => (
+                <div key={idx} className="grid grid-cols-12 gap-2 items-end bg-gray-700/40 border border-gray-700 rounded-lg p-2.5">
+                  <div className="col-span-12 sm:col-span-3">
+                    <label className="block text-xs text-gray-400 mb-1">Tipo</label>
+                    <select
+                      value={s.tipo}
+                      onChange={(e) => updateServico(idx, { tipo: e.target.value })}
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
+                    >
+                      {SERVICE_TYPES.map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="col-span-8 sm:col-span-6">
+                    <label className="block text-xs text-gray-400 mb-1">Descrição</label>
+                    <input
+                      type="text"
+                      value={s.descricao}
+                      onChange={(e) => updateServico(idx, { descricao: e.target.value })}
+                      placeholder="Detalhe do serviço (opcional)"
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                    />
+                  </div>
+                  <div className="col-span-3 sm:col-span-2">
+                    <label className="block text-xs text-gray-400 mb-1">Valor (R$)</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={s.valor}
+                      onChange={(e) => updateServico(idx, { valor: e.target.value })}
+                      placeholder="0,00"
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                    />
+                  </div>
+                  <div className="col-span-1 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => removeServico(idx)}
+                      disabled={(form.servicos || []).length <= 1}
+                      className="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-gray-700 transition disabled:opacity-30 disabled:cursor-not-allowed min-h-[36px] min-w-[36px] inline-flex items-center justify-center"
+                      aria-label="Remover serviço"
+                      title="Remover serviço"
+                    >
+                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={addServico}
+              className="w-full sm:w-auto px-3 py-2 text-sm rounded-lg bg-blue-600/20 border border-blue-600/40 text-blue-300 hover:bg-blue-600/30 transition inline-flex items-center gap-2"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              Adicionar serviço
+            </button>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -5610,7 +2655,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Técnico</label>
               <select
@@ -5631,18 +2676,6 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                 value={form.dataAgendada}
                 onChange={(e) => setForm({ ...form, dataAgendada: e.target.value })}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Valor (R$)</label>
-              <input
-                type="number"
-                step="0.01"
-                min="0"
-                value={form.valor}
-                onChange={(e) => setForm({ ...form, valor: e.target.value })}
-                placeholder="0,00"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
               />
             </div>
           </div>
@@ -5681,8 +2714,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
 // ─── SCHEDULE MODULE ────────────────────────────────────────────────────────
 
-function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
+function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavigate }) {
   const [appointments, setAppointments] = useState([]);
+  // OS também entram no calendário como itens "só visualização" (origem=os) — editáveis só pelo módulo OS
+  const [serviceOrders, setServiceOrders] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -5696,6 +2731,12 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
     em_andamento: "bg-yellow-500",
     concluido: "bg-green-500",
     cancelado: "bg-red-500",
+    // Status provenientes das OS — usamos cores distintas para separar visualmente
+    aguardando: "bg-amber-500",
+    em_deslocamento: "bg-cyan-600",
+    em_execucao: "bg-blue-600",
+    finalizado: "bg-green-600",
+    pendente: "bg-orange-500",
   };
   const STATUS_LABELS_SCHEDULE = {
     agendado: "Agendado",
@@ -5703,6 +2744,11 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
     em_andamento: "Em Andamento",
     concluido: "Concluído",
     cancelado: "Cancelado",
+    aguardando: "Aguardando",
+    em_deslocamento: "Em Deslocamento",
+    em_execucao: "Em Execução",
+    finalizado: "Finalizado",
+    pendente: "Pendente",
   };
 
   // Carrega clientes e funcionários do DB diretamente para refletir cadastros recentes
@@ -5716,11 +2762,61 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
   }, [employees, clients]);
   const tecnicos = useMemo(() => allEmployees.filter((e) => e.tipo === "tecnico" && e.status === "ativo"), [allEmployees]);
 
+  // Carrega agendamentos (erp:schedule:) e OS (erp:os:) — os dois stores alimentam o calendário
   const loadAppointments = useCallback(() => {
     setAppointments(DB.list("erp:schedule:"));
+    setServiceOrders(DB.list("erp:os:"));
   }, []);
 
   useEffect(() => { loadAppointments(); }, [loadAppointments]);
+
+  // Converte cada OS no formato compatível com a visualização do calendário.
+  // dataAgendada normalmente vem como "YYYY-MM-DDT00:00:00.000Z" — extraímos só a data
+  // para evitar problemas de fuso (UTC 00:00 vira dia anterior em BRT).
+  // Para OS sem dataAgendada, cai para dataAbertura (timestamp real).
+  const osAsAppointments = useMemo(() => {
+    const pad = (n) => String(n).padStart(2, "0");
+    return serviceOrders
+      .filter((os) => os.status !== "cancelado" && (os.dataAgendada || os.dataAbertura))
+      .map((os) => {
+        let dataStr, dataFimStr;
+        if (os.dataAgendada) {
+          // "2024-01-15T00:00:00.000Z" → "2024-01-15" → "2024-01-15T09:00"
+          const datePart = String(os.dataAgendada).slice(0, 10);
+          dataStr = `${datePart}T09:00`;
+          dataFimStr = `${datePart}T10:00`;
+        } else {
+          const dt = new Date(os.dataAbertura);
+          const datePart = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+          const timePart = `${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+          dataStr = `${datePart}T${timePart}`;
+          const dtFim = new Date(dt.getTime() + 60 * 60 * 1000);
+          dataFimStr = `${dtFim.getFullYear()}-${pad(dtFim.getMonth() + 1)}-${pad(dtFim.getDate())}T${pad(dtFim.getHours())}:${pad(dtFim.getMinutes())}`;
+        }
+        return {
+          id: "os-" + os.id,
+          osId: os.id,
+          origem: "os",
+          titulo: `OS ${os.numero || ""} — ${os.tipo || "Serviço"}`,
+          data: dataStr,
+          dataFim: dataFimStr,
+          clienteId: os.clienteId,
+          clienteNome: os.clienteNome || "—",
+          tecnicoId: os.tecnicoId,
+          tecnicoNome: os.tecnicoNome || "—",
+          tipo: os.tipo,
+          endereco: os.endereco || "",
+          status: os.status || "aguardando",
+          observacoes: os.descricao || "",
+        };
+      });
+  }, [serviceOrders]);
+
+  // Lista unificada usada por todos os renderizadores do calendário
+  const allItems = useMemo(() => {
+    const scheduled = appointments.map((a) => ({ ...a, origem: a.origem || "agenda" }));
+    return [...scheduled, ...osAsAppointments];
+  }, [appointments, osAsAppointments]);
 
   const emptyForm = {
     data: toISODate(new Date()),
@@ -5758,10 +2854,11 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
     return days;
   }, [year, month]);
 
+  // Agora inclui agendamentos + OS do dia (visualização unificada)
   const getAppointmentsForDate = useCallback((dateStr) => {
     if (!dateStr) return [];
-    return appointments.filter((a) => a.data && a.data.startsWith(dateStr));
-  }, [appointments]);
+    return allItems.filter((a) => a.data && a.data.startsWith(dateStr));
+  }, [allItems]);
 
   // Week view
   const weekDays = useMemo(() => {
@@ -5821,7 +2918,21 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
     setModalOpen(true);
   }, []);
 
-  const openEdit = useCallback((appt) => {
+  // Clique em item do calendário — OS redireciona para o módulo Ordens de Serviço
+  const handleItemClick = useCallback((item) => {
+    if (item.origem === "os") {
+      if (onNavigate) {
+        onNavigate("processos");
+        addToast("Edite a OS pelo módulo Ordens de Serviço.", "info");
+      } else {
+        addToast("Esta OS é editada pelo módulo Ordens de Serviço.", "info");
+      }
+      return;
+    }
+    openEditInternal(item);
+  }, [onNavigate, addToast]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const openEditInternal = useCallback((appt) => {
     setEditing(appt);
     // Extrai horário diretamente da string (sem conversão de fuso) — ex: "2024-01-15T09:00" → "09:00"
     const startTime = appt.data && appt.data.includes("T") ? appt.data.slice(11, 16) : "08:00";
@@ -5854,7 +2965,8 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
       return;
     }
 
-    const conflicts = appointments.filter((a) => {
+    // Detecção de conflito considera agendamentos E OS do mesmo técnico
+    const conflicts = allItems.filter((a) => {
       if (editing && a.id === editing.id) return false;
       if (a.tecnicoId !== form.tecnicoId) return false;
       if (a.status === "cancelado") return false;
@@ -5864,7 +2976,11 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
     });
 
     if (conflicts.length > 0) {
-      addToast("Conflito de horário! Técnico já possui agendamento nesse período.", "error");
+      const hasOS = conflicts.some((c) => c.origem === "os");
+      addToast(hasOS
+        ? "Conflito de horário! Técnico já possui uma OS nesse período."
+        : "Conflito de horário! Técnico já possui agendamento nesse período.",
+        "error");
       return;
     }
 
@@ -5910,7 +3026,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
 
     setModalOpen(false);
     loadAppointments();
-  }, [form, editing, appointments, allClients, tecnicos, loadAppointments, addToast]);
+  }, [form, editing, allItems, allClients, tecnicos, loadAppointments, addToast]);
 
   const handleDelete = useCallback((appt) => {
     setConfirmDelete(appt);
@@ -6040,11 +3156,12 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
                         {appts.slice(0, 3).map((a) => (
                           <div
                             key={a.id}
-                            className={`text-xs px-1 py-0.5 rounded truncate text-white ${STATUS_COLORS_SCHEDULE[a.status] || "bg-gray-600"}`}
-                            onClick={(e) => { e.stopPropagation(); openEdit(a); }}
-                            title={a.titulo}
+                            className={`text-xs px-1 py-0.5 rounded truncate text-white flex items-center gap-1 ${STATUS_COLORS_SCHEDULE[a.status] || "bg-gray-600"} ${a.origem === "os" ? "ring-1 ring-white/30" : ""}`}
+                            onClick={(e) => { e.stopPropagation(); handleItemClick(a); }}
+                            title={`${a.origem === "os" ? "OS — clique para abrir Ordens de Serviço" : "Agendamento"} · ${a.titulo}`}
                           >
-                            {a.titulo}
+                            {a.origem === "os" && <span aria-hidden="true">🔧</span>}
+                            <span className="truncate">{a.titulo}</span>
                           </div>
                         ))}
                         {appts.length > 3 && (
@@ -6076,10 +3193,14 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
                     {appts.map((a) => (
                       <div
                         key={a.id}
-                        className={`text-xs p-1.5 rounded text-white cursor-pointer ${STATUS_COLORS_SCHEDULE[a.status] || "bg-gray-600"} hover:opacity-80 transition`}
-                        onClick={() => openEdit(a)}
+                        className={`text-xs p-1.5 rounded text-white cursor-pointer ${STATUS_COLORS_SCHEDULE[a.status] || "bg-gray-600"} ${a.origem === "os" ? "ring-1 ring-white/30" : ""} hover:opacity-80 transition`}
+                        onClick={() => handleItemClick(a)}
+                        title={a.origem === "os" ? "OS — abre no módulo Ordens de Serviço" : "Agendamento"}
                       >
-                        <p className="font-medium truncate">{a.titulo}</p>
+                        <p className="font-medium truncate flex items-center gap-1">
+                          {a.origem === "os" && <span aria-hidden="true">🔧</span>}
+                          {a.titulo}
+                        </p>
                         <p className="opacity-75">{new Date(a.data).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</p>
                         <p className="opacity-75 truncate">{a.tecnicoNome}</p>
                       </div>
@@ -6101,7 +3222,8 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
           <div className="divide-y divide-gray-700/50">
             {timeSlots.map((slot) => {
               const slotDate = toISODate(currentDate);
-              const slotAppts = appointments.filter((a) => {
+              // Agora considera agendamentos + OS
+              const slotAppts = allItems.filter((a) => {
                 if (!a.data || !a.data.startsWith(slotDate)) return false;
                 const aHour = new Date(a.data).getHours();
                 return aHour === parseInt(slot);
@@ -6115,25 +3237,30 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
                     {slotAppts.map((a) => (
                       <div
                         key={a.id}
-                        className={`text-xs p-2 rounded text-white flex-1 min-w-[150px] cursor-pointer ${STATUS_COLORS_SCHEDULE[a.status] || "bg-gray-600"} hover:opacity-80`}
-                        onClick={(e) => { e.stopPropagation(); openEdit(a); }}
+                        className={`text-xs p-2 rounded text-white flex-1 min-w-[150px] cursor-pointer ${STATUS_COLORS_SCHEDULE[a.status] || "bg-gray-600"} ${a.origem === "os" ? "ring-1 ring-white/30" : ""} hover:opacity-80`}
+                        onClick={(e) => { e.stopPropagation(); handleItemClick(a); }}
                       >
-                        <p className="font-medium">{a.titulo}</p>
+                        <p className="font-medium flex items-center gap-1">
+                          {a.origem === "os" && <span aria-hidden="true">🔧</span>}
+                          {a.titulo}
+                        </p>
                         <p className="opacity-75">{a.tecnicoNome} | {a.clienteNome}</p>
-                        <div className="flex gap-1 mt-1">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); sendWhatsApp(a); }}
-                            className="text-xs bg-green-600/50 px-1.5 py-0.5 rounded hover:bg-green-600 transition"
-                          >
-                            WhatsApp
-                          </button>
-                          <button
-                            onClick={(e) => { e.stopPropagation(); sendEmail(a); }}
-                            className="text-xs bg-blue-600/50 px-1.5 py-0.5 rounded hover:bg-blue-600 transition"
-                          >
-                            Email
-                          </button>
-                        </div>
+                        {a.origem !== "os" && (
+                          <div className="flex gap-1 mt-1">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); sendWhatsApp(a); }}
+                              className="text-xs bg-green-600/50 px-1.5 py-0.5 rounded hover:bg-green-600 transition"
+                            >
+                              WhatsApp
+                            </button>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); sendEmail(a); }}
+                              className="text-xs bg-blue-600/50 px-1.5 py-0.5 rounded hover:bg-blue-600 transition"
+                            >
+                              Email
+                            </button>
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -6144,32 +3271,44 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
         </div>
       )}
 
-      {/* Today's appointments highlight */}
-      {appointments.filter((a) => a.data && a.data.startsWith(todayStr) && a.status !== "cancelado").length > 0 && (
+      {/* Today's items — agendamentos + OS */}
+      {allItems.filter((a) => a.data && a.data.startsWith(todayStr) && a.status !== "cancelado").length > 0 && (
         <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <h3 className="text-white font-semibold mb-3">Agendamentos de Hoje</h3>
+          <h3 className="text-white font-semibold mb-3">Agenda de Hoje</h3>
           <div className="space-y-2">
-            {appointments
+            {allItems
               .filter((a) => a.data && a.data.startsWith(todayStr) && a.status !== "cancelado")
               .sort((a, b) => new Date(a.data) - new Date(b.data))
               .map((a) => (
                 <div key={a.id} className="flex items-center gap-3 p-3 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition">
                   <div className={`w-2 h-8 rounded-full ${STATUS_COLORS_SCHEDULE[a.status]}`} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-white text-sm font-medium truncate">{a.titulo}</p>
+                    <p className="text-white text-sm font-medium truncate flex items-center gap-1.5">
+                      {a.origem === "os" && <span className="text-xs px-1.5 py-0.5 rounded bg-purple-500/30 text-purple-200">OS</span>}
+                      {a.titulo}
+                    </p>
                     <p className="text-gray-400 text-xs">
                       {new Date(a.data).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })} -
                       {a.dataFim ? new Date(a.dataFim).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" }) : ""} | {a.tecnicoNome}
                     </p>
                   </div>
                   <div className="flex gap-1">
-                    <button onClick={() => sendWhatsApp(a)} className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition" title="WhatsApp">
-                      <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" /></svg>
-                    </button>
-                    <button onClick={() => sendEmail(a)} className="p-1.5 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-gray-700 transition" title="Email">
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
-                    </button>
-                    {a.status === "agendado" && (
+                    {a.origem !== "os" && (
+                      <>
+                        <button onClick={() => sendWhatsApp(a)} className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition" title="WhatsApp">
+                          <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z" /></svg>
+                        </button>
+                        <button onClick={() => sendEmail(a)} className="p-1.5 rounded-lg text-gray-400 hover:text-blue-400 hover:bg-gray-700 transition" title="Email">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" /></svg>
+                        </button>
+                      </>
+                    )}
+                    {a.origem === "os" && (
+                      <button onClick={() => onNavigate && onNavigate("processos")} className="p-1.5 rounded-lg text-gray-400 hover:text-purple-400 hover:bg-gray-700 transition" title="Abrir em Ordens de Serviço">
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" /></svg>
+                      </button>
+                    )}
+                    {a.origem !== "os" && a.status === "agendado" && (
                       <button onClick={() => changeApptStatus(a, "confirmado")} className="p-1.5 rounded-lg text-gray-400 hover:text-cyan-400 hover:bg-gray-700 transition" title="Confirmar">
                         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
                       </button>
@@ -6311,376 +3450,6 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees }) {
   );
 }
 
-// ─── BANKING MODULE ──────────────────────────────────────────────────────────
-
-function BankingModule({ user, dateFilter, addToast }) {
-  const [bankEntries, setBankEntries] = useState([]);
-  const [internalEntries, setInternalEntries] = useState([]);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [search, setSearch] = useState("");
-  const [selectedBank, setSelectedBank] = useState(null);
-  const [selectedInternal, setSelectedInternal] = useState(null);
-  const [confirmAction, setConfirmAction] = useState(null);
-
-  const emptyForm = {
-    data: toISODate(new Date()),
-    descricao: "",
-    valor: "",
-    referencia: "",
-  };
-  const [form, setForm] = useState(emptyForm);
-
-  const loadData = useCallback(() => {
-    setBankEntries(DB.list("erp:banking:"));
-    setInternalEntries(DB.list("erp:finance:"));
-  }, []);
-
-  useEffect(() => { loadData(); }, [loadData]);
-
-  const filteredBank = useMemo(() => {
-    let list = filterByDate(bankEntries, "data", dateFilter);
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      list = list.filter(
-        (e) =>
-          (e.descricao || "").toLowerCase().includes(s) ||
-          (e.referencia || "").toLowerCase().includes(s)
-      );
-    }
-    return list.sort((a, b) => new Date(b.data) - new Date(a.data));
-  }, [bankEntries, dateFilter, search]);
-
-  const filteredInternal = useMemo(() => {
-    let list = filterByDate(internalEntries, "data", dateFilter);
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      list = list.filter(
-        (t) =>
-          (t.descricao || "").toLowerCase().includes(s) ||
-          (t.numero || "").toLowerCase().includes(s)
-      );
-    }
-    return list.sort((a, b) => new Date(b.data) - new Date(a.data));
-  }, [internalEntries, dateFilter, search]);
-
-  const totalConciliados = useMemo(() => filteredBank.filter((e) => e.statusConciliacao === "conciliado").length, [filteredBank]);
-  const totalPendentes = useMemo(() => filteredBank.filter((e) => !e.statusConciliacao || e.statusConciliacao === "pendente").length, [filteredBank]);
-  const totalDivergentes = useMemo(() => filteredBank.filter((e) => e.statusConciliacao === "divergente").length, [filteredBank]);
-
-  const handleAddEntry = useCallback(() => {
-    setForm(emptyForm);
-    setModalOpen(true);
-  }, []);
-
-  const handleSaveEntry = useCallback(() => {
-    if (!form.descricao.trim() || !form.valor || !form.data) {
-      addToast("Preencha os campos obrigatórios.", "error");
-      return;
-    }
-    const valor = parseFloat(String(form.valor).replace(",", "."));
-    if (isNaN(valor)) {
-      addToast("Informe um valor válido.", "error");
-      return;
-    }
-    const entry = {
-      id: genId(),
-      data: form.data + "T00:00:00.000Z",
-      descricao: form.descricao.trim(),
-      valor,
-      referencia: form.referencia.trim(),
-      statusConciliacao: "pendente",
-      conciliadoCom: null,
-      createdAt: new Date().toISOString(),
-    };
-    DB.set("erp:banking:" + entry.id, entry);
-    addToast("Lançamento bancário adicionado.", "success");
-    setModalOpen(false);
-    loadData();
-  }, [form, loadData, addToast]);
-
-  const autoMatch = useCallback(() => {
-    const bank = DB.list("erp:banking:");
-    const finance = DB.list("erp:finance:");
-    let matched = 0;
-
-    bank.forEach((be) => {
-      if (be.statusConciliacao === "conciliado") return;
-      const beDate = new Date(be.data);
-      const beVal = Math.abs(be.valor);
-
-      const match = finance.find((fe) => {
-        if (fe.conciliadoBanking) return false;
-        const feDate = new Date(fe.data);
-        const feVal = fe.valor || 0;
-        const dayDiff = Math.abs((beDate - feDate) / (1000 * 60 * 60 * 24));
-        return Math.abs(feVal - beVal) < 0.01 && dayDiff <= 2;
-      });
-
-      if (match) {
-        be.statusConciliacao = "conciliado";
-        be.conciliadoCom = match.id;
-        DB.set("erp:banking:" + be.id, be);
-        match.conciliadoBanking = be.id;
-        DB.set("erp:finance:" + match.id, match);
-        matched++;
-      }
-    });
-
-    if (matched > 0) {
-      addToast(`${matched} lançamento(s) conciliado(s) automaticamente.`, "success");
-    } else {
-      addToast("Nenhuma correspondência encontrada.", "info");
-    }
-    loadData();
-  }, [loadData, addToast]);
-
-  const manualConciliate = useCallback(() => {
-    if (!selectedBank || !selectedInternal) {
-      addToast("Selecione um lançamento bancário e um lançamento interno.", "warning");
-      return;
-    }
-    const be = { ...selectedBank, statusConciliacao: "conciliado", conciliadoCom: selectedInternal.id };
-    DB.set("erp:banking:" + be.id, be);
-    const fe = { ...selectedInternal, conciliadoBanking: be.id };
-    DB.set("erp:finance:" + fe.id, fe);
-    addToast("Lançamentos conciliados manualmente.", "success");
-    setSelectedBank(null);
-    setSelectedInternal(null);
-    loadData();
-  }, [selectedBank, selectedInternal, loadData, addToast]);
-
-  const markResolved = useCallback((entry) => {
-    const updated = { ...entry, statusConciliacao: "conciliado" };
-    DB.set("erp:banking:" + updated.id, updated);
-    addToast("Lançamento marcado como resolvido.", "success");
-    loadData();
-  }, [loadData, addToast]);
-
-  const markDivergent = useCallback((entry) => {
-    const updated = { ...entry, statusConciliacao: "divergente" };
-    DB.set("erp:banking:" + updated.id, updated);
-    addToast("Lançamento marcado como divergente.", "warning");
-    loadData();
-  }, [loadData, addToast]);
-
-  const conciliacaoColor = (status) => {
-    if (status === "conciliado") return "bg-green-500";
-    if (status === "divergente") return "bg-red-500";
-    return "bg-yellow-500";
-  };
-
-  const conciliacaoLabel = (status) => {
-    if (status === "conciliado") return "Conciliado";
-    if (status === "divergente") return "Divergente";
-    return "Pendente";
-  };
-
-  const valorConciliado = useMemo(() => filteredBank.filter((e) => e.statusConciliacao === "conciliado").reduce((s, e) => s + Math.abs(e.valor || 0), 0), [filteredBank]);
-  const valorPendente = useMemo(() => filteredBank.filter((e) => !e.statusConciliacao || e.statusConciliacao === "pendente").reduce((s, e) => s + Math.abs(e.valor || 0), 0), [filteredBank]);
-  const valorDivergente = useMemo(() => filteredBank.filter((e) => e.statusConciliacao === "divergente").reduce((s, e) => s + Math.abs(e.valor || 0), 0), [filteredBank]);
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-white">Conciliação Bancária</h2>
-          <p className="text-gray-400 text-sm mt-1">Compare extratos bancários com lançamentos internos</p>
-        </div>
-        <div className="flex gap-2">
-          <button onClick={autoMatch} className="px-4 py-2 text-sm rounded-lg bg-cyan-600 text-white hover:bg-cyan-700 transition flex items-center gap-2">
-            🔄 Auto-Conciliar
-          </button>
-          <button onClick={handleAddEntry} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition flex items-center gap-2">
-            + Novo Lançamento Bancário
-          </button>
-        </div>
-      </div>
-
-      {/* KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <KPICard title="Total Lançamentos" value={filteredBank.length} icon="🏦" />
-        <KPICard title="Conciliados" value={totalConciliados} icon="✅" />
-        <KPICard title="Pendentes" value={totalPendentes} icon="⏳" />
-        <KPICard title="Divergentes" value={totalDivergentes} icon="⚠️" />
-      </div>
-
-      {/* Summary Totals */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
-          <p className="text-gray-400 text-sm">Valor Conciliado</p>
-          <p className="text-xl font-bold text-green-400">{formatCurrency(valorConciliado)}</p>
-        </div>
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
-          <p className="text-gray-400 text-sm">Valor Pendente</p>
-          <p className="text-xl font-bold text-yellow-400">{formatCurrency(valorPendente)}</p>
-        </div>
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
-          <p className="text-gray-400 text-sm">Valor Divergente</p>
-          <p className="text-xl font-bold text-red-400">{formatCurrency(valorDivergente)}</p>
-        </div>
-      </div>
-
-      {/* Search */}
-      <div className="flex flex-wrap items-center gap-4">
-        <div className="flex-1 min-w-[200px] max-w-sm">
-          <SearchInput value={search} onChange={setSearch} placeholder="Buscar lançamentos..." />
-        </div>
-        {selectedBank && selectedInternal && (
-          <button onClick={manualConciliate} className="px-4 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 transition">
-            🔗 Conciliar Selecionados
-          </button>
-        )}
-      </div>
-
-      {/* Two-panel layout */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Left Panel - Extrato Bancário */}
-        <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-700 bg-gray-800/80">
-            <h3 className="text-white font-semibold">🏦 Extrato Bancário</h3>
-          </div>
-          <div className="divide-y divide-gray-700/50 max-h-[500px] overflow-y-auto">
-            {filteredBank.length === 0 ? (
-              <div className="p-8 text-center text-gray-400">Nenhum lançamento bancário.</div>
-            ) : (
-              filteredBank.map((entry) => (
-                <div
-                  key={entry.id}
-                  onClick={() => setSelectedBank(selectedBank?.id === entry.id ? null : entry)}
-                  className={`px-4 py-3 cursor-pointer transition hover:bg-gray-700/30 ${selectedBank?.id === entry.id ? "bg-blue-500/10 border-l-2 border-l-blue-500" : ""}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <p className="text-sm text-white font-medium">{entry.descricao}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">{formatDate(entry.data)} {entry.referencia ? `• Ref: ${entry.referencia}` : ""}</p>
-                    </div>
-                    <div className="text-right ml-3">
-                      <p className={`text-sm font-semibold ${entry.valor >= 0 ? "text-green-400" : "text-red-400"}`}>
-                        {formatCurrency(entry.valor)}
-                      </p>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium text-white mt-1 ${conciliacaoColor(entry.statusConciliacao)}`}>
-                        {conciliacaoLabel(entry.statusConciliacao)}
-                      </span>
-                    </div>
-                  </div>
-                  {entry.statusConciliacao !== "conciliado" && (
-                    <div className="flex gap-2 mt-2">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); markResolved(entry); }}
-                        className="text-xs px-2 py-1 rounded bg-green-600/20 text-green-400 hover:bg-green-600/40 transition"
-                      >
-                        Resolver
-                      </button>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); markDivergent(entry); }}
-                        className="text-xs px-2 py-1 rounded bg-red-600/20 text-red-400 hover:bg-red-600/40 transition"
-                      >
-                        Divergente
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* Right Panel - Lançamentos Internos */}
-        <div className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b border-gray-700 bg-gray-800/80">
-            <h3 className="text-white font-semibold">📋 Lançamentos Internos</h3>
-          </div>
-          <div className="divide-y divide-gray-700/50 max-h-[500px] overflow-y-auto">
-            {filteredInternal.length === 0 ? (
-              <div className="p-8 text-center text-gray-400">Nenhum lançamento interno.</div>
-            ) : (
-              filteredInternal.map((entry) => (
-                <div
-                  key={entry.id}
-                  onClick={() => setSelectedInternal(selectedInternal?.id === entry.id ? null : entry)}
-                  className={`px-4 py-3 cursor-pointer transition hover:bg-gray-700/30 ${selectedInternal?.id === entry.id ? "bg-cyan-500/10 border-l-2 border-l-cyan-500" : ""}`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div className="flex-1">
-                      <p className="text-sm text-white font-medium">{entry.descricao}</p>
-                      <p className="text-xs text-gray-400 mt-0.5">{formatDate(entry.data)} • {entry.numero || "—"} • {entry.categoria || "—"}</p>
-                    </div>
-                    <div className="text-right ml-3">
-                      <p className={`text-sm font-semibold ${entry.tipo === "receita" ? "text-green-400" : "text-red-400"}`}>
-                        {entry.tipo === "despesa" ? "-" : ""}{formatCurrency(entry.valor)}
-                      </p>
-                      {entry.conciliadoBanking && (
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium text-white mt-1 bg-green-500">
-                          Conciliado
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Add Bank Entry Modal */}
-      <Modal isOpen={modalOpen} title="Novo Lançamento Bancário" onClose={() => setModalOpen(false)} size="md">
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Data *</label>
-            <input
-              type="date"
-              value={form.data}
-              onChange={(e) => setForm({ ...form, data: e.target.value })}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Descrição *</label>
-            <input
-              type="text"
-              value={form.descricao}
-              onChange={(e) => setForm({ ...form, descricao: e.target.value })}
-              placeholder="Ex: TED recebida - Maria Silva"
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Valor (R$) *</label>
-              <input
-                type="number"
-                step="0.01"
-                value={form.valor}
-                onChange={(e) => setForm({ ...form, valor: e.target.value })}
-                placeholder="Positivo = crédito, Negativo = débito"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Referência</label>
-              <input
-                type="text"
-                value={form.referencia}
-                onChange={(e) => setForm({ ...form, referencia: e.target.value })}
-                placeholder="Ex: DOC 12345"
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-          </div>
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
-            <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition">
-              Cancelar
-            </button>
-            <button onClick={handleSaveEntry} className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
-              Adicionar
-            </button>
-          </div>
-        </div>
-      </Modal>
-    </div>
-  );
-}
 
 // ─── CADASTRO MODULE ─────────────────────────────────────────────────────────
 
@@ -6806,7 +3575,7 @@ function CadastroModule({ user, addToast, reloadData }) {
     } else {
       const newClient = { ...data, id: genId(), createdAt: new Date().toISOString() };
       DB.set("erp:client:" + newClient.id, newClient);
-      addToast(MSG_TEMPLATES.cliente_criado(newClient.nome), "success");
+      addToast(`Cliente ${newClient.nome} cadastrado com sucesso.`, "success");
     }
     setModalOpen(false);
     loadClients();
@@ -6824,18 +3593,12 @@ function CadastroModule({ user, addToast, reloadData }) {
       // Remove OS vinculadas
       const os = DB.list("erp:os:").filter((o) => o.clienteId === confirmDelete.id);
       os.forEach((o) => DB.delete("erp:os:" + o.id));
-      // Remove transações vinculadas
-      const tx = DB.list("erp:finance:").filter((t) => t.clienteId === confirmDelete.id);
-      tx.forEach((t) => DB.delete("erp:finance:" + t.id));
-      // Remove tickets vinculados
-      const tk = DB.list("erp:ticket:").filter((t) => t.clienteId === confirmDelete.id);
-      tk.forEach((t) => DB.delete("erp:ticket:" + t.id));
       // Remove agendamentos vinculados
       const ag = DB.list("erp:schedule:").filter((s) => s.clienteId === confirmDelete.id);
       ag.forEach((s) => DB.delete("erp:schedule:" + s.id));
       // Remove o cliente
       DB.delete("erp:client:" + confirmDelete.id);
-      const removed = os.length + tx.length + tk.length + ag.length;
+      const removed = os.length + ag.length;
       addToast(`Cliente e ${removed} registro(s) vinculado(s) excluídos.`, "success");
       setConfirmDelete(null);
       setDetailView(null);
@@ -6928,14 +3691,11 @@ function CadastroModule({ user, addToast, reloadData }) {
     }
   }, [confirmDelete, loadEmployees, addToast, reloadData]);
 
-  // ─── Client Detail View ───
+  // ─── Client Detail View — restrito a dados + OS após remoção dos módulos financeiro/fiscal
   const clientDetailData = useMemo(() => {
     if (!detailView) return null;
     return {
       os: DB.list("erp:os:").filter((o) => o.clienteId === detailView.id),
-      transactions: DB.list("erp:finance:").filter((t) => t.clienteId === detailView.id || (t.descricao || "").toLowerCase().includes((detailView.nome || "").toLowerCase())),
-      tickets: DB.list("erp:ticket:").filter((t) => t.clienteId === detailView.id),
-      invoices: DB.list("erp:invoice:").filter((i) => i.clienteId === detailView.id),
     };
   }, [detailView]);
 
@@ -6991,13 +3751,13 @@ function CadastroModule({ user, addToast, reloadData }) {
 
         {/* Tabs */}
         <div className="flex gap-2 border-b border-gray-700 pb-2">
-          {["dados", "os", "transacoes", "tickets", "nfs"].map((tab) => (
+          {["dados", "os"].map((tab) => (
             <button
               key={tab}
               onClick={() => setDetailTab(tab)}
               className={`px-4 py-2 text-sm rounded-t-lg transition ${detailTab === tab ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white hover:bg-gray-700"}`}
             >
-              {{ dados: "Dados", os: "Ordens de Serviço", transacoes: "Transações", tickets: "Tickets", nfs: "Notas Fiscais" }[tab]}
+              {{ dados: "Dados", os: "Ordens de Serviço" }[tab]}
             </button>
           ))}
         </div>
@@ -7070,48 +3830,6 @@ function CadastroModule({ user, addToast, reloadData }) {
           />
         )}
 
-        {detailTab === "transacoes" && clientDetailData && (
-          <DataTable
-            columns={[
-              { key: "numero", label: "Nº" },
-              { key: "descricao", label: "Descrição" },
-              { key: "tipo", label: "Tipo", render: (v) => v === "receita" ? "Receita" : "Despesa" },
-              { key: "valor", label: "Valor", render: (v) => formatCurrency(v) },
-              { key: "data", label: "Data", render: (v) => formatDate(v) },
-              { key: "status", label: "Status", render: (v) => <StatusBadge status={v} /> },
-            ]}
-            data={clientDetailData.transactions}
-            emptyMessage="Nenhuma transação vinculada a este cliente."
-          />
-        )}
-
-        {detailTab === "tickets" && clientDetailData && (
-          <DataTable
-            columns={[
-              { key: "numero", label: "Nº" },
-              { key: "titulo", label: "Título" },
-              { key: "prioridade", label: "Prioridade" },
-              { key: "status", label: "Status", render: (v) => <StatusBadge status={v} /> },
-              { key: "dataAbertura", label: "Data", render: (v) => formatDate(v) },
-            ]}
-            data={clientDetailData.tickets}
-            emptyMessage="Nenhum ticket vinculado a este cliente."
-          />
-        )}
-
-        {detailTab === "nfs" && clientDetailData && (
-          <DataTable
-            columns={[
-              { key: "numero", label: "Nº" },
-              { key: "clienteNome", label: "Cliente" },
-              { key: "valorTotal", label: "Valor", render: (v) => formatCurrency(v) },
-              { key: "status", label: "Status", render: (v) => <StatusBadge status={v} /> },
-              { key: "dataEmissao", label: "Emissão", render: (v) => formatDate(v) },
-            ]}
-            data={clientDetailData.invoices}
-            emptyMessage="Nenhuma NF vinculada a este cliente."
-          />
-        )}
       </div>
     );
   }
@@ -7481,197 +4199,6 @@ function CadastroModule({ user, addToast, reloadData }) {
   );
 }
 
-// ─── MESSAGE CENTER ──────────────────────────────────────────────────────────
-
-function sendWhatsApp(phone, message) {
-  const cleanPhone = (phone || "").replace(/\D/g, "");
-  const brPhone = cleanPhone.startsWith("55") ? cleanPhone : "55" + cleanPhone;
-  const url = `https://wa.me/${brPhone}?text=${encodeURIComponent(message)}`;
-  window.open(url, "_blank");
-
-  const log = {
-    id: genId(),
-    tipo: "whatsapp",
-    destinatario: phone,
-    mensagem: message,
-    template: null,
-    status: "enviado",
-    data: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-  };
-  DB.set("erp:message:" + log.id, log);
-  return log;
-}
-
-function sendEmail(email, subject, body) {
-  const url = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  window.open(url, "_blank");
-
-  const log = {
-    id: genId(),
-    tipo: "email",
-    destinatario: email,
-    assunto: subject,
-    mensagem: body,
-    template: null,
-    status: "enviado",
-    data: new Date().toISOString(),
-    createdAt: new Date().toISOString(),
-  };
-  DB.set("erp:message:" + log.id, log);
-  return log;
-}
-
-function MessageCenter({ user, addToast }) {
-  const [messages, setMessages] = useState([]);
-  const [filterType, setFilterType] = useState("all");
-  const [search, setSearch] = useState("");
-  const [detailView, setDetailView] = useState(null);
-  const [dateFilter, setDateFilter] = useState({ period: "30dias" });
-
-  const loadMessages = useCallback(() => {
-    setMessages(DB.list("erp:message:"));
-  }, []);
-
-  useEffect(() => { loadMessages(); }, [loadMessages]);
-
-  const filteredMessages = useMemo(() => {
-    let list = filterByDate(messages, "data", dateFilter);
-    if (filterType !== "all") list = list.filter((m) => m.tipo === filterType);
-    if (search.trim()) {
-      const s = search.toLowerCase();
-      list = list.filter(
-        (m) =>
-          (m.destinatario || "").toLowerCase().includes(s) ||
-          (m.mensagem || "").toLowerCase().includes(s) ||
-          (m.assunto || "").toLowerCase().includes(s)
-      );
-    }
-    return list.sort((a, b) => new Date(b.data) - new Date(a.data));
-  }, [messages, dateFilter, filterType, search]);
-
-  const columns = [
-    { key: "data", label: "Data", render: (v) => formatDateTime(v) },
-    {
-      key: "tipo", label: "Tipo",
-      render: (v) => (
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white ${v === "whatsapp" ? "bg-green-600" : "bg-blue-600"}`}>
-          {v === "whatsapp" ? "WhatsApp" : "Email"}
-        </span>
-      ),
-    },
-    { key: "destinatario", label: "Destinatário" },
-    {
-      key: "mensagem", label: "Conteúdo",
-      render: (v, row) => (
-        <span className="text-gray-300 truncate max-w-[200px] inline-block">
-          {row.assunto || (v || "").slice(0, 60) + ((v || "").length > 60 ? "..." : "")}
-        </span>
-      ),
-    },
-    {
-      key: "status", label: "Status",
-      render: (v) => (
-        <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white bg-green-500">
-          {v === "enviado" ? "Enviado" : v}
-        </span>
-      ),
-    },
-  ];
-
-  if (detailView) {
-    return (
-      <div className="space-y-6">
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setDetailView(null)}
-            className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition"
-          >
-            ← Voltar
-          </button>
-          <h2 className="text-2xl font-bold text-white">Detalhes da Mensagem</h2>
-        </div>
-
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 space-y-4">
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <p className="text-xs text-gray-400 uppercase">Tipo</p>
-              <p className="text-white">{detailView.tipo === "whatsapp" ? "WhatsApp" : "Email"}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400 uppercase">Data/Hora</p>
-              <p className="text-white">{formatDateTime(detailView.data)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400 uppercase">Destinatário</p>
-              <p className="text-white">{detailView.destinatario}</p>
-            </div>
-            <div>
-              <p className="text-xs text-gray-400 uppercase">Status</p>
-              <p className="text-white">{detailView.status === "enviado" ? "Enviado" : detailView.status}</p>
-            </div>
-          </div>
-          {detailView.assunto && (
-            <div>
-              <p className="text-xs text-gray-400 uppercase">Assunto</p>
-              <p className="text-white">{detailView.assunto}</p>
-            </div>
-          )}
-          <div>
-            <p className="text-xs text-gray-400 uppercase">Conteúdo</p>
-            <div className="mt-2 bg-gray-700 rounded-lg p-4 text-gray-200 text-sm whitespace-pre-wrap">
-              {detailView.mensagem || "—"}
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-white">Central de Mensagens</h2>
-          <p className="text-gray-400 text-sm mt-1">Histórico de mensagens enviadas</p>
-        </div>
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-wrap items-center gap-4">
-        <div className="flex-1 min-w-[200px] max-w-sm">
-          <SearchInput value={search} onChange={setSearch} placeholder="Buscar mensagens..." />
-        </div>
-        <select
-          value={filterType}
-          onChange={(e) => setFilterType(e.target.value)}
-          className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-        >
-          <option value="all">Todos os tipos</option>
-          <option value="whatsapp">WhatsApp</option>
-          <option value="email">Email</option>
-        </select>
-        <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
-      </div>
-
-      {/* Table */}
-      <DataTable
-        columns={columns}
-        data={filteredMessages}
-        actions={(row) => (
-          <button
-            onClick={() => setDetailView(row)}
-            className="p-1.5 rounded-lg text-gray-400 hover:text-cyan-400 hover:bg-gray-700 transition"
-            title="Ver detalhes"
-          >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" /></svg>
-          </button>
-        )}
-        emptyMessage="Nenhuma mensagem registrada."
-      />
-    </div>
-  );
-}
 
 // ─── SETTINGS MODULE ──────────────────────────────────────────────────────────
 
@@ -8047,6 +4574,95 @@ function UserManagement({ currentUser, addToast }) {
   );
 }
 
+// Painel do feed iCalendar — mostra URL https/webcal, QR code e ações de regenerar/desativar
+// QR code é gerado via API pública (chart.googleapis / goqr.me) sem dependência extra.
+function CalendarFeedPanel({ feed, onRegenerate, onDisable, onCopy }) {
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const httpsURL = `${origin}/api/calendar.ics?token=${feed.token}`;
+  // webcal:// faz calendários (iOS/macOS/Outlook) assinarem o feed automaticamente
+  const webcalURL = httpsURL.replace(/^https?:\/\//, "webcal://");
+  const qrSrc = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&margin=8&data=${encodeURIComponent(webcalURL)}`;
+
+  return (
+    <div className="grid md:grid-cols-[1fr_auto] gap-6 items-start">
+      <div className="space-y-4">
+        <div>
+          <label className="block text-xs font-medium text-gray-400 uppercase mb-1">URL HTTPS (Google Calendar, Outlook)</label>
+          <div className="flex gap-2">
+            <input
+              readOnly
+              value={httpsURL}
+              onFocus={(e) => e.target.select()}
+              className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 font-mono"
+            />
+            <button
+              onClick={() => onCopy(httpsURL)}
+              className="px-3 py-2 text-xs rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600 transition"
+            >
+              Copiar
+            </button>
+          </div>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-gray-400 uppercase mb-1">URL webcal (Apple Calendar / iOS)</label>
+          <div className="flex gap-2">
+            <input
+              readOnly
+              value={webcalURL}
+              onFocus={(e) => e.target.select()}
+              className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-xs text-gray-200 font-mono"
+            />
+            <button
+              onClick={() => onCopy(webcalURL)}
+              className="px-3 py-2 text-xs rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600 transition"
+            >
+              Copiar
+            </button>
+          </div>
+        </div>
+
+        <details className="text-sm text-gray-400">
+          <summary className="cursor-pointer text-blue-400 hover:text-blue-300">Como adicionar no celular?</summary>
+          <ul className="mt-2 space-y-1 text-xs leading-relaxed list-disc pl-5">
+            <li><strong>iPhone:</strong> Ajustes → Calendário → Contas → Adicionar Conta → Outra → Adicionar Calendário Assinado → cole a URL <em>webcal://</em>.</li>
+            <li><strong>Google Calendar:</strong> calendar.google.com → &quot;Outros calendários&quot; → &quot;Por URL&quot; → cole a URL <em>https</em>.</li>
+            <li><strong>Outlook (web):</strong> Calendário → &quot;Adicionar calendário&quot; → &quot;Inscrever-se na Web&quot; → cole a URL <em>https</em>.</li>
+            <li>A sincronização é automática; pode levar alguns minutos para novos eventos aparecerem.</li>
+          </ul>
+        </details>
+
+        <div className="flex flex-wrap gap-2 pt-2 border-t border-gray-700">
+          <button
+            onClick={onRegenerate}
+            className="px-3 py-1.5 text-xs rounded-lg bg-yellow-600/20 border border-yellow-600/40 text-yellow-300 hover:bg-yellow-600/30 transition"
+          >
+            Regenerar token
+          </button>
+          <button
+            onClick={onDisable}
+            className="px-3 py-1.5 text-xs rounded-lg bg-red-600/20 border border-red-600/40 text-red-300 hover:bg-red-600/30 transition"
+          >
+            Desativar sincronização
+          </button>
+        </div>
+      </div>
+
+      <div className="flex flex-col items-center gap-2">
+        <img
+          src={qrSrc}
+          alt="QR Code da URL do calendário"
+          className="w-[180px] h-[180px] rounded-lg bg-white p-2"
+          loading="lazy"
+        />
+        <p className="text-xs text-gray-400 text-center max-w-[180px]">
+          Escaneie com o celular para abrir direto no calendário nativo
+        </p>
+      </div>
+    </div>
+  );
+}
+
 function SettingsModule({ user, addToast, reloadData }) {
   const [config, setConfig] = useState({
     razaoSocial: "", cnpj: "", telefone: "", email: "", endereco: "",
@@ -8056,6 +4672,8 @@ function SettingsModule({ user, addToast, reloadData }) {
   const [importConfirm, setImportConfirm] = useState(false);
   const [pendingImportData, setPendingImportData] = useState(null);
   const [systemInfo, setSystemInfo] = useState({ totalRecords: 0, lastBackup: null });
+  // Estado do feed de calendário (sincronização com celular)
+  const [calendarFeed, setCalendarFeed] = useState({ token: null, enabled: false });
   const fileInputRef = useRef(null);
 
   const loadConfig = useCallback(() => {
@@ -8068,17 +4686,57 @@ function SettingsModule({ user, addToast, reloadData }) {
       endereco: cfg.endereco || "",
     });
 
-    // Count total records
+    // Prefixos ativos após remoção dos módulos financeiro/fiscal/estoque/mensageria
     const prefixes = [
-      "erp:client:", "erp:employee:", "erp:inventory:", "erp:os:",
-      "erp:schedule:", "erp:finance:", "erp:invoice:", "erp:boleto:", "erp:ticket:",
-      "erp:banking:", "erp:pdv:", "erp:message:", "erp:user:",
+      "erp:client:", "erp:employee:", "erp:os:",
+      "erp:schedule:", "erp:user:",
     ];
     let total = 0;
     prefixes.forEach((p) => { total += DB.list(p).length; });
     const lastBackup = DB.get("erp:lastBackup");
     setSystemInfo({ totalRecords: total, lastBackup });
+
+    // Carrega estado atual do feed de calendário
+    const feed = DB.get("erp:calendarFeedToken") || { token: null, enabled: false };
+    setCalendarFeed(feed);
   }, []);
+
+  // ─── Feed de Calendário — gera token para sincronizar com celular via URL iCalendar ───
+  const handleEnableCalendarFeed = useCallback(() => {
+    const token = genSecureToken();
+    const feed = { token, enabled: true, name: "FrostERP — Agenda", createdAt: new Date().toISOString() };
+    DB.set("erp:calendarFeedToken", feed);
+    setCalendarFeed(feed);
+    addToast("Link de sincronização gerado! Use a URL abaixo no seu celular.", "success");
+  }, [addToast]);
+
+  const handleRegenerateCalendarToken = useCallback(() => {
+    const token = genSecureToken();
+    const existing = DB.get("erp:calendarFeedToken") || {};
+    const feed = { ...existing, token, enabled: true, regeneratedAt: new Date().toISOString() };
+    DB.set("erp:calendarFeedToken", feed);
+    setCalendarFeed(feed);
+    addToast("Novo token gerado. O link antigo não funciona mais.", "success");
+  }, [addToast]);
+
+  const handleDisableCalendarFeed = useCallback(() => {
+    const existing = DB.get("erp:calendarFeedToken") || {};
+    const feed = { ...existing, enabled: false };
+    DB.set("erp:calendarFeedToken", feed);
+    setCalendarFeed(feed);
+    addToast("Sincronização desativada.", "info");
+  }, [addToast]);
+
+  const handleCopyCalendarURL = useCallback((url) => {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(
+        () => addToast("URL copiada!", "success"),
+        () => addToast("Não foi possível copiar. Copie manualmente.", "error")
+      );
+    } else {
+      addToast("Clipboard indisponível. Copie manualmente.", "warning");
+    }
+  }, [addToast]);
 
   useEffect(() => { loadConfig(); }, [loadConfig]);
 
@@ -8098,25 +4756,17 @@ function SettingsModule({ user, addToast, reloadData }) {
     loadConfig();
   }, [config, loadConfig, addToast]);
 
-  // ─── Export Backup ───
+  // ─── Export Backup — restrito aos módulos ativos (clientes, funcionários, OS, agenda, usuários) ───
   const handleExport = useCallback(() => {
     const backup = {
       clients: DB.list("erp:client:"),
       employees: DB.list("erp:employee:"),
-      inventory: DB.list("erp:inventory:"),
       services: DB.list("erp:os:"),
       schedule: DB.list("erp:schedule:"),
-      finance: DB.list("erp:finance:"),
-      invoices: DB.list("erp:invoice:"),
-      bills: DB.list("erp:boleto:"),
-      tickets: DB.list("erp:ticket:"),
-      banking: DB.list("erp:banking:"),
-      pdv: DB.list("erp:pdv:"),
-      messages: DB.list("erp:message:"),
       config: DB.get("erp:config"),
       users: DB.list("erp:user:"),
       exportedAt: new Date().toISOString(),
-      version: "1.0",
+      version: "2.0",
     };
 
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
@@ -8130,23 +4780,9 @@ function SettingsModule({ user, addToast, reloadData }) {
     URL.revokeObjectURL(url);
 
     DB.set("erp:lastBackup", new Date().toISOString());
-
-    // Log export
-    const log = {
-      id: genId(),
-      tipo: "email",
-      destinatario: "sistema",
-      assunto: "Backup exportado",
-      mensagem: `Backup do sistema exportado em ${formatDateTime(new Date().toISOString())} por ${user.nome}.`,
-      status: "enviado",
-      data: new Date().toISOString(),
-      createdAt: new Date().toISOString(),
-    };
-    DB.set("erp:message:" + log.id, log);
-
     addToast("Backup exportado com sucesso.", "success");
     loadConfig();
-  }, [user, addToast, loadConfig]);
+  }, [addToast, loadConfig]);
 
   // ─── Import Backup ───
   const handleFileSelect = useCallback((e) => {
@@ -8157,8 +4793,8 @@ function SettingsModule({ user, addToast, reloadData }) {
     reader.onload = (ev) => {
       try {
         const data = JSON.parse(ev.target.result);
-        // Validate structure
-        const requiredKeys = ["clients", "employees", "inventory", "finance", "config", "version"];
+        // Aceita backups antigos (v1.0 com inventory/finance) ignorando campos descontinuados
+        const requiredKeys = ["clients", "employees", "config", "version"];
         const hasRequired = requiredKeys.every((k) => k in data);
         if (!hasRequired) {
           addToast("Arquivo de backup inválido. Chaves obrigatórias ausentes.", "error");
@@ -8179,18 +4815,17 @@ function SettingsModule({ user, addToast, reloadData }) {
     if (!pendingImportData) return;
     const data = pendingImportData;
 
-    // Clear all DB prefixes
+    // Apaga apenas os prefixos que o sistema atual usa
     const prefixes = [
-      "erp:client:", "erp:employee:", "erp:inventory:", "erp:os:",
-      "erp:schedule:", "erp:finance:", "erp:invoice:", "erp:boleto:", "erp:ticket:",
-      "erp:banking:", "erp:pdv:", "erp:message:", "erp:user:",
+      "erp:client:", "erp:employee:", "erp:os:",
+      "erp:schedule:", "erp:user:",
     ];
     prefixes.forEach((prefix) => {
       const items = DB.list(prefix);
       items.forEach((item) => { if (item.id) DB.delete(prefix + item.id); });
     });
 
-    // Import all records
+    // Importa apenas os registros relevantes — campos de backups antigos são ignorados
     const importList = (items, prefix) => {
       (items || []).forEach((item) => {
         if (item.id) DB.set(prefix + item.id, item);
@@ -8199,17 +4834,8 @@ function SettingsModule({ user, addToast, reloadData }) {
 
     importList(data.clients, "erp:client:");
     importList(data.employees, "erp:employee:");
-    importList(data.inventory, "erp:inventory:");
     importList(data.services || data.processes, "erp:os:");
     importList(data.schedule, "erp:schedule:");
-    importList(data.finance, "erp:finance:");
-    importList(data.invoices, "erp:invoice:");
-    importList(data.bills, "erp:boleto:");
-    importList(data.tickets, "erp:ticket:");
-    importList(data.processes, "erp:os:");
-    importList(data.banking, "erp:banking:");
-    importList(data.pdv, "erp:pdv:");
-    importList(data.messages, "erp:message:");
     importList(data.users, "erp:user:");
 
     if (data.config) DB.set("erp:config", data.config);
@@ -8235,9 +4861,8 @@ function SettingsModule({ user, addToast, reloadData }) {
   const executeResetDemo = useCallback(async () => {
     // Apaga todos os dados do sistema
     const prefixes = [
-      "erp:client:", "erp:employee:", "erp:inventory:", "erp:os:",
-      "erp:schedule:", "erp:finance:", "erp:invoice:", "erp:boleto:", "erp:ticket:",
-      "erp:banking:", "erp:pdv:", "erp:message:", "erp:user:",
+      "erp:client:", "erp:employee:", "erp:os:",
+      "erp:schedule:", "erp:user:",
     ];
     prefixes.forEach((prefix) => {
       const items = DB.list(prefix);
@@ -8349,6 +4974,41 @@ function SettingsModule({ user, addToast, reloadData }) {
         </div>
       </div>
 
+
+      {/* Sincronização de calendário com o celular (feed iCalendar) */}
+      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <div>
+            <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+              📱 Sincronizar Agenda com o Celular
+            </h3>
+            <p className="text-gray-400 text-sm mt-1">
+              Gere um link privado para adicionar seus agendamentos e OS ao Google Calendar, Apple Calendar ou Outlook.
+            </p>
+          </div>
+        </div>
+
+        {!calendarFeed.enabled || !calendarFeed.token ? (
+          <div className="flex flex-col items-start gap-3">
+            <p className="text-sm text-gray-400">
+              Ao ativar, um link com token único será criado. Mantenha-o em segurança — qualquer pessoa com o link pode ver seus eventos.
+            </p>
+            <button
+              onClick={handleEnableCalendarFeed}
+              className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
+            >
+              Ativar sincronização
+            </button>
+          </div>
+        ) : (
+          <CalendarFeedPanel
+            feed={calendarFeed}
+            onRegenerate={handleRegenerateCalendarToken}
+            onDisable={handleDisableCalendarFeed}
+            onCopy={handleCopyCalendarURL}
+          />
+        )}
+      </div>
 
       {/* Gerenciamento de Usuários (apenas admin) */}
       <UserManagement currentUser={user} addToast={addToast} />
@@ -8500,8 +5160,6 @@ export default function App() {
       employees: DB.list("erp:employee:"),
       services: DB.list("erp:os:"),
       schedule: DB.list("erp:schedule:"),
-      finance: DB.list("erp:finance:"),
-      inventory: DB.list("erp:inventory:"),
       config: DB.get("erp:config") || {},
     });
   }, []);
@@ -8551,21 +5209,20 @@ export default function App() {
   }, [user, addToast]);
 
   // ─── Compute Notifications ───
+  // OS pendentes há mais de 2 dias — sinaliza atenção no sino da barra superior
   const computedNotifications = useMemo(() => {
     const alerts = [];
-    // Contas vencidas
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    data.finance
-      .filter((t) => t.tipo === "despesa" && t.status === "pendente")
-      .forEach((t) => {
-        const dueDate = new Date(t.data);
-        if (dueDate < today) {
+    const dueDate = new Date();
+    dueDate.setDate(dueDate.getDate() - 2);
+    data.services
+      .filter((os) => os.status === "pendente" || os.status === "aguardando")
+      .forEach((os) => {
+        if (new Date(os.dataAbertura) < dueDate) {
           alerts.push({
-            id: "bill-" + t.id,
-            type: "error",
-            message: `Conta vencida: ${t.descricao} - ${formatCurrency(t.valor)}`,
-            module: "financeiro",
+            id: "os-" + os.id,
+            type: "warning",
+            message: `OS ${os.numero} sem movimentação há 2+ dias — ${os.clienteNome}`,
+            module: "processos",
           });
         }
       });
@@ -8596,9 +5253,9 @@ export default function App() {
       results.push({ type: "OS", label: o.numero + " - " + (o.clienteNome || ""), sub: o.tipo, module: "processos", id: o.id });
     });
 
-    // Search finance
-    data.finance.filter((t) => (t.descricao || "").toLowerCase().includes(s) || (t.numero || "").toLowerCase().includes(s)).slice(0, 5).forEach((t) => {
-      results.push({ type: "Financeiro", label: t.numero + " - " + t.descricao, sub: formatCurrency(t.valor), module: "financeiro", id: t.id });
+    // Search funcionários
+    data.employees.filter((e) => (e.nome || "").toLowerCase().includes(s)).slice(0, 5).forEach((e) => {
+      results.push({ type: "Funcionário", label: e.nome, sub: e.cargo, module: "cadastro", id: e.id });
     });
 
     setGlobalSearchResults(results);
@@ -8626,10 +5283,8 @@ export default function App() {
   const navItems = useMemo(() => {
     const items = [
       { id: "dashboard", label: "Dashboard", icon: "📊", module: "dashboard" },
-      { id: "financeiro", label: "Financeiro", icon: "💰", module: "financeiro" },
       { id: "processos", label: "Ordens de Serviço", icon: "🔧", module: "os" },
       { id: "agenda", label: "Agenda", icon: "📅", module: "agenda" },
-      { id: "mensagens", label: "Mensagens", icon: "💬", module: "tickets" },
       { id: "cadastro", label: "Cadastros", icon: "👥", module: "clientes" },
       { id: "config", label: "Configurações", icon: "⚙️", module: "config" },
     ];
@@ -8768,7 +5423,9 @@ export default function App() {
 
       {/* Sidebar */}
       <aside
-        className={`fixed lg:static inset-y-0 left-0 z-40 bg-gray-800 border-r border-gray-700 flex flex-col transition-all duration-300 ${
+        id="main-sidebar"
+        aria-label="Navegação principal"
+        className={`fixed lg:static inset-y-0 left-0 z-40 bg-gray-800 border-r border-gray-700 flex flex-col transition-all duration-300 shadow-2xl lg:shadow-none ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         } ${sidebarCollapsed ? "w-16" : "w-64"}`}
       >
@@ -8841,8 +5498,10 @@ export default function App() {
             {/* Hamburger (mobile) */}
             <button
               onClick={() => setSidebarOpen(true)}
-              className="lg:hidden p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition"
+              className="lg:hidden p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition min-h-[40px] min-w-[40px] inline-flex items-center justify-center"
               aria-label="Abrir menu"
+              aria-controls="main-sidebar"
+              aria-expanded={sidebarOpen}
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
@@ -8857,7 +5516,7 @@ export default function App() {
             </div>
 
             {/* Filtro de data — só aparece em páginas que usam período */}
-            {["dashboard", "financeiro", "processos", "agenda"].includes(activeModule) && (
+            {["dashboard", "processos", "agenda"].includes(activeModule) && (
               <div className="hidden xl:block ml-4">
                 <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
               </div>
@@ -8994,7 +5653,7 @@ export default function App() {
           </div>
 
           {/* Filtro de data mobile — só aparece em páginas que usam período */}
-          {["dashboard", "financeiro", "processos", "agenda"].includes(activeModule) && (
+          {["dashboard", "processos", "agenda"].includes(activeModule) && (
             <div className="xl:hidden mt-3">
               <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
             </div>
@@ -9006,17 +5665,11 @@ export default function App() {
           {activeModule === "dashboard" && (
             <Dashboard user={user} dateFilter={dateFilter} onNavigate={setActiveModule} />
           )}
-          {activeModule === "financeiro" && (
-            <FinanceModule user={user} dateFilter={dateFilter} addToast={addToast} />
-          )}
           {activeModule === "processos" && (
             <ProcessModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} />
           )}
           {activeModule === "agenda" && (
-            <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} />
-          )}
-          {activeModule === "mensagens" && (
-            <MessageCenter user={user} addToast={addToast} />
+            <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} onNavigate={setActiveModule} />
           )}
           {activeModule === "cadastro" && (
             <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
