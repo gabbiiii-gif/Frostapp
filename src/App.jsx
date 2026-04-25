@@ -717,24 +717,26 @@ function Modal({ isOpen, title, children, onClose, size = "md" }) {
   }, [isOpen, onClose]);
 
   // ─── Botão "voltar" do navegador/Android fecha o modal em vez de sair da página ───
+  // IMPORTANTE: deps apenas [isOpen]. onClose troca de identidade a cada render do pai
+  // e dispararia cleanup → history.back() → modal fecharia sozinho ao interagir.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useEffect(() => {
     if (!isOpen) return;
     let poppedByBack = false;
-    // Empilha estado para que o "voltar" caia aqui em vez de navegar fora
     window.history.pushState({ modal: true }, "");
     const onPop = () => {
       poppedByBack = true;
-      onClose();
+      onCloseRef.current?.();
     };
     window.addEventListener("popstate", onPop);
     return () => {
       window.removeEventListener("popstate", onPop);
-      // Se o modal foi fechado por X/Esc (não pelo botão voltar), remove o estado empilhado
       if (!poppedByBack && window.history.state?.modal) {
         window.history.back();
       }
     };
-  }, [isOpen, onClose]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -6838,12 +6840,16 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
   const [busy, setBusy] = useState(false);
 
   // ─── Botão "voltar" Android/navegador fecha esta tela ao invés de sair do app ───
+  // Mesmo motivo do Modal: deps vazias + ref para onClose, senão re-render do pai
+  // dispararia cleanup → history.back() → tela fecharia sozinha ao interagir.
+  const closeRef = useRef(onClose);
+  useEffect(() => { closeRef.current = onClose; }, [onClose]);
   useEffect(() => {
     let poppedByBack = false;
     window.history.pushState({ tecnicoDetail: true }, "");
     const onPop = () => {
       poppedByBack = true;
-      onClose();
+      closeRef.current?.();
     };
     window.addEventListener("popstate", onPop);
     return () => {
@@ -6852,7 +6858,7 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
         window.history.back();
       }
     };
-  }, [onClose]);
+  }, []);
 
   // ─── Marca chegada do técnico no local ───
   const handleChegada = async () => {
