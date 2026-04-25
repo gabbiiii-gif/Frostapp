@@ -716,6 +716,26 @@ function Modal({ isOpen, title, children, onClose, size = "md" }) {
     return () => document.removeEventListener("keydown", handleKey);
   }, [isOpen, onClose]);
 
+  // ─── Botão "voltar" do navegador/Android fecha o modal em vez de sair da página ───
+  useEffect(() => {
+    if (!isOpen) return;
+    let poppedByBack = false;
+    // Empilha estado para que o "voltar" caia aqui em vez de navegar fora
+    window.history.pushState({ modal: true }, "");
+    const onPop = () => {
+      poppedByBack = true;
+      onClose();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      // Se o modal foi fechado por X/Esc (não pelo botão voltar), remove o estado empilhado
+      if (!poppedByBack && window.history.state?.modal) {
+        window.history.back();
+      }
+    };
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
@@ -3015,6 +3035,8 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterTecnico, setFilterTecnico] = useState("all");
+  // Filtro por cliente — permite ver todas as OS de um cliente específico
+  const [filterCliente, setFilterCliente] = useState("all");
   const [viewMode, setViewMode] = useState("lista");
   // ─── Modal Produtividade Mensal por Técnico (admin/gerente) ───
   const [showProdutividade, setShowProdutividade] = useState(false);
@@ -3071,7 +3093,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     equipamentoModelo: "",
     equipamentoCapacidade: "", // valor genérico — a unidade depende do tipo
     equipamentoBTUs: "",       // mantido para retrocompatibilidade (apenas quando tipo=central)
-    tecnicoId: "", dataAgendada: toISODate(new Date()), observacoes: "",
+    tecnicoId: "", dataAgendada: toISODate(new Date()), horaAgendada: "08:00", observacoes: "",
   };
   const [form, setForm] = useState(emptyForm);
 
@@ -3133,6 +3155,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
     if (filterStatus !== "all") list = list.filter((os) => os.status === filterStatus);
     if (filterTecnico !== "all") list = list.filter((os) => os.tecnicoId === filterTecnico);
+    if (filterCliente !== "all") list = list.filter((os) => os.clienteId === filterCliente);
     if (search.trim()) {
       const s = search.toLowerCase();
       list = list.filter(
@@ -3144,7 +3167,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
       );
     }
     return list.sort((a, b) => new Date(b.dataAbertura) - new Date(a.dataAbertura));
-  }, [orders, dateFilter, filterStatus, filterTecnico, search, user]);
+  }, [orders, dateFilter, filterStatus, filterTecnico, filterCliente, search, user]);
 
   const stats = useMemo(() => ({
     total: filteredOrders.length,
@@ -3204,6 +3227,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
       equipamentoBTUs: row.equipamentoBTUs || "",
       tecnicoId: row.tecnicoId || "",
       dataAgendada: row.dataAgendada ? row.dataAgendada.split("T")[0] : toISODate(new Date()),
+      horaAgendada: row.horaAgendada || "08:00",
       observacoes: row.observacoes || "",
     });
     setModalOpen(true);
@@ -3269,6 +3293,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         tecnicoId: form.tecnicoId,
         tecnicoNome: tecnico?.nome || "—",
         dataAgendada: form.dataAgendada + "T00:00:00.000Z",
+        horaAgendada: form.horaAgendada || "",
         observacoes: form.observacoes,
         valor: valorTotal,
         // Mantém itensUtilizados sincronizado (alguns docs antigos ainda usam)
@@ -3298,6 +3323,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         status: "aguardando",
         dataAbertura: new Date().toISOString(),
         dataAgendada: form.dataAgendada + "T00:00:00.000Z",
+        horaAgendada: form.horaAgendada || "",
         dataConclusao: null,
         observacoes: form.observacoes,
         valor: valorTotal,
@@ -3443,6 +3469,19 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
             <option value="all">Todos técnicos</option>
             {tecnicos.map((t) => (
               <option key={t.id} value={t.id}>{t.nome}</option>
+            ))}
+          </select>
+        )}
+        {/* Filtro por cliente — para ver histórico de serviços de um cliente específico */}
+        {user.role !== "tecnico" && (
+          <select
+            value={filterCliente}
+            onChange={(e) => setFilterCliente(e.target.value)}
+            className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+          >
+            <option value="all">Todos clientes</option>
+            {[...allClients].sort((a, b) => (a.nome || "").localeCompare(b.nome || "")).map((c) => (
+              <option key={c.id} value={c.id}>{c.nome}</option>
             ))}
           </select>
         )}
@@ -3824,7 +3863,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Técnico</label>
               <select
@@ -3847,15 +3886,25 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
               />
             </div>
+            <div>
+              {/* Hora agendada — usada pelo app do técnico para saber horário do compromisso */}
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Hora Agendada</label>
+              <input
+                type="time"
+                value={form.horaAgendada || ""}
+                onChange={(e) => setForm({ ...form, horaAgendada: e.target.value })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+              />
+            </div>
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Observações</label>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">Relatos do Cliente</label>
             <textarea
               value={form.observacoes}
               onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
               rows={3}
-              placeholder="Detalhes do serviço..."
+              placeholder="O que o cliente relatou sobre o problema/serviço solicitado..."
               className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
             />
           </div>
@@ -6755,6 +6804,7 @@ function TecnicoMobileApp({ user, onLogout, addToast }) {
             </p>
             <p className="text-xs text-gray-500">
               📅 {os.dataAgendada ? formatDate(os.dataAgendada) : "Sem data"}
+              {os.horaAgendada && <span className="ml-2">⏰ {os.horaAgendada}</span>}
             </p>
             {os.endereco && (
               <p className="text-xs text-gray-500 mt-1">📍 {os.endereco}</p>
@@ -6786,6 +6836,23 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
   const [fotos, setFotos] = useState(os.fotos || []); // array de URLs públicas
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // ─── Botão "voltar" Android/navegador fecha esta tela ao invés de sair do app ───
+  useEffect(() => {
+    let poppedByBack = false;
+    window.history.pushState({ tecnicoDetail: true }, "");
+    const onPop = () => {
+      poppedByBack = true;
+      onClose();
+    };
+    window.addEventListener("popstate", onPop);
+    return () => {
+      window.removeEventListener("popstate", onPop);
+      if (!poppedByBack && window.history.state?.tecnicoDetail) {
+        window.history.back();
+      }
+    };
+  }, [onClose]);
 
   // ─── Marca chegada do técnico no local ───
   const handleChegada = async () => {
@@ -6877,8 +6944,11 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
             <span>{EQUIPMENT_TYPES[os.equipamentoTipo]?.label || "—"}</span>
           </div>
           <div className="flex justify-between text-sm">
-            <span className="text-gray-400">Data</span>
-            <span>{os.dataAgendada ? formatDate(os.dataAgendada) : "—"}</span>
+            <span className="text-gray-400">Data / Hora</span>
+            <span>
+              {os.dataAgendada ? formatDate(os.dataAgendada) : "—"}
+              {os.horaAgendada ? ` às ${os.horaAgendada}` : ""}
+            </span>
           </div>
           {os.endereco && (
             <div className="flex justify-between text-sm">
@@ -6902,10 +6972,10 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
           })()}
         </section>
 
-        {/* Problema relatado pelo escritório (campo observacoes da OS) */}
+        {/* Relatos do cliente (campo observacoes da OS — preenchido pelo escritório) */}
         {os.observacoes && (
           <section className="bg-gray-800 border border-gray-700 rounded-xl p-4">
-            <h3 className="text-xs font-semibold text-gray-400 mb-2">OBSERVAÇÕES DO ESCRITÓRIO</h3>
+            <h3 className="text-xs font-semibold text-gray-400 mb-2">RELATOS DO CLIENTE</h3>
             <p className="text-sm whitespace-pre-wrap">{os.observacoes}</p>
           </section>
         )}
