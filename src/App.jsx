@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer
 } from "recharts";
-import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges } from "./supabase.js";
+import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 
@@ -23,6 +23,11 @@ const STATUS_MAP = {
   cancelado: { label: "Cancelado", color: "bg-red-500" },
   agendado: { label: "Agendado", color: "bg-cyan-500" },
   confirmado: { label: "Confirmado", color: "bg-blue-500" },
+  // ─── Novos status do fluxo Tech App → ERP ───────────────────────────────
+  // Técnico chegou no local e iniciou o serviço
+  em_servico: { label: "Em Serviço", color: "bg-blue-600" },
+  // Técnico terminou e enviou relatório — aguarda revisão admin/gerente para fechar OS
+  aguardando_finalizacao: { label: "Aguardando Finalização", color: "bg-orange-500" },
   pago: { label: "Pago", color: "bg-green-500" },
   atrasado: { label: "Atrasado", color: "bg-red-500" },
 };
@@ -3011,6 +3016,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterTecnico, setFilterTecnico] = useState("all");
   const [viewMode, setViewMode] = useState("lista");
+  // ─── Modal Produtividade Mensal por Técnico (admin/gerente) ───
+  const [showProdutividade, setShowProdutividade] = useState(false);
+  // ─── Modal Revisão de OS finalizadas pelo técnico (admin/gerente) ───
+  const [reviewing, setReviewing] = useState(null);
 
   // Lista de tipos de serviço — vem da constante global (SERVICE_TYPES_OS)
   // Removidos: Higienização, Reparo. Adicionados: Troca de Peças, Solda.
@@ -3421,6 +3430,9 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
           {STATUS_FLOW.map((s) => (
             <option key={s} value={s}>{STATUS_LABELS_OS[s]}</option>
           ))}
+          {/* Status novos do fluxo Tech App */}
+          <option value="em_servico">Em Serviço (técnico)</option>
+          <option value="aguardando_finalizacao">Aguardando Finalização</option>
         </select>
         {user.role !== "tecnico" && (
           <select
@@ -3434,7 +3446,38 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
             ))}
           </select>
         )}
+        {/* Botão Produtividade — só admin/gerente veem */}
+        {(user.role === "admin" || user.role === "gerente") && (
+          <button
+            onClick={() => setShowProdutividade(true)}
+            className="ml-auto bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center gap-2"
+          >
+            📊 Produtividade
+          </button>
+        )}
       </div>
+
+      {/* ─── Banner: OS aguardando revisão da equipe técnica ─── */}
+      {(user.role === "admin" || user.role === "gerente") && orders.filter((o) => o.status === "aguardando_finalizacao").length > 0 && (
+        <div className="bg-orange-500/10 border border-orange-500/40 rounded-xl p-4 mb-4">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h3 className="font-semibold text-orange-300 mb-1">
+                ⚠ {orders.filter((o) => o.status === "aguardando_finalizacao").length} OS aguardando finalização
+              </h3>
+              <p className="text-xs text-orange-200/80">
+                Técnicos enviaram relatórios — clique para revisar e fechar.
+              </p>
+            </div>
+            <button
+              onClick={() => setFilterStatus("aguardando_finalizacao")}
+              className="bg-orange-600 hover:bg-orange-700 text-white px-3 py-2 rounded-lg text-sm font-semibold transition whitespace-nowrap"
+            >
+              Ver pendentes
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* List View */}
       {viewMode === "lista" && (
@@ -3445,6 +3488,16 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
           onDelete={(user.role === "admin" || user.role === "gerente") ? handleDelete : undefined}
           actions={(row) => (
             <>
+              {/* Botão revisar OS finalizada pelo técnico — só admin/gerente */}
+              {row.status === "aguardando_finalizacao" && (user.role === "admin" || user.role === "gerente") && (
+                <button
+                  onClick={() => setReviewing(row)}
+                  className="p-1.5 rounded-lg text-orange-400 hover:text-orange-300 hover:bg-gray-700 transition"
+                  title="Revisar relatório do técnico"
+                >
+                  📋
+                </button>
+              )}
               {getNextStatus(row.status) && (
                 <button
                   onClick={() => changeStatus(row, getNextStatus(row.status))}
@@ -3823,6 +3876,123 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
           onConfirm={confirmDeleteAction}
           onCancel={() => setConfirmDelete(null)}
         />
+      )}
+
+      {/* ─── Modal Produtividade Mensal ─── */}
+      {showProdutividade && (
+        <ProductivityReport
+          orders={orders}
+          tecnicos={tecnicos}
+          onClose={() => setShowProdutividade(false)}
+        />
+      )}
+
+      {/* ─── Modal Revisão OS finalizada pelo técnico ─── */}
+      {reviewing && (
+        <Modal isOpen={true} title={`Revisar OS — ${reviewing.clienteNome || ""}`} onClose={() => setReviewing(null)} size="lg">
+          <div className="space-y-4">
+            {/* Cabeçalho com info do técnico */}
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <div className="bg-gray-800 rounded-lg p-3">
+                <div className="text-xs text-gray-400">Técnico</div>
+                <div className="font-semibold">{reviewing.tecnicoNome}</div>
+              </div>
+              <div className="bg-gray-800 rounded-lg p-3">
+                <div className="text-xs text-gray-400">Equipamento</div>
+                <div className="font-semibold">{EQUIPMENT_TYPES[reviewing.equipamentoTipo]?.label || "—"}</div>
+              </div>
+              <div className="bg-gray-800 rounded-lg p-3">
+                <div className="text-xs text-gray-400">Chegada</div>
+                <div className="font-semibold">
+                  {reviewing.tecnico?.chegada ? new Date(reviewing.tecnico.chegada).toLocaleString("pt-BR") : "—"}
+                </div>
+              </div>
+              <div className="bg-gray-800 rounded-lg p-3">
+                <div className="text-xs text-gray-400">Saída</div>
+                <div className="font-semibold">
+                  {reviewing.tecnico?.saida ? new Date(reviewing.tecnico.saida).toLocaleString("pt-BR") : "—"}
+                </div>
+              </div>
+              {reviewing.tecnico?.chegada && reviewing.tecnico?.saida && (
+                <div className="bg-gray-800 rounded-lg p-3 col-span-2">
+                  <div className="text-xs text-gray-400">Tempo de execução</div>
+                  <div className="font-semibold text-cyan-400">
+                    {(() => {
+                      const ms = new Date(reviewing.tecnico.saida) - new Date(reviewing.tecnico.chegada);
+                      const min = Math.floor(ms / 60000);
+                      const h = Math.floor(min / 60);
+                      const m = min % 60;
+                      return h > 0 ? `${h}h ${m}min` : `${m}min`;
+                    })()}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Descrição */}
+            <div>
+              <h4 className="text-xs font-semibold text-gray-400 mb-2">DESCRIÇÃO DO SERVIÇO</h4>
+              <div className="bg-gray-800 rounded-lg p-3 text-sm whitespace-pre-wrap min-h-[80px]">
+                {reviewing.descricaoTecnico || reviewing.tecnico?.descricao || "—"}
+              </div>
+            </div>
+
+            {/* Fotos */}
+            {(reviewing.fotos || []).length > 0 && (
+              <div>
+                <h4 className="text-xs font-semibold text-gray-400 mb-2">FOTOS ({reviewing.fotos.length})</h4>
+                <div className="grid grid-cols-3 gap-2">
+                  {reviewing.fotos.map((url) => (
+                    <a key={url} href={url} target="_blank" rel="noopener" className="block aspect-square">
+                      <img src={url} alt="Foto serviço" className="w-full h-full object-cover rounded-lg hover:opacity-80 transition" />
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Ações */}
+            <div className="flex gap-2 pt-3 border-t border-gray-700">
+              <button
+                onClick={() => setReviewing(null)}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded-lg text-sm transition"
+              >
+                Fechar
+              </button>
+              <button
+                onClick={() => {
+                  // Reabre OS para o técnico corrigir — volta a 'em_servico'
+                  if (!confirm("Devolver OS para o técnico corrigir?")) return;
+                  const updated = { ...reviewing, status: "em_servico" };
+                  DB.set("erp:os:" + updated.id, updated);
+                  loadOrders();
+                  setReviewing(null);
+                  addToast("OS devolvida ao técnico", "warning");
+                }}
+                className="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition"
+              >
+                ↩ Devolver ao técnico
+              </button>
+              <button
+                onClick={() => {
+                  // Aprova e finaliza — status 'finalizado' + define dataConclusao
+                  const updated = {
+                    ...reviewing,
+                    status: "finalizado",
+                    dataConclusao: new Date().toISOString(),
+                  };
+                  DB.set("erp:os:" + updated.id, updated);
+                  loadOrders();
+                  setReviewing(null);
+                  addToast(`OS ${reviewing.numero} finalizada`, "success");
+                }}
+                className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-semibold transition"
+              >
+                ✅ Aprovar e finalizar
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
     </div>
   );
@@ -6308,6 +6478,552 @@ function SettingsModule({ user, addToast, reloadData }) {
   );
 }
 
+// ─── RELATÓRIO DE PRODUTIVIDADE POR TÉCNICO ──────────────────────────────────
+// Lista todos os serviços concluídos no mês selecionado, agrupados por técnico.
+// Calcula: total de OS, tempo médio (chegada → saída), valor total faturado.
+function ProductivityReport({ orders, tecnicos, onClose }) {
+  const [mes, setMes] = useState(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  });
+
+  // ─── Agrupa OS concluídas/aguardando por técnico no mês selecionado ───
+  const stats = useMemo(() => {
+    const [ano, mm] = mes.split("-").map(Number);
+    const inicio = new Date(ano, mm - 1, 1).getTime();
+    const fim = new Date(ano, mm, 1).getTime();
+
+    // Filtra OS finalizadas (concluido ou aguardando_finalizacao) cuja saída do técnico está no mês
+    const filtradas = orders.filter((os) => {
+      const status = os.status;
+      if (!["concluido", "aguardando_finalizacao"].includes(status)) return false;
+      const saidaIso = os.tecnico?.saida;
+      if (!saidaIso) return false;
+      const t = new Date(saidaIso).getTime();
+      return t >= inicio && t < fim;
+    });
+
+    // Agrupa por tecnicoId
+    const agrupado = {};
+    filtradas.forEach((os) => {
+      const tid = os.tecnicoId || "sem_tecnico";
+      if (!agrupado[tid]) {
+        agrupado[tid] = {
+          tecnicoId: tid,
+          nome: os.tecnicoNome || "Sem técnico",
+          total: 0,
+          tempoTotalMs: 0,
+          valorTotal: 0,
+          ordens: [],
+        };
+      }
+      const grupo = agrupado[tid];
+      grupo.total += 1;
+      grupo.ordens.push(os);
+      // Soma tempo de execução (chegada → saída)
+      if (os.tecnico?.chegada && os.tecnico?.saida) {
+        grupo.tempoTotalMs += new Date(os.tecnico.saida) - new Date(os.tecnico.chegada);
+      }
+      // Soma valor cobrado (campo valorTotal ou valor da OS)
+      grupo.valorTotal += Number(os.valorTotal || os.valor || 0);
+    });
+
+    return Object.values(agrupado).sort((a, b) => b.total - a.total);
+  }, [orders, mes]);
+
+  const formatDuracao = (ms) => {
+    if (!ms) return "—";
+    const min = Math.floor(ms / 60000);
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return h > 0 ? `${h}h ${m}min` : `${m}min`;
+  };
+
+  const totalGeral = stats.reduce((sum, s) => sum + s.total, 0);
+  const valorGeral = stats.reduce((sum, s) => sum + s.valorTotal, 0);
+
+  return (
+    <Modal isOpen={true} title="Produtividade Mensal por Técnico" onClose={onClose} size="xl">
+      <div className="space-y-4">
+        <div className="flex items-center gap-3">
+          <label className="text-sm text-gray-300">Mês:</label>
+          <input
+            type="month"
+            value={mes}
+            onChange={(e) => setMes(e.target.value)}
+            className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+          />
+          <div className="ml-auto text-sm text-gray-400">
+            Total: <span className="text-white font-semibold">{totalGeral} OS</span>
+            {" • "}
+            <span className="text-green-400 font-semibold">
+              {valorGeral.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+            </span>
+          </div>
+        </div>
+
+        {stats.length === 0 ? (
+          <div className="text-center py-12 text-gray-500">
+            Nenhum serviço finalizado neste mês.
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {stats.map((s) => (
+              <details
+                key={s.tecnicoId}
+                className="bg-gray-800 border border-gray-700 rounded-xl overflow-hidden"
+              >
+                <summary className="cursor-pointer px-4 py-3 flex items-center justify-between hover:bg-gray-750">
+                  <div>
+                    <div className="font-semibold text-white">{s.nome}</div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      Tempo médio:{" "}
+                      {formatDuracao(s.total > 0 ? s.tempoTotalMs / s.total : 0)}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <div className="text-2xl font-bold text-cyan-400">{s.total}</div>
+                      <div className="text-xs text-gray-500">serviços</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-sm font-semibold text-green-400">
+                        {s.valorTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                      </div>
+                      <div className="text-xs text-gray-500">faturado</div>
+                    </div>
+                  </div>
+                </summary>
+                <div className="px-4 py-3 border-t border-gray-700 bg-gray-900/40">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-400 text-left">
+                        <th className="py-1">Cliente</th>
+                        <th className="py-1">Equipamento</th>
+                        <th className="py-1">Saída</th>
+                        <th className="py-1">Tempo</th>
+                        <th className="py-1 text-right">Valor</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {s.ordens.map((o) => {
+                        const dur =
+                          o.tecnico?.chegada && o.tecnico?.saida
+                            ? new Date(o.tecnico.saida) - new Date(o.tecnico.chegada)
+                            : 0;
+                        return (
+                          <tr key={o.id} className="border-t border-gray-800">
+                            <td className="py-1.5">{o.clienteNome || "—"}</td>
+                            <td className="py-1.5">
+                              {EQUIPMENT_TYPES[o.equipamentoTipo]?.label || "—"}
+                            </td>
+                            <td className="py-1.5">
+                              {o.tecnico?.saida
+                                ? new Date(o.tecnico.saida).toLocaleString("pt-BR")
+                                : "—"}
+                            </td>
+                            <td className="py-1.5">{formatDuracao(dur)}</td>
+                            <td className="py-1.5 text-right">
+                              {Number(o.valorTotal || o.valor || 0).toLocaleString("pt-BR", {
+                                style: "currency",
+                                currency: "BRL",
+                              })}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            ))}
+          </div>
+        )}
+
+        <div className="flex justify-end pt-3 border-t border-gray-700">
+          <button
+            onClick={() => window.print()}
+            className="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm transition"
+          >
+            🖨️ Imprimir
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// ─── TÉCNICO MOBILE APP ─────────────────────────────────────────────────────
+// Shell totalmente separado renderizado quando o usuário logado tem role="tecnico".
+// Não usa sidebar — UI mobile-first focada exclusivamente nas demandas do técnico.
+// Fluxo: vê OS atribuídas → marca chegada → preenche relatório+fotos → finaliza.
+function TecnicoMobileApp({ user, onLogout, addToast }) {
+  const [orders, setOrders] = useState([]);
+  const [tab, setTab] = useState("ativas"); // ativas | historico
+  const [selected, setSelected] = useState(null); // OS aberta no detalhe
+  const [reload, setReload] = useState(0);
+
+  // ─── Carrega OS atribuídas ao técnico logado ───
+  useEffect(() => {
+    const all = DB.list("erp:os:");
+    const minhas = all.filter(
+      (os) => os.tecnicoId === user.id || os.tecnicoNome === user.nome
+    );
+    setOrders(minhas);
+  }, [user.id, user.nome, reload]);
+
+  // ─── Realtime: recarrega quando ERP envia novas OS ───
+  useEffect(() => {
+    const unsub = subscribeToChanges(() => setReload((r) => r + 1));
+    return unsub;
+  }, []);
+
+  // Filtra ativas (qualquer status antes de aguardando_finalizacao) e histórico
+  // ERP cria OS com status='aguardando' (STATUS_FLOW[0]), então essa também é ativa
+  const ativas = orders.filter((o) =>
+    ["aguardando", "agendado", "em_deslocamento", "em_servico", "em_execucao", "confirmado"].includes(o.status)
+  );
+  const historico = orders.filter((o) =>
+    ["aguardando_finalizacao", "concluido", "finalizado", "cancelado"].includes(o.status)
+  );
+
+  const lista = tab === "ativas" ? ativas : historico;
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-gray-100 font-['DM_Sans']">
+      <StyleSheet />
+
+      {/* Header fixo */}
+      <header className="sticky top-0 z-20 bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between shadow-lg">
+        <div>
+          <h1 className="text-base font-bold">{user.nome}</h1>
+          <p className="text-xs text-gray-400">Técnico • FrostERP</p>
+        </div>
+        <button
+          onClick={onLogout}
+          className="text-xs px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition"
+        >
+          Sair
+        </button>
+      </header>
+
+      {/* Tabs */}
+      <div className="flex border-b border-gray-700 bg-gray-800">
+        {[
+          { id: "ativas", label: `Ativas (${ativas.length})` },
+          { id: "historico", label: `Histórico (${historico.length})` },
+        ].map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className={`flex-1 py-3 text-sm font-semibold transition ${
+              tab === t.id
+                ? "text-cyan-400 border-b-2 border-cyan-400"
+                : "text-gray-400"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Lista */}
+      <main className="p-4 space-y-3 pb-24">
+        {lista.length === 0 && (
+          <div className="text-center py-20 text-gray-500">
+            <div className="text-4xl mb-2">📋</div>
+            <p className="text-sm">
+              {tab === "ativas"
+                ? "Nenhuma OS ativa atribuída a você."
+                : "Sem histórico ainda."}
+            </p>
+          </div>
+        )}
+
+        {lista.map((os) => (
+          <button
+            key={os.id}
+            onClick={() => setSelected(os)}
+            className="w-full text-left bg-gray-800 hover:bg-gray-750 border border-gray-700 rounded-xl p-4 transition active:scale-[0.98]"
+          >
+            <div className="flex items-start justify-between mb-2">
+              <span className="font-semibold text-sm">{os.clienteNome || "—"}</span>
+              <StatusBadge status={os.status} />
+            </div>
+            <p className="text-xs text-gray-400 mb-1">
+              {EQUIPMENT_TYPES[os.equipamentoTipo]?.label || os.tipoEquipamento || "—"}
+            </p>
+            <p className="text-xs text-gray-500">
+              📅 {os.dataAgendada ? formatDate(os.dataAgendada) : "Sem data"}
+            </p>
+            {os.endereco && (
+              <p className="text-xs text-gray-500 mt-1">📍 {os.endereco}</p>
+            )}
+          </button>
+        ))}
+      </main>
+
+      {/* Modal detalhe/ação */}
+      {selected && (
+        <TecnicoOSDetail
+          os={selected}
+          user={user}
+          onClose={() => setSelected(null)}
+          onUpdated={() => {
+            setSelected(null);
+            setReload((r) => r + 1);
+          }}
+          addToast={addToast}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Tela de detalhe + ações para uma OS específica (técnico) ────────────────
+function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
+  const [descricao, setDescricao] = useState(os.descricaoTecnico || "");
+  const [fotos, setFotos] = useState(os.fotos || []); // array de URLs públicas
+  const [uploading, setUploading] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  // ─── Marca chegada do técnico no local ───
+  const handleChegada = async () => {
+    setBusy(true);
+    const updated = {
+      ...os,
+      status: "em_servico",
+      tecnico: { ...(os.tecnico || {}), chegada: new Date().toISOString() },
+    };
+    DB.set(`erp:os:${os.id}`, updated);
+    addToast("Chegada registrada!", "success");
+    setBusy(false);
+    onUpdated();
+  };
+
+  // ─── Upload de fotos: captura/galeria (camera mobile) ───
+  const handleFotosChange = async (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUploading(true);
+    const novasUrls = [];
+    for (const file of files) {
+      const url = await uploadFotoOS(file, os.id);
+      if (url) novasUrls.push(url);
+    }
+    setFotos((prev) => [...prev, ...novasUrls]);
+    setUploading(false);
+    if (novasUrls.length > 0) addToast(`${novasUrls.length} foto(s) enviada(s)`, "success");
+    else addToast("Falha no upload", "error");
+    e.target.value = ""; // reset input
+  };
+
+  // ─── Remove foto antes de finalizar ───
+  const removeFoto = async (url) => {
+    if (!confirm("Remover esta foto?")) return;
+    await deleteFotoOS(url);
+    setFotos((prev) => prev.filter((u) => u !== url));
+  };
+
+  // ─── Finaliza serviço: envia tudo para ERP revisar ───
+  const handleFinalizar = async () => {
+    if (!descricao.trim()) {
+      addToast("Descreva o serviço realizado antes de finalizar", "warning");
+      return;
+    }
+    if (!confirm("Finalizar serviço e enviar para escritório?")) return;
+    setBusy(true);
+    const updated = {
+      ...os,
+      status: "aguardando_finalizacao",
+      descricaoTecnico: descricao.trim(),
+      fotos,
+      tecnico: {
+        ...(os.tecnico || {}),
+        chegada: os.tecnico?.chegada || new Date().toISOString(),
+        saida: new Date().toISOString(),
+        descricao: descricao.trim(),
+        fotos,
+      },
+    };
+    DB.set(`erp:os:${os.id}`, updated);
+    addToast("Serviço enviado para revisão!", "success");
+    setBusy(false);
+    onUpdated();
+  };
+
+  // Tech pode iniciar (chegada) quando OS está em qualquer status pré-execução
+  const podeIniciar = ["aguardando", "agendado", "em_deslocamento", "confirmado"].includes(os.status);
+  const emServico = ["em_servico", "em_execucao"].includes(os.status);
+  const finalizado = ["aguardando_finalizacao", "concluido", "finalizado"].includes(os.status);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-gray-900 overflow-y-auto fade-in">
+      {/* Header */}
+      <header className="sticky top-0 z-10 bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center gap-3">
+        <button onClick={onClose} className="text-2xl leading-none">&larr;</button>
+        <div className="flex-1">
+          <h2 className="text-sm font-bold">OS #{os.numero || os.id.slice(0, 6)}</h2>
+          <p className="text-xs text-gray-400">{os.clienteNome}</p>
+        </div>
+        <StatusBadge status={os.status} />
+      </header>
+
+      <div className="p-4 space-y-4">
+        {/* Info básica */}
+        <section className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-400">Equipamento</span>
+            <span>{EQUIPMENT_TYPES[os.equipamentoTipo]?.label || "—"}</span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-400">Data</span>
+            <span>{os.dataAgendada ? formatDate(os.dataAgendada) : "—"}</span>
+          </div>
+          {os.endereco && (
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-400">Endereço</span>
+              <span className="text-right">{os.endereco}</span>
+            </div>
+          )}
+          {(() => {
+            // Busca telefone do cliente no DB (não vem direto na OS)
+            const cli = os.clienteId ? DB.get("erp:client:" + os.clienteId) : null;
+            const tel = cli?.telefone;
+            if (!tel) return null;
+            return (
+              <a
+                href={`tel:${tel.replace(/\D/g, "")}`}
+                className="block mt-2 text-center bg-cyan-600 hover:bg-cyan-700 rounded-lg py-2 text-sm font-semibold"
+              >
+                📞 Ligar para {tel}
+              </a>
+            );
+          })()}
+        </section>
+
+        {/* Problema relatado pelo escritório (campo observacoes da OS) */}
+        {os.observacoes && (
+          <section className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+            <h3 className="text-xs font-semibold text-gray-400 mb-2">OBSERVAÇÕES DO ESCRITÓRIO</h3>
+            <p className="text-sm whitespace-pre-wrap">{os.observacoes}</p>
+          </section>
+        )}
+
+        {/* Lista de serviços previstos */}
+        {(os.servicos || []).length > 0 && (
+          <section className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+            <h3 className="text-xs font-semibold text-gray-400 mb-2">SERVIÇOS PREVISTOS</h3>
+            <ul className="text-sm space-y-1">
+              {os.servicos.map((s, i) => (
+                <li key={i} className="flex justify-between">
+                  <span>• {s.tipo}{s.descricao ? ` — ${s.descricao}` : ""}</span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+
+        {/* Botão chegada */}
+        {podeIniciar && (
+          <button
+            onClick={handleChegada}
+            disabled={busy}
+            className="w-full py-4 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-base font-bold transition active:scale-[0.98]"
+          >
+            🚪 Cheguei no local
+          </button>
+        )}
+
+        {/* Em serviço — formulário relatório */}
+        {(emServico || finalizado) && (
+          <>
+            {os.tecnico?.chegada && (
+              <p className="text-xs text-gray-500 text-center">
+                Chegada: {new Date(os.tecnico.chegada).toLocaleString("pt-BR")}
+              </p>
+            )}
+
+            <section className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+              <label className="text-xs font-semibold text-gray-400 mb-2 block">
+                DESCRIÇÃO DETALHADA DO SERVIÇO
+              </label>
+              <textarea
+                value={descricao}
+                onChange={(e) => setDescricao(e.target.value)}
+                disabled={finalizado}
+                rows={6}
+                placeholder="Descreva o que foi feito, peças trocadas, observações..."
+                className="w-full bg-gray-900 border border-gray-700 rounded-lg p-3 text-sm focus:outline-none focus:border-cyan-500 disabled:opacity-60"
+              />
+            </section>
+
+            <section className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+              <label className="text-xs font-semibold text-gray-400 mb-2 block">
+                FOTOS DO SERVIÇO ({fotos.length})
+              </label>
+
+              {!finalizado && (
+                <label className="block w-full py-3 mb-3 rounded-lg bg-gray-700 hover:bg-gray-600 text-center text-sm font-semibold cursor-pointer transition">
+                  {uploading ? "Enviando..." : "📷 Adicionar fotos"}
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    multiple
+                    onChange={handleFotosChange}
+                    disabled={uploading}
+                    className="hidden"
+                  />
+                </label>
+              )}
+
+              {fotos.length > 0 && (
+                <div className="grid grid-cols-3 gap-2">
+                  {fotos.map((url) => (
+                    <div key={url} className="relative aspect-square">
+                      <img
+                        src={url}
+                        alt="Foto serviço"
+                        className="w-full h-full object-cover rounded-lg"
+                      />
+                      {!finalizado && (
+                        <button
+                          onClick={() => removeFoto(url)}
+                          className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-red-600 text-xs flex items-center justify-center"
+                        >
+                          ×
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </section>
+
+            {/* Botão finalizar */}
+            {emServico && (
+              <button
+                onClick={handleFinalizar}
+                disabled={busy}
+                className="w-full py-4 rounded-xl bg-green-600 hover:bg-green-700 disabled:opacity-50 text-base font-bold transition active:scale-[0.98]"
+              >
+                ✅ Finalizar e enviar para escritório
+              </button>
+            )}
+
+            {finalizado && os.tecnico?.saida && (
+              <p className="text-xs text-gray-500 text-center">
+                Saída: {new Date(os.tecnico.saida).toLocaleString("pt-BR")}
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN APP COMPONENT ──────────────────────────────────────────────────────
 
 export default function App() {
@@ -6656,6 +7372,16 @@ export default function App() {
       <>
         <StyleSheet />
         <LoginScreen onLogin={handleLogin} />
+      </>
+    );
+  }
+
+  // ─── Roteamento por role: técnico vê app mobile dedicado, sem sidebar ───
+  if (user.role === "tecnico") {
+    return (
+      <>
+        <ToastContainer toasts={toasts} removeToast={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
+        <TecnicoMobileApp user={user} onLogout={handleLogout} addToast={addToast} />
       </>
     );
   }

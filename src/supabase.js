@@ -125,6 +125,54 @@ export function deleteFromSupabase(key) {
     });
 }
 
+// ─── Upload de fotos ao Supabase Storage ──────────────────────────────────────
+// Usado pelo app do técnico para enviar fotos do serviço.
+// Retorna URL pública da foto enviada (ou null se falhar).
+// Bucket esperado: 'os-fotos' (precisa estar criado no Supabase com acesso público).
+export async function uploadFotoOS(file, osId) {
+  if (!supabase) {
+    console.warn('Supabase desconectado — upload de foto ignorado');
+    return null;
+  }
+  try {
+    // Gera nome único: osId/timestamp_nomeoriginal
+    const ext = (file.name || 'foto.jpg').split('.').pop();
+    const ts = Date.now();
+    const path = `${osId}/${ts}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+
+    const { error: upErr } = await supabase.storage
+      .from('os-fotos')
+      .upload(path, file, { cacheControl: '3600', upsert: false, contentType: file.type });
+
+    if (upErr) {
+      console.warn('Upload foto erro:', upErr.message);
+      return null;
+    }
+
+    // Pega URL pública do bucket
+    const { data } = supabase.storage.from('os-fotos').getPublicUrl(path);
+    return data?.publicUrl || null;
+  } catch (err) {
+    console.warn('Upload foto falhou:', err.message);
+    return null;
+  }
+}
+
+// ─── Remove foto do Storage (caso técnico exclua antes de finalizar) ─────────
+export async function deleteFotoOS(publicUrl) {
+  if (!supabase || !publicUrl) return;
+  try {
+    // Extrai path do URL público (depois de /os-fotos/)
+    const marker = '/os-fotos/';
+    const idx = publicUrl.indexOf(marker);
+    if (idx === -1) return;
+    const path = publicUrl.slice(idx + marker.length);
+    await supabase.storage.from('os-fotos').remove([path]);
+  } catch (err) {
+    console.warn('Delete foto falhou:', err.message);
+  }
+}
+
 // ─── Realtime: escuta mudanças no Supabase e atualiza o local ─────────────────
 // Retorna função de cleanup para desinscrever
 export function subscribeToChanges(onDataChanged) {
