@@ -3083,18 +3083,23 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
   // Cada OS pode conter múltiplos serviços e peças/materiais — cada linha tem valor próprio.
   // valorTotal = soma de todos os serviços + soma de todas as peças (qtd × valor unit).
-  const emptyServico = { tipo: "Instalação", descricao: "", valor: "" };
+  // Cada serviço tem seu próprio tipo de equipamento — uma OS pode ter
+  // múltiplos serviços, cada um para um equipamento diferente.
+  const emptyServico = {
+    tipo: "Instalação",
+    descricao: "",
+    valor: "",
+    equipamentoTipo: "central",
+    equipamentoModelo: "",
+    equipamentoCapacidade: "",
+  };
   // Peças/materiais: nome obrigatório, quantidade e valor unitário opcionais
   const emptyPeca = { nome: "", quantidade: "1", valorUnit: "" };
   const emptyForm = {
     clienteId: "", endereco: "",
     servicos: [{ ...emptyServico }],
     pecas: [],
-    // Tipo de equipamento define quais campos técnicos aparecem (BTU, Litros, Kg, etc.)
-    equipamentoTipo: "central",
-    equipamentoModelo: "",
-    equipamentoCapacidade: "", // valor genérico — a unidade depende do tipo
-    equipamentoBTUs: "",       // mantido para retrocompatibilidade (apenas quando tipo=central)
+    // Equipamento agora vive dentro de cada serviço (não mais no nível da OS).
     tecnicoId: "", dataAgendada: toISODate(new Date()), horaAgendada: "08:00", observacoes: "",
   };
   const [form, setForm] = useState(emptyForm);
@@ -3187,17 +3192,24 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
   const openEdit = useCallback((row) => {
     setEditing(row);
-    // Migração: OS antigas têm tipo/valor soltos — convertemos para o array de serviços
+    // Migração: OS antigas têm tipo/valor soltos — convertemos para o array de serviços.
+    // Equipamento por serviço: se vier vazio, herda do top-level (compat com OS antigas).
     const servicos = Array.isArray(row.servicos) && row.servicos.length > 0
       ? row.servicos.map((s) => ({
           tipo: s.tipo || "Instalação",
           descricao: s.descricao || "",
           valor: s.valor !== undefined && s.valor !== null ? String(s.valor) : "",
+          equipamentoTipo: s.equipamentoTipo || row.equipamentoTipo || "central",
+          equipamentoModelo: s.equipamentoModelo || row.equipamentoModelo || "",
+          equipamentoCapacidade: s.equipamentoCapacidade || row.equipamentoCapacidade || row.equipamentoBTUs || "",
         }))
       : [{
           tipo: row.tipo || "Instalação",
           descricao: row.descricao || "",
           valor: row.valor !== undefined && row.valor !== null ? String(row.valor) : "",
+          equipamentoTipo: row.equipamentoTipo || "central",
+          equipamentoModelo: row.equipamentoModelo || "",
+          equipamentoCapacidade: row.equipamentoCapacidade || row.equipamentoBTUs || "",
         }];
     // Peças: estrutura { nome, quantidade, valorUnit } — migra itensUtilizados antigo
     const pecas = Array.isArray(row.pecas) && row.pecas.length > 0
@@ -3213,20 +3225,11 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
             valorUnit: i.valorUnit !== undefined && i.valorUnit !== null ? String(i.valorUnit) : "",
           }))
         : [];
-    // Equipamento: migra OS antigas (que só tinham BTUs) para o novo modelo multi-tipo
-    const equipamentoTipo = row.equipamentoTipo || "central";
-    const equipamentoCapacidade = row.equipamentoCapacidade !== undefined && row.equipamentoCapacidade !== null && row.equipamentoCapacidade !== ""
-      ? String(row.equipamentoCapacidade)
-      : String(row.equipamentoBTUs || "");
     setForm({
       clienteId: row.clienteId || "",
       endereco: row.endereco || "",
       servicos,
       pecas,
-      equipamentoTipo,
-      equipamentoModelo: row.equipamentoModelo || "",
-      equipamentoCapacidade,
-      equipamentoBTUs: row.equipamentoBTUs || "",
       tecnicoId: row.tecnicoId || "",
       dataAgendada: row.dataAgendada ? row.dataAgendada.split("T")[0] : toISODate(new Date()),
       horaAgendada: row.horaAgendada || "08:00",
@@ -3242,6 +3245,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         tipo: (s.tipo || "").trim(),
         descricao: (s.descricao || "").trim(),
         valor: parseFloat(String(s.valor || "0").replace(",", ".")) || 0,
+        // Cada serviço carrega seu próprio tipo de equipamento
+        equipamentoTipo: s.equipamentoTipo || "central",
+        equipamentoModelo: (s.equipamentoModelo || "").trim(),
+        equipamentoCapacidade: (s.equipamentoCapacidade || "").trim(),
       }))
       .filter((s) => s.tipo);
 
@@ -3274,9 +3281,13 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
       .map((s) => s.descricao ? `${s.tipo}: ${s.descricao}` : s.tipo)
       .join(" • ");
 
-    // Mantém compat com código antigo: se tipo=central, popula equipamentoBTUs
-    const equipCapacidade = form.equipamentoCapacidade || "";
-    const equipBTUs = form.equipamentoTipo === "central" ? equipCapacidade : "";
+    // Compat: campos top-level de equipamento derivam do PRIMEIRO serviço
+    // (apps/relatórios antigos ainda leem os.equipamentoTipo em vez de iterar serviços)
+    const primeiro = servicosLimpos[0] || {};
+    const formEquipTipo = primeiro.equipamentoTipo || "central";
+    const formEquipModelo = primeiro.equipamentoModelo || "";
+    const equipCapacidade = primeiro.equipamentoCapacidade || "";
+    const equipBTUs = formEquipTipo === "central" ? equipCapacidade : "";
 
     if (editing) {
       const updated = {
@@ -3288,8 +3299,8 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         pecas: pecasLimpas,
         tipo: tipoResumo,
         descricao: descricaoResumo,
-        equipamentoTipo: form.equipamentoTipo,
-        equipamentoModelo: form.equipamentoModelo,
+        equipamentoTipo: formEquipTipo,
+        equipamentoModelo: formEquipModelo,
         equipamentoCapacidade: equipCapacidade,
         equipamentoBTUs: equipBTUs,
         tecnicoId: form.tecnicoId,
@@ -3316,8 +3327,8 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         pecas: pecasLimpas,
         tipo: tipoResumo,
         descricao: descricaoResumo,
-        equipamentoTipo: form.equipamentoTipo,
-        equipamentoModelo: form.equipamentoModelo,
+        equipamentoTipo: formEquipTipo,
+        equipamentoModelo: formEquipModelo,
         equipamentoCapacidade: equipCapacidade,
         equipamentoBTUs: equipBTUs,
         tecnicoId: form.tecnicoId,
@@ -3677,56 +3688,103 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
               </span>
             </div>
             <div className="space-y-2">
-              {(form.servicos || []).map((s, idx) => (
-                <div key={idx} className="grid grid-cols-12 gap-2 items-end bg-gray-700/40 border border-gray-700 rounded-lg p-2.5">
-                  <div className="col-span-12 sm:col-span-3">
-                    <label className="block text-xs text-gray-400 mb-1">Tipo</label>
-                    <select
-                      value={s.tipo}
-                      onChange={(e) => updateServico(idx, { tipo: e.target.value })}
-                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
-                    >
-                      {SERVICE_TYPES.map((t) => (
-                        <option key={t} value={t}>{t}</option>
-                      ))}
-                    </select>
+              {(form.servicos || []).map((s, idx) => {
+                const equipMeta = EQUIPMENT_TYPES[s.equipamentoTipo] || EQUIPMENT_TYPES.central;
+                return (
+                  <div key={idx} className="bg-gray-700/40 border border-gray-700 rounded-lg p-3 space-y-2.5">
+                    {/* Cabeçalho do card com índice + remover */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-300">
+                        Serviço #{idx + 1}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removeServico(idx)}
+                        disabled={(form.servicos || []).length <= 1}
+                        className="p-1.5 rounded-lg text-gray-400 hover:text-red-400 hover:bg-gray-700 transition disabled:opacity-30 disabled:cursor-not-allowed inline-flex items-center justify-center"
+                        aria-label="Remover serviço"
+                        title="Remover serviço"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                      </button>
+                    </div>
+
+                    {/* Linha 1: Tipo serviço | Descrição | Valor */}
+                    <div className="grid grid-cols-12 gap-2">
+                      <div className="col-span-12 sm:col-span-3">
+                        <label className="block text-xs text-gray-400 mb-1">Tipo</label>
+                        <select
+                          value={s.tipo}
+                          onChange={(e) => updateServico(idx, { tipo: e.target.value })}
+                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
+                        >
+                          {SERVICE_TYPES.map((t) => (
+                            <option key={t} value={t}>{t}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="col-span-12 sm:col-span-6">
+                        <label className="block text-xs text-gray-400 mb-1">Descrição</label>
+                        <input
+                          type="text"
+                          value={s.descricao}
+                          onChange={(e) => updateServico(idx, { descricao: e.target.value })}
+                          placeholder="Detalhe do serviço (opcional)"
+                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                        />
+                      </div>
+                      <div className="col-span-12 sm:col-span-3">
+                        <label className="block text-xs text-gray-400 mb-1">Valor (R$)</label>
+                        <input
+                          type="number"
+                          step="0.01"
+                          min="0"
+                          value={s.valor}
+                          onChange={(e) => updateServico(idx, { valor: e.target.value })}
+                          placeholder="0,00"
+                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Linha 2: Equipamento por serviço — tipo / modelo / capacidade */}
+                    <div className="grid grid-cols-12 gap-2 pt-2 border-t border-gray-700/60">
+                      <div className="col-span-12 sm:col-span-5">
+                        <label className="block text-xs text-gray-400 mb-1">Tipo de Equipamento</label>
+                        <select
+                          value={s.equipamentoTipo || "central"}
+                          onChange={(e) => updateServico(idx, { equipamentoTipo: e.target.value, equipamentoCapacidade: "" })}
+                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
+                        >
+                          {Object.entries(EQUIPMENT_TYPES).map(([key, meta]) => (
+                            <option key={key} value={key}>{meta.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <div className="col-span-6 sm:col-span-4">
+                        <label className="block text-xs text-gray-400 mb-1">Modelo</label>
+                        <input
+                          type="text"
+                          value={s.equipamentoModelo || ""}
+                          onChange={(e) => updateServico(idx, { equipamentoModelo: e.target.value })}
+                          placeholder="Marca/modelo"
+                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                        />
+                      </div>
+                      <div className="col-span-6 sm:col-span-3">
+                        <label className="block text-xs text-gray-400 mb-1">{equipMeta.capacityLabel}</label>
+                        <input
+                          type="text"
+                          value={s.equipamentoCapacidade || ""}
+                          onChange={(e) => updateServico(idx, { equipamentoCapacidade: e.target.value })}
+                          placeholder={equipMeta.capacityPlaceholder}
+                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                        />
+                      </div>
+                    </div>
                   </div>
-                  <div className="col-span-8 sm:col-span-6">
-                    <label className="block text-xs text-gray-400 mb-1">Descrição</label>
-                    <input
-                      type="text"
-                      value={s.descricao}
-                      onChange={(e) => updateServico(idx, { descricao: e.target.value })}
-                      placeholder="Detalhe do serviço (opcional)"
-                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-                    />
-                  </div>
-                  <div className="col-span-3 sm:col-span-2">
-                    <label className="block text-xs text-gray-400 mb-1">Valor (R$)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      min="0"
-                      value={s.valor}
-                      onChange={(e) => updateServico(idx, { valor: e.target.value })}
-                      placeholder="0,00"
-                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-                    />
-                  </div>
-                  <div className="col-span-1 flex justify-end">
-                    <button
-                      type="button"
-                      onClick={() => removeServico(idx)}
-                      disabled={(form.servicos || []).length <= 1}
-                      className="p-2 rounded-lg text-gray-400 hover:text-red-400 hover:bg-gray-700 transition disabled:opacity-30 disabled:cursor-not-allowed min-h-[36px] min-w-[36px] inline-flex items-center justify-center"
-                      aria-label="Remover serviço"
-                      title="Remover serviço"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
-                    </button>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
             <button
               type="button"
@@ -3824,46 +3882,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
             </button>
           </div>
 
-          {/* ─── Equipamento ──────────────────────────────────────────────
-              Campos técnicos dependem do tipo selecionado:
-              - central  → BTUs   - geladeira  → Litros
-              - lavadora → Kg     - câmara fria → m³ etc. */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo de Equipamento</label>
-              <select
-                value={form.equipamentoTipo}
-                onChange={(e) => setForm({ ...form, equipamentoTipo: e.target.value, equipamentoCapacidade: "" })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                {Object.entries(EQUIPMENT_TYPES).map(([key, cfg]) => (
-                  <option key={key} value={key}>{cfg.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Modelo / Marca</label>
-              <input
-                type="text"
-                value={form.equipamentoModelo}
-                onChange={(e) => setForm({ ...form, equipamentoModelo: e.target.value })}
-                placeholder="Ex: Consul, Brastemp, Samsung..."
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">
-                {EQUIPMENT_TYPES[form.equipamentoTipo]?.capacityLabel || "Capacidade"}
-              </label>
-              <input
-                type="text"
-                value={form.equipamentoCapacidade}
-                onChange={(e) => setForm({ ...form, equipamentoCapacidade: e.target.value })}
-                placeholder={EQUIPMENT_TYPES[form.equipamentoTipo]?.capacityPlaceholder || ""}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-              />
-            </div>
-          </div>
+          {/* Bloco de equipamento global removido — agora é por serviço (ver acima). */}
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
@@ -3950,7 +3969,17 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
               </div>
               <div className="bg-gray-800 rounded-lg p-3">
                 <div className="text-xs text-gray-400">Equipamento</div>
-                <div className="font-semibold">{EQUIPMENT_TYPES[reviewing.equipamentoTipo]?.label || "—"}</div>
+                <div className="font-semibold">
+                  {(() => {
+                    // Lista equipamentos únicos a partir dos serviços (modelo novo).
+                    // Fallback para campo top-level se a OS antiga não tiver por serviço.
+                    const list = [...new Set((reviewing.servicos || [])
+                      .map((s) => EQUIPMENT_TYPES[s.equipamentoTipo]?.label)
+                      .filter(Boolean))];
+                    if (list.length > 0) return list.join(", ");
+                    return EQUIPMENT_TYPES[reviewing.equipamentoTipo]?.label || "—";
+                  })()}
+                </div>
               </div>
               <div className="bg-gray-800 rounded-lg p-3">
                 <div className="text-xs text-gray-400">Chegada</div>
@@ -6666,7 +6695,12 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
                           <tr key={o.id} className="border-t border-gray-800">
                             <td className="py-1.5">{o.clienteNome || "—"}</td>
                             <td className="py-1.5">
-                              {EQUIPMENT_TYPES[o.equipamentoTipo]?.label || "—"}
+                              {(() => {
+                                const list = [...new Set((o.servicos || [])
+                                  .map((sv) => EQUIPMENT_TYPES[sv.equipamentoTipo]?.label)
+                                  .filter(Boolean))];
+                                return list.length > 0 ? list.join(", ") : (EQUIPMENT_TYPES[o.equipamentoTipo]?.label || "—");
+                              })()}
                             </td>
                             <td className="py-1.5">
                               {o.tecnico?.saida
@@ -6802,7 +6836,14 @@ function TecnicoMobileApp({ user, onLogout, addToast }) {
               <StatusBadge status={os.status} />
             </div>
             <p className="text-xs text-gray-400 mb-1">
-              {EQUIPMENT_TYPES[os.equipamentoTipo]?.label || os.tipoEquipamento || "—"}
+              {(() => {
+                const list = [...new Set((os.servicos || [])
+                  .map((s) => EQUIPMENT_TYPES[s.equipamentoTipo]?.label)
+                  .filter(Boolean))];
+                if (list.length === 0) return EQUIPMENT_TYPES[os.equipamentoTipo]?.label || "—";
+                if (list.length === 1) return list[0];
+                return `${list.length} equipamentos`;
+              })()}
             </p>
             <p className="text-xs text-gray-500">
               📅 {os.dataAgendada ? formatDate(os.dataAgendada) : "Sem data"}
@@ -6947,7 +6988,15 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
         <section className="bg-gray-800 border border-gray-700 rounded-xl p-4 space-y-2">
           <div className="flex justify-between text-sm">
             <span className="text-gray-400">Equipamento</span>
-            <span>{EQUIPMENT_TYPES[os.equipamentoTipo]?.label || "—"}</span>
+            <span className="text-right">
+              {(() => {
+                const list = [...new Set((os.servicos || [])
+                  .map((s) => EQUIPMENT_TYPES[s.equipamentoTipo]?.label)
+                  .filter(Boolean))];
+                if (list.length === 0) return EQUIPMENT_TYPES[os.equipamentoTipo]?.label || "—";
+                return list.length > 1 ? `${list.length} equipamentos (ver abaixo)` : list[0];
+              })()}
+            </span>
           </div>
           <div className="flex justify-between text-sm">
             <span className="text-gray-400">Data / Hora</span>
@@ -6986,16 +7035,26 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
           </section>
         )}
 
-        {/* Lista de serviços previstos */}
+        {/* Lista de serviços previstos — cada serviço com seu próprio equipamento */}
         {(os.servicos || []).length > 0 && (
           <section className="bg-gray-800 border border-gray-700 rounded-xl p-4">
             <h3 className="text-xs font-semibold text-gray-400 mb-2">SERVIÇOS PREVISTOS</h3>
-            <ul className="text-sm space-y-1">
-              {os.servicos.map((s, i) => (
-                <li key={i} className="flex justify-between">
-                  <span>• {s.tipo}{s.descricao ? ` — ${s.descricao}` : ""}</span>
-                </li>
-              ))}
+            <ul className="text-sm space-y-3">
+              {os.servicos.map((s, i) => {
+                const equipLabel = EQUIPMENT_TYPES[s.equipamentoTipo]?.label;
+                const detalhes = [
+                  equipLabel,
+                  s.equipamentoModelo,
+                  s.equipamentoCapacidade,
+                ].filter(Boolean).join(" • ");
+                return (
+                  <li key={i} className="border-l-2 border-cyan-500/50 pl-3">
+                    <div className="font-semibold">{s.tipo}</div>
+                    {s.descricao && <div className="text-xs text-gray-300">{s.descricao}</div>}
+                    {detalhes && <div className="text-xs text-cyan-400 mt-1">🔧 {detalhes}</div>}
+                  </li>
+                );
+              })}
             </ul>
           </section>
         )}
