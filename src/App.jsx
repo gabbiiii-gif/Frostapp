@@ -7477,11 +7477,17 @@ export default function App() {
           transition: "opacity 0.6s ease-out",
         }}
       >
-        {/* Splash de abertura: logo no lugar do texto FrostERP */}
+        {/* Splash de abertura: logo ocupa no minimo 45% da menor dimensao da tela (vmin), centralizada e responsiva em qualquer orientacao */}
         <img
           src="/logo.svg"
           alt="FrostERP"
-          className="h-32 sm:h-40 w-auto animate-pulse drop-shadow-[0_8px_24px_rgba(96,165,250,0.45)]"
+          className="animate-pulse drop-shadow-[0_8px_24px_rgba(96,165,250,0.45)]"
+          style={{
+            width: "clamp(280px, 60vmin, 90vw)",
+            minWidth: "45vmin",
+            height: "auto",
+            objectFit: "contain",
+          }}
         />
       </div>
     );
