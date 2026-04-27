@@ -1323,7 +1323,7 @@ function LoginScreen({ onLogin }) {
             {/* Logo principal da tela de login */}
             {/* Login: logo 02 + titulo FROSTErp + subtitulo */}
             <img
-              src="/logo-02.svg"
+              src="/frosterp-snowflake.svg"
               alt="FROSTErp"
               className="mx-auto mb-3 h-24 w-auto drop-shadow-[0_4px_12px_rgba(96,165,250,0.35)]"
             />
@@ -1558,7 +1558,7 @@ function FirstUserSetup({ onComplete }) {
         <div className="bg-gray-800/80 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-700 p-8">
           <div className="text-center mb-6">
             {/* Logo no fluxo de primeiro acesso (super admin) */}
-            <img src="/logo.svg" alt="FrostERP" className="mx-auto mb-3 h-16 w-auto" />
+            <img src="/frosterp-snowflake.svg" alt="FrostERP" className="mx-auto mb-3 h-16 w-auto" />
             <h2 className="text-2xl font-bold text-white">Primeiro Acesso</h2>
             <p className="text-gray-400 text-sm mt-2">
               Cadastre o usuário <strong className="text-white">Super Administrador</strong>.<br />
@@ -7480,7 +7480,7 @@ export default function App() {
       >
         {/* Splash de abertura: logo ocupa no minimo 45% da menor dimensao da tela (vmin), centralizada e responsiva em qualquer orientacao */}
         <img
-          src="/logo.svg"
+          src="/frosterp-snowflake.svg"
           alt="FrostERP"
           className="animate-pulse drop-shadow-[0_8px_24px_rgba(96,165,250,0.45)]"
           style={{
@@ -7549,7 +7549,7 @@ export default function App() {
         <div className={`flex items-center gap-3 px-4 py-5 border-b border-gray-700 ${sidebarCollapsed ? "justify-center" : ""}`}>
           {/* Sidebar: logo 02 + subtitulo Gestao Integrada */}
           <img
-            src="/logo-02.svg"
+            src="/frosterp-snowflake.svg"
             alt="FROSTErp"
             className={sidebarCollapsed ? "h-8 w-auto" : "h-10 w-auto"}
           />
