@@ -1321,12 +1321,13 @@ function LoginScreen({ onLogin }) {
         <div className="bg-gray-800/70 backdrop-blur-2xl rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.4)] border border-white/10 p-6 sm:p-8 ring-1 ring-white/5">
           <div className="text-center mb-8">
             {/* Logo principal da tela de login */}
-            {/* Logo principal substitui o titulo FrostERP na tela de login */}
+            {/* Login: logo 02 + titulo FROSTErp + subtitulo */}
             <img
-              src="/logo.svg"
-              alt="FrostERP"
+              src="/logo-02.svg"
+              alt="FROSTErp"
               className="mx-auto mb-3 h-24 w-auto drop-shadow-[0_4px_12px_rgba(96,165,250,0.35)]"
             />
+            <h2 className="text-2xl font-bold text-white tracking-tight">FROSTErp</h2>
             <p className="text-gray-400 text-sm mt-1">Sistema de Gestão Integrada</p>
           </div>
 
@@ -7483,8 +7484,8 @@ export default function App() {
           alt="FrostERP"
           className="animate-pulse drop-shadow-[0_8px_24px_rgba(96,165,250,0.45)]"
           style={{
-            width: "110vmin",
-            minWidth: "110vmin",
+            width: "95vmin",
+            minWidth: "95vmin",
             height: "auto",
             objectFit: "contain",
           }}
@@ -7546,10 +7547,10 @@ export default function App() {
       >
         {/* Logo */}
         <div className={`flex items-center gap-3 px-4 py-5 border-b border-gray-700 ${sidebarCollapsed ? "justify-center" : ""}`}>
-          {/* Logo na sidebar substitui o nome FrostERP; expande quando aberta */}
+          {/* Sidebar: logo 02 + subtitulo Gestao Integrada */}
           <img
-            src="/logo.svg"
-            alt="FrostERP"
+            src="/logo-02.svg"
+            alt="FROSTErp"
             className={sidebarCollapsed ? "h-8 w-auto" : "h-10 w-auto"}
           />
           {!sidebarCollapsed && (
