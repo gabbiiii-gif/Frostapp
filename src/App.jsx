@@ -1321,12 +1321,12 @@ function LoginScreen({ onLogin }) {
         <div className="bg-gray-800/70 backdrop-blur-2xl rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.4)] border border-white/10 p-6 sm:p-8 ring-1 ring-white/5">
           <div className="text-center mb-8">
             {/* Logo principal da tela de login */}
+            {/* Logo principal substitui o titulo FrostERP na tela de login */}
             <img
               src="/logo.svg"
               alt="FrostERP"
-              className="mx-auto mb-3 h-20 w-auto drop-shadow-[0_4px_12px_rgba(96,165,250,0.35)]"
+              className="mx-auto mb-3 h-24 w-auto drop-shadow-[0_4px_12px_rgba(96,165,250,0.35)]"
             />
-            <h2 className="text-2xl font-bold text-white tracking-tight">FrostERP</h2>
             <p className="text-gray-400 text-sm mt-1">Sistema de Gestão Integrada</p>
           </div>
 
@@ -7477,12 +7477,11 @@ export default function App() {
           transition: "opacity 0.6s ease-out",
         }}
       >
-        <BlurText
-          text="FrostERP"
-          delay={200}
-          animateBy="words"
-          direction="top"
-          className="text-5xl font-bold text-white"
+        {/* Splash de abertura: logo no lugar do texto FrostERP */}
+        <img
+          src="/logo.svg"
+          alt="FrostERP"
+          className="h-32 sm:h-40 w-auto animate-pulse drop-shadow-[0_8px_24px_rgba(96,165,250,0.45)]"
         />
       </div>
     );
@@ -7541,12 +7540,14 @@ export default function App() {
       >
         {/* Logo */}
         <div className={`flex items-center gap-3 px-4 py-5 border-b border-gray-700 ${sidebarCollapsed ? "justify-center" : ""}`}>
-          <img src="/logo.svg" alt="FrostERP" className="h-8 w-auto" />
+          {/* Logo na sidebar substitui o nome FrostERP; expande quando aberta */}
+          <img
+            src="/logo.svg"
+            alt="FrostERP"
+            className={sidebarCollapsed ? "h-8 w-auto" : "h-10 w-auto"}
+          />
           {!sidebarCollapsed && (
-            <div>
-              <span className="text-lg font-bold text-white">FrostERP</span>
-              <p className="text-xs text-gray-400">Gestão Integrada</p>
-            </div>
+            <p className="text-xs text-gray-400">Gestão Integrada</p>
           )}
         </div>
 
