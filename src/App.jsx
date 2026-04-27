@@ -1320,7 +1320,12 @@ function LoginScreen({ onLogin }) {
       <div className="w-full max-w-md animate-slideIn" style={{ position: 'relative', zIndex: 1 }}>
         <div className="bg-gray-800/70 backdrop-blur-2xl rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.4)] border border-white/10 p-6 sm:p-8 ring-1 ring-white/5">
           <div className="text-center mb-8">
-            <div className="text-6xl mb-3 drop-shadow-[0_4px_12px_rgba(96,165,250,0.35)]">❄️</div>
+            {/* Logo principal da tela de login */}
+            <img
+              src="/logo.svg"
+              alt="FrostERP"
+              className="mx-auto mb-3 h-20 w-auto drop-shadow-[0_4px_12px_rgba(96,165,250,0.35)]"
+            />
             <h2 className="text-2xl font-bold text-white tracking-tight">FrostERP</h2>
             <p className="text-gray-400 text-sm mt-1">Sistema de Gestão Integrada</p>
           </div>
@@ -1551,7 +1556,8 @@ function FirstUserSetup({ onComplete }) {
       <div className="w-full max-w-md animate-slideIn" style={{ position: "relative", zIndex: 1 }}>
         <div className="bg-gray-800/80 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-700 p-8">
           <div className="text-center mb-6">
-            <div className="text-5xl mb-3">❄️</div>
+            {/* Logo no fluxo de primeiro acesso (super admin) */}
+            <img src="/logo.svg" alt="FrostERP" className="mx-auto mb-3 h-16 w-auto" />
             <h2 className="text-2xl font-bold text-white">Primeiro Acesso</h2>
             <p className="text-gray-400 text-sm mt-2">
               Cadastre o usuário <strong className="text-white">Super Administrador</strong>.<br />
@@ -7535,7 +7541,7 @@ export default function App() {
       >
         {/* Logo */}
         <div className={`flex items-center gap-3 px-4 py-5 border-b border-gray-700 ${sidebarCollapsed ? "justify-center" : ""}`}>
-          <span className="text-2xl">❄️</span>
+          <img src="/logo.svg" alt="FrostERP" className="h-8 w-auto" />
           {!sidebarCollapsed && (
             <div>
               <span className="text-lg font-bold text-white">FrostERP</span>
