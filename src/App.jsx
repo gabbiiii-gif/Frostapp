@@ -7483,8 +7483,8 @@ export default function App() {
           alt="FrostERP"
           className="animate-pulse drop-shadow-[0_8px_24px_rgba(96,165,250,0.45)]"
           style={{
-            width: "clamp(280px, 60vmin, 90vw)",
-            minWidth: "45vmin",
+            width: "clamp(280px, 80vmin, 95vw)",
+            minWidth: "70vmin",
             height: "auto",
             objectFit: "contain",
           }}
