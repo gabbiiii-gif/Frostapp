@@ -1327,7 +1327,7 @@ function LoginScreen({ onLogin }) {
               alt="FROSTErp"
               className="mx-auto mb-3 h-24 w-auto drop-shadow-[0_4px_12px_rgba(96,165,250,0.35)]"
             />
-            <h2 className="text-2xl font-bold text-white tracking-tight">FROSTErp</h2>
+            <h2 className="text-2xl font-bold text-white tracking-tight">FrostERP</h2>
             <p className="text-gray-400 text-sm mt-1">Sistema de Gestão Integrada</p>
           </div>
 
@@ -7478,9 +7478,9 @@ export default function App() {
           transition: "opacity 0.6s ease-out",
         }}
       >
-        {/* Splash de abertura: logo ocupa no minimo 45% da menor dimensao da tela (vmin), centralizada e responsiva em qualquer orientacao */}
+        {/* Splash de abertura: usa frosterp_logo_clean (logo.svg), 95vmin, centralizada e responsiva */}
         <img
-          src="/frosterp-snowflake.svg"
+          src="/logo.svg"
           alt="FrostERP"
           className="animate-pulse drop-shadow-[0_8px_24px_rgba(96,165,250,0.45)]"
           style={{
