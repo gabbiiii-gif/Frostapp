@@ -7,6 +7,7 @@ import {
 import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
+import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────────
 
@@ -1321,12 +1322,8 @@ function LoginScreen({ onLogin }) {
         <div className="bg-gray-800/70 backdrop-blur-2xl rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.4)] border border-white/10 p-6 sm:p-8 ring-1 ring-white/5">
           <div className="text-center mb-8">
             {/* Logo principal da tela de login */}
-            {/* Login: logo 02 + titulo FROSTErp + subtitulo */}
-            <img
-              src="/frosterp-snowflake.svg"
-              alt="FROSTErp"
-              className="mx-auto mb-3 h-24 w-auto drop-shadow-[0_4px_12px_rgba(96,165,250,0.35)]"
-            />
+            {/* Login: floco animado (SVG com animacoes CSS) + titulo + subtitulo */}
+            <AnimatedSnowflake className="mx-auto mb-3 w-32 sm:w-40 aspect-square drop-shadow-[0_4px_12px_rgba(96,165,250,0.35)]" />
             <h2 className="text-2xl font-bold text-white tracking-tight">FrostERP</h2>
             <p className="text-gray-400 text-sm mt-1">Sistema de Gestão Integrada</p>
           </div>
