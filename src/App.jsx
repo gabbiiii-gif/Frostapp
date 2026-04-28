@@ -8,6 +8,11 @@ import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSup
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
+import AnimatedLogo from "./AnimatedLogo.jsx";
+
+// Detecta se a URL aponta para um arquivo de vídeo (preview do tecnico)
+const VIDEO_EXT_RE = /\.(mp4|mov|webm|m4v|avi|mkv|ogv|3gp)(\?|$)/i;
+const isVideoUrl = (url) => typeof url === "string" && VIDEO_EXT_RE.test(url);
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────────
 
@@ -7103,34 +7108,61 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
               </label>
 
               {!finalizado && (
-                <label className="block w-full py-3 mb-3 rounded-lg bg-gray-700 hover:bg-gray-600 text-center text-sm font-semibold cursor-pointer transition">
-                  {uploading ? "Enviando..." : "📷 Adicionar fotos"}
-                  <input
-                    name="fotos"
-                    type="file"
-                    accept="image/*"
-                    capture="environment"
-                    multiple
-                    onChange={handleFotosChange}
-                    disabled={uploading}
-                    className="hidden"
-                  />
-                </label>
+                // Dois botoes para que o tecnico possa abrir camera ou pegar
+                // arquivos ja salvos (fotos e videos) na galeria
+                <div className="grid grid-cols-2 gap-2 mb-3">
+                  <label className="block py-3 rounded-lg bg-gray-700 hover:bg-gray-600 text-center text-sm font-semibold cursor-pointer transition">
+                    {uploading ? "..." : "📷 Câmera"}
+                    <input
+                      name="cameraFotos"
+                      type="file"
+                      accept="image/*,video/*"
+                      capture="environment"
+                      multiple
+                      onChange={handleFotosChange}
+                      disabled={uploading}
+                      className="hidden"
+                    />
+                  </label>
+                  <label className="block py-3 rounded-lg bg-gray-700 hover:bg-gray-600 text-center text-sm font-semibold cursor-pointer transition">
+                    {uploading ? "..." : "🖼️ Galeria"}
+                    <input
+                      name="galeriaFotos"
+                      type="file"
+                      accept="image/*,video/*"
+                      multiple
+                      onChange={handleFotosChange}
+                      disabled={uploading}
+                      className="hidden"
+                    />
+                  </label>
+                </div>
               )}
 
               {fotos.length > 0 && (
                 <div className="grid grid-cols-3 gap-2">
                   {fotos.map((url) => (
-                    <div key={url} className="relative aspect-square">
-                      <img
-                        src={url}
-                        alt="Foto serviço"
-                        className="w-full h-full object-cover rounded-lg"
-                      />
+                    <div key={url} className="relative aspect-square bg-gray-900 rounded-lg overflow-hidden">
+                      {/* Renderiza video com controles quando o arquivo for video; caso contrario imagem */}
+                      {isVideoUrl(url) ? (
+                        <video
+                          src={url}
+                          controls
+                          playsInline
+                          preload="metadata"
+                          className="w-full h-full object-cover"
+                        />
+                      ) : (
+                        <img
+                          src={url}
+                          alt="Foto serviço"
+                          className="w-full h-full object-cover"
+                        />
+                      )}
                       {!finalizado && (
                         <button
                           onClick={() => removeFoto(url)}
-                          className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-red-600 text-xs flex items-center justify-center"
+                          className="absolute -top-1 -right-1 w-6 h-6 rounded-full bg-red-600 text-xs flex items-center justify-center z-10"
                         >
                           ×
                         </button>
@@ -7476,17 +7508,10 @@ export default function App() {
           transition: "opacity 0.6s ease-out",
         }}
       >
-        {/* Splash de abertura: usa frosterp_logo_clean (logo.svg), 95vmin, centralizada e responsiva */}
-        <img
-          src="/logo.svg"
-          alt="FrostERP"
-          className="animate-pulse drop-shadow-[0_8px_24px_rgba(96,165,250,0.45)]"
-          style={{
-            width: "95vmin",
-            minWidth: "95vmin",
-            height: "auto",
-            objectFit: "contain",
-          }}
+        {/* Splash: logo animada completa (frosterp_logo_animated) ocupa ~95% da tela */}
+        <AnimatedLogo
+          className="drop-shadow-[0_8px_24px_rgba(96,165,250,0.45)]"
+          style={{ width: "95vmin", height: "auto" }}
         />
       </div>
     );
