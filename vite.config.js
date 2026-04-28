@@ -9,8 +9,11 @@ function cspPlugin() {
     name: 'inject-csp',
     transformIndexHtml(html, ctx) {
       if (ctx.bundle) {
-        // Produção: CSP restritivo com worker-src e manifest-src para PWA, base-uri e form-action
-        const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; manifest-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://fonts.googleapis.com https://fonts.gstatic.com; img-src 'self' data: blob: https://api.qrserver.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none';" />`;
+        // Produção: CSP restritivo com worker-src e manifest-src para PWA, base-uri e form-action.
+        // OBS: frame-ancestors NÃO é incluído aqui — esse diretivo é ignorado em <meta>
+        // pelo browser. A proteção contra clickjacking é feita pelo header X-Frame-Options:
+        // DENY (ou Content-Security-Policy: frame-ancestors 'none') configurado no vercel.json.
+        const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; manifest-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://fonts.googleapis.com https://fonts.gstatic.com; img-src 'self' data: blob: https://api.qrserver.com; object-src 'none'; base-uri 'self'; form-action 'self';" />`;
         return html.replace('<!-- CSP aplicado via servidor em produção; em dev o Vite precisa de ws: e eval para HMR -->', csp);
       }
       return html;
