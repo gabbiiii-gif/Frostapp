@@ -6885,7 +6885,13 @@ function TecnicoMobileApp({ user, onLogout, addToast }) {
 // ─── Tela de detalhe + ações para uma OS específica (técnico) ────────────────
 function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
   const [descricao, setDescricao] = useState(os.descricaoTecnico || "");
-  const [fotos, setFotos] = useState(os.fotos || []); // array de URLs públicas
+  const [fotos, setFotos] = useState(os.fotos || []); // array de URLs (publicas e blob: temporarias durante upload)
+  // Conjunto de URLs que sao videos (necessario para blob: que nao tem extensao)
+  const [videoUrls, setVideoUrls] = useState(() => {
+    const s = new Set();
+    (os.fotos || []).forEach((u) => { if (isVideoUrl(u)) s.add(u); });
+    return s;
+  });
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -6924,29 +6930,68 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
     onUpdated();
   };
 
-  // ─── Upload de fotos: captura/galeria (camera mobile) ───
+  // ─── Upload de fotos/videos: captura/galeria (mobile) ───
+  // Estrategia otimista: cria blob: URL imediatamente para preview, depois
+  // sobe pro Supabase em paralelo e troca o blob: pelo URL publico quando
+  // terminar. Em caso de falha no upload, remove o blob: da lista.
   const handleFotosChange = async (e) => {
     const files = Array.from(e.target.files || []);
     if (files.length === 0) return;
     setUploading(true);
-    const novasUrls = [];
-    for (const file of files) {
-      const url = await uploadFotoOS(file, os.id);
-      if (url) novasUrls.push(url);
-    }
-    setFotos((prev) => [...prev, ...novasUrls]);
+
+    const blobUrls = files.map((f) => URL.createObjectURL(f));
+    const isVideoFlags = files.map((f) => (f.type || "").startsWith("video/"));
+
+    // Marca quais blob: sao videos antes de inseri-los na grid
+    setVideoUrls((prev) => {
+      const next = new Set(prev);
+      blobUrls.forEach((u, i) => { if (isVideoFlags[i]) next.add(u); });
+      return next;
+    });
+    setFotos((prev) => [...prev, ...blobUrls]);
+
+    let okCount = 0;
+    await Promise.all(files.map(async (file, i) => {
+      const tempUrl = blobUrls[i];
+      try {
+        const url = await uploadFotoOS(file, os.id);
+        if (url) {
+          okCount++;
+          setFotos((prev) => prev.map((u) => (u === tempUrl ? url : u)));
+          setVideoUrls((prev) => {
+            const next = new Set(prev);
+            if (next.delete(tempUrl) && isVideoFlags[i]) next.add(url);
+            return next;
+          });
+        } else {
+          // upload falhou — remove blob: da lista
+          setFotos((prev) => prev.filter((u) => u !== tempUrl));
+          setVideoUrls((prev) => { const n = new Set(prev); n.delete(tempUrl); return n; });
+        }
+      } catch (err) {
+        setFotos((prev) => prev.filter((u) => u !== tempUrl));
+        setVideoUrls((prev) => { const n = new Set(prev); n.delete(tempUrl); return n; });
+      } finally {
+        URL.revokeObjectURL(tempUrl);
+      }
+    }));
+
     setUploading(false);
-    if (novasUrls.length > 0) addToast(`${novasUrls.length} foto(s) enviada(s)`, "success");
+    if (okCount > 0) addToast(`${okCount} arquivo(s) enviado(s)`, "success");
     else addToast("Falha no upload", "error");
-    e.target.value = ""; // reset input
+    e.target.value = "";
   };
 
-  // ─── Remove foto antes de finalizar ───
+  // ─── Remove foto/video antes de finalizar ───
   const removeFoto = async (url) => {
-    if (!confirm("Remover esta foto?")) return;
-    await deleteFotoOS(url);
+    if (!confirm("Remover este arquivo?")) return;
+    if (!url.startsWith("blob:")) await deleteFotoOS(url);
     setFotos((prev) => prev.filter((u) => u !== url));
+    setVideoUrls((prev) => { const n = new Set(prev); n.delete(url); return n; });
   };
+
+  // Helper local: combina deteccao por extensao + Set de blobs identificados como video
+  const isVideoLocal = (url) => isVideoUrl(url) || videoUrls.has(url);
 
   // ─── Finaliza serviço: envia tudo para ERP revisar ───
   const handleFinalizar = async () => {
@@ -7144,7 +7189,7 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
                   {fotos.map((url) => (
                     <div key={url} className="relative aspect-square bg-gray-900 rounded-lg overflow-hidden">
                       {/* Renderiza video com controles quando o arquivo for video; caso contrario imagem */}
-                      {isVideoUrl(url) ? (
+                      {isVideoLocal(url) ? (
                         <video
                           src={url}
                           controls
