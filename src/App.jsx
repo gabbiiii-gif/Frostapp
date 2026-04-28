@@ -26,14 +26,20 @@ function ConfigNavIcon({ active = false }) {
   return (
     <span
       className="flex-shrink-0 inline-flex items-center justify-center"
-      style={{ width: 22, height: 22 }}
+      style={{
+        width: 22,
+        height: 22,
+        // Lordicon "wired-outline" tem traço preto por padrão; invertendo
+        // vira branco para ficar visível na sidebar escura
+        filter: "invert(1) brightness(2)",
+      }}
       onMouseEnter={handleEnter}
     >
       <Lottie
         lottieRef={lottieRef}
         animationData={configToolAnimation}
-        loop={active}
-        autoplay={active}
+        loop
+        autoplay
         style={{ width: 22, height: 22 }}
       />
     </span>
