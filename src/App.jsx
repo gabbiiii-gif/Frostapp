@@ -8,6 +8,37 @@ import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSup
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
+// Animação Lordicon (Lottie) usada como ícone do menu Configurações
+import Lottie from "lottie-react";
+import configToolAnimation from "./icons/config-tool.json";
+
+// Ícone animado (Lordicon) do menu Configurações.
+// - Toca o ciclo automaticamente quando o item está ativo
+// - Replay no hover para reproduzir o efeito "hover-oscillate" do Lordicon original
+function ConfigNavIcon({ active = false }) {
+  const lottieRef = useRef(null);
+  const handleEnter = useCallback(() => {
+    const inst = lottieRef.current;
+    if (!inst) return;
+    inst.stop();
+    inst.play();
+  }, []);
+  return (
+    <span
+      className="flex-shrink-0 inline-flex items-center justify-center"
+      style={{ width: 22, height: 22 }}
+      onMouseEnter={handleEnter}
+    >
+      <Lottie
+        lottieRef={lottieRef}
+        animationData={configToolAnimation}
+        loop={active}
+        autoplay={active}
+        style={{ width: 22, height: 22 }}
+      />
+    </span>
+  );
+}
 
 // ─── CONSTANTS ──────────────────────────────────────────────────────────────────
 
@@ -7585,7 +7616,12 @@ export default function App() {
                   : "text-gray-300 hover:bg-gray-700 hover:text-white"
               } ${sidebarCollapsed ? "justify-center" : ""}`}
             >
-              <span className="text-lg flex-shrink-0">{item.icon}</span>
+              {/* Configuracoes usa animacao Lordicon (hover-oscillate) em vez de emoji */}
+              {item.id === "config" ? (
+                <ConfigNavIcon active={activeModule === item.id} />
+              ) : (
+                <span className="text-lg flex-shrink-0">{item.icon}</span>
+              )}
               {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
             </button>
           ))}
