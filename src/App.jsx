@@ -1090,7 +1090,7 @@ function SearchInput({ value, onChange, placeholder = "Buscar..." }) {
       <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
       </svg>
-      <input
+      <input name="local"
         type="text"
         value={local}
         onChange={handleChange}
@@ -1131,7 +1131,7 @@ function ConfirmDialog({ message, onConfirm, onCancel, requireType = null }) {
         {requireType && (
           <div className="mb-4">
             <p className="text-gray-400 text-xs mb-2">Digite <strong className="text-red-400">{requireType}</strong> para confirmar:</p>
-            <input
+            <input name="typed"
               type="text"
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
@@ -1450,7 +1450,7 @@ function ForcePasswordChangeDialog({ user, onComplete }) {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Nova Senha</label>
-              <input
+              <input name="newPassword"
                 type="password"
                 value={newPassword}
                 onChange={(e) => { setNewPassword(e.target.value); setError(""); }}
@@ -1461,7 +1461,7 @@ function ForcePasswordChangeDialog({ user, onComplete }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar Senha</label>
-              <input
+              <input name="confirmPassword"
                 type="password"
                 value={confirmPassword}
                 onChange={(e) => { setConfirmPassword(e.target.value); setError(""); }}
@@ -1566,7 +1566,7 @@ function FirstUserSetup({ onComplete }) {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Nome completo</label>
-              <input
+              <input name="nome"
                 type="text"
                 value={nome}
                 onChange={(e) => { setNome(e.target.value); setError(""); }}
@@ -1577,7 +1577,7 @@ function FirstUserSetup({ onComplete }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
-              <input
+              <input name="email"
                 type="email"
                 autoComplete="email"
                 value={email}
@@ -1588,7 +1588,7 @@ function FirstUserSetup({ onComplete }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Senha</label>
-              <input
+              <input name="password"
                 type="password"
                 autoComplete="new-password"
                 value={password}
@@ -1599,7 +1599,7 @@ function FirstUserSetup({ onComplete }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar Senha</label>
-              <input
+              <input name="confirmPassword"
                 type="password"
                 autoComplete="new-password"
                 value={confirmPassword}
@@ -2255,7 +2255,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
         <div className="flex-1 min-w-[200px] max-w-sm">
           <SearchInput value={search} onChange={setSearch} placeholder="Buscar transação..." />
         </div>
-        <select
+        <select name="filterType"
           value={filterType}
           onChange={(e) => setFilterType(e.target.value)}
           className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 min-h-[44px]"
@@ -2264,7 +2264,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
           <option value="receita">Receitas</option>
           <option value="despesa">Despesas</option>
         </select>
-        <select
+        <select name="filterStatus"
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
           className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 min-h-[44px]"
@@ -2276,7 +2276,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
           <option value="atrasado">Atrasado</option>
           <option value="cancelado">Cancelado</option>
         </select>
-        <select
+        <select name="filterCategory"
           value={filterCategory}
           onChange={(e) => setFilterCategory(e.target.value)}
           className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 min-h-[44px]"
@@ -2314,7 +2314,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">Descrição *</label>
-            <input
+            <input name="descricao"
               type="text"
               value={form.descricao}
               onChange={(e) => setForm({ ...form, descricao: e.target.value })}
@@ -2326,7 +2326,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Valor (R$) *</label>
-              <input
+              <input name="valor"
                 type="number"
                 step="0.01"
                 min="0"
@@ -2339,7 +2339,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo</label>
-              <select
+              <select name="tipo"
                 value={form.tipo}
                 onChange={(e) => setForm({ ...form, tipo: e.target.value, categoria: "" })}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
@@ -2353,7 +2353,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Categoria</label>
-              <select
+              <select name="categoria"
                 value={form.categoria}
                 onChange={(e) => setForm({ ...form, categoria: e.target.value })}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
@@ -2366,7 +2366,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Data *</label>
-              <input
+              <input name="data"
                 type="date"
                 value={form.data}
                 onChange={(e) => setForm({ ...form, data: e.target.value })}
@@ -2378,7 +2378,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Status</label>
-              <select
+              <select name="status"
                 value={form.status}
                 onChange={(e) => setForm({ ...form, status: e.target.value })}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
@@ -2393,7 +2393,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Forma de Pagamento</label>
-              <select
+              <select name="formaPagamento"
                 value={form.formaPagamento}
                 onChange={(e) => setForm({ ...form, formaPagamento: e.target.value })}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
@@ -2407,7 +2407,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
 
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">Observações</label>
-            <textarea
+            <textarea name="observacoes"
               value={form.observacoes}
               onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
               rows={3}
@@ -3464,7 +3464,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         <div className="flex-1 min-w-[200px] max-w-sm">
           <SearchInput value={search} onChange={setSearch} placeholder="Buscar OS..." />
         </div>
-        <select
+        <select name="filterStatus"
           value={filterStatus}
           onChange={(e) => setFilterStatus(e.target.value)}
           className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
@@ -3478,7 +3478,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
           <option value="aguardando_finalizacao">Aguardando Finalização</option>
         </select>
         {user.role !== "tecnico" && (
-          <select
+          <select name="filterTecnico"
             value={filterTecnico}
             onChange={(e) => setFilterTecnico(e.target.value)}
             className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
@@ -3491,7 +3491,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
         )}
         {/* Filtro por cliente — para ver histórico de serviços de um cliente específico */}
         {user.role !== "tecnico" && (
-          <select
+          <select name="filterCliente"
             value={filterCliente}
             onChange={(e) => setFilterCliente(e.target.value)}
             className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
@@ -3674,7 +3674,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">Endereço</label>
-            <input
+            <input name="endereco"
               type="text"
               value={form.endereco}
               onChange={(e) => setForm({ ...form, endereco: e.target.value })}
@@ -3717,7 +3717,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                     <div className="grid grid-cols-12 gap-2">
                       <div className="col-span-12 sm:col-span-3">
                         <label className="block text-xs text-gray-400 mb-1">Tipo</label>
-                        <select
+                        <select name="tipo"
                           value={s.tipo}
                           onChange={(e) => updateServico(idx, { tipo: e.target.value })}
                           className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
@@ -3729,7 +3729,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                       </div>
                       <div className="col-span-12 sm:col-span-6">
                         <label className="block text-xs text-gray-400 mb-1">Descrição</label>
-                        <input
+                        <input name="descricao"
                           type="text"
                           value={s.descricao}
                           onChange={(e) => updateServico(idx, { descricao: e.target.value })}
@@ -3739,7 +3739,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                       </div>
                       <div className="col-span-12 sm:col-span-3">
                         <label className="block text-xs text-gray-400 mb-1">Valor (R$)</label>
-                        <input
+                        <input name="valor"
                           type="number"
                           step="0.01"
                           min="0"
@@ -3755,7 +3755,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                     <div className="grid grid-cols-12 gap-2 pt-2 border-t border-gray-700/60">
                       <div className="col-span-12 sm:col-span-5">
                         <label className="block text-xs text-gray-400 mb-1">Tipo de Equipamento</label>
-                        <select
+                        <select name="equipamentoTipo"
                           value={s.equipamentoTipo || "central"}
                           onChange={(e) => updateServico(idx, { equipamentoTipo: e.target.value, equipamentoCapacidade: "" })}
                           className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
@@ -3767,7 +3767,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                       </div>
                       <div className="col-span-6 sm:col-span-4">
                         <label className="block text-xs text-gray-400 mb-1">Modelo</label>
-                        <input
+                        <input name="equipamentoModelo"
                           type="text"
                           value={s.equipamentoModelo || ""}
                           onChange={(e) => updateServico(idx, { equipamentoModelo: e.target.value })}
@@ -3777,7 +3777,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                       </div>
                       <div className="col-span-6 sm:col-span-3">
                         <label className="block text-xs text-gray-400 mb-1">{equipMeta.capacityLabel}</label>
-                        <input
+                        <input name="equipamentoCapacidade"
                           type="text"
                           value={s.equipamentoCapacidade || ""}
                           onChange={(e) => updateServico(idx, { equipamentoCapacidade: e.target.value })}
@@ -3820,7 +3820,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                     <div key={idx} className="grid grid-cols-12 gap-2 items-end bg-gray-700/40 border border-gray-700 rounded-lg p-2.5">
                       <div className="col-span-12 sm:col-span-5">
                         <label className="block text-xs text-gray-400 mb-1">Peça/Material</label>
-                        <input
+                        <input name="nome"
                           type="text"
                           value={p.nome}
                           onChange={(e) => updatePeca(idx, { nome: e.target.value })}
@@ -3830,7 +3830,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                       </div>
                       <div className="col-span-4 sm:col-span-2">
                         <label className="block text-xs text-gray-400 mb-1">Qtd</label>
-                        <input
+                        <input name="quantidade"
                           type="number"
                           step="0.01"
                           min="0"
@@ -3843,7 +3843,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                       </div>
                       <div className="col-span-4 sm:col-span-2">
                         <label className="block text-xs text-gray-400 mb-1">Valor Unit.</label>
-                        <input
+                        <input name="valorUnit"
                           type="number"
                           step="0.01"
                           min="0"
@@ -3891,7 +3891,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Técnico</label>
-              <select
+              <select name="tecnicoId"
                 value={form.tecnicoId}
                 onChange={(e) => setForm({ ...form, tecnicoId: e.target.value })}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
@@ -3904,7 +3904,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Data Agendada</label>
-              <input
+              <input name="dataAgendada"
                 type="date"
                 value={form.dataAgendada}
                 onChange={(e) => setForm({ ...form, dataAgendada: e.target.value })}
@@ -3914,7 +3914,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
             <div>
               {/* Hora agendada — usada pelo app do técnico para saber horário do compromisso */}
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Hora Agendada</label>
-              <input
+              <input name="horaAgendada"
                 type="time"
                 value={form.horaAgendada || ""}
                 onChange={(e) => setForm({ ...form, horaAgendada: e.target.value })}
@@ -3925,7 +3925,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">Relatos do Cliente</label>
-            <textarea
+            <textarea name="observacoes"
               value={form.observacoes}
               onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
               rows={3}
@@ -4697,7 +4697,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Data *</label>
-              <input
+              <input name="data"
                 type="date"
                 value={form.data}
                 onChange={(e) => setForm({ ...form, data: e.target.value })}
@@ -4706,7 +4706,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Hora Início *</label>
-              <input
+              <input name="horaInicio"
                 type="time"
                 value={form.horaInicio}
                 onChange={(e) => setForm({ ...form, horaInicio: e.target.value })}
@@ -4715,7 +4715,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Hora Fim *</label>
-              <input
+              <input name="horaFim"
                 type="time"
                 value={form.horaFim}
                 onChange={(e) => setForm({ ...form, horaFim: e.target.value })}
@@ -4748,7 +4748,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Técnico *</label>
-              <select
+              <select name="tecnicoId"
                 value={form.tecnicoId}
                 onChange={(e) => setForm({ ...form, tecnicoId: e.target.value })}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
@@ -4764,7 +4764,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo de Serviço</label>
-              <select
+              <select name="tipo"
                 value={form.tipo}
                 onChange={(e) => setForm({ ...form, tipo: e.target.value })}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
@@ -4776,7 +4776,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Endereço</label>
-              <input
+              <input name="endereco"
                 type="text"
                 value={form.endereco}
                 onChange={(e) => setForm({ ...form, endereco: e.target.value })}
@@ -4788,7 +4788,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
 
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">Observações</label>
-            <textarea
+            <textarea name="observacoes"
               value={form.observacoes}
               onChange={(e) => setForm({ ...form, observacoes: e.target.value })}
               rows={3}
@@ -5312,7 +5312,7 @@ function CadastroModule({ user, addToast, reloadData }) {
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Nome *</label>
-                <input
+                <input name="nome"
                   type="text"
                   value={clientForm.nome}
                   onChange={(e) => setClientForm({ ...clientForm, nome: e.target.value })}
@@ -5322,7 +5322,7 @@ function CadastroModule({ user, addToast, reloadData }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo</label>
-                <select
+                <select name="tipo"
                   value={clientForm.tipo}
                   onChange={(e) => setClientForm({ ...clientForm, tipo: e.target.value })}
                   className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
@@ -5335,7 +5335,7 @@ function CadastroModule({ user, addToast, reloadData }) {
                 {clientForm.tipo === "pf" ? (
                   <>
                     <label className="block text-sm font-medium text-gray-300 mb-1.5">CPF</label>
-                    <input
+                    <input name="cpf"
                       type="text"
                       value={clientForm.cpf}
                       onChange={(e) => setClientForm({ ...clientForm, cpf: formatCPF(e.target.value) })}
@@ -5347,7 +5347,7 @@ function CadastroModule({ user, addToast, reloadData }) {
                 ) : (
                   <>
                     <label className="block text-sm font-medium text-gray-300 mb-1.5">CNPJ</label>
-                    <input
+                    <input name="cnpj"
                       type="text"
                       value={clientForm.cnpj}
                       onChange={(e) => setClientForm({ ...clientForm, cnpj: formatCNPJ(e.target.value) })}
@@ -5362,7 +5362,7 @@ function CadastroModule({ user, addToast, reloadData }) {
               {clientForm.tipo === "pf" && (
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">RG</label>
-                  <input
+                  <input name="rg"
                     type="text"
                     value={clientForm.rg}
                     onChange={(e) => setClientForm({ ...clientForm, rg: e.target.value })}
@@ -5377,7 +5377,7 @@ function CadastroModule({ user, addToast, reloadData }) {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Telefone *</label>
-                <input
+                <input name="telefone"
                   type="text"
                   value={clientForm.telefone}
                   onChange={(e) => setClientForm({ ...clientForm, telefone: formatPhone(e.target.value) })}
@@ -5388,7 +5388,7 @@ function CadastroModule({ user, addToast, reloadData }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
-                <input
+                <input name="email"
                   type="email"
                   value={clientForm.email}
                   onChange={(e) => setClientForm({ ...clientForm, email: e.target.value })}
@@ -5403,7 +5403,7 @@ function CadastroModule({ user, addToast, reloadData }) {
               <div className="grid grid-cols-3 gap-4">
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Rua</label>
-                  <input
+                  <input name="rua"
                     type="text"
                     value={clientForm.rua}
                     onChange={(e) => setClientForm({ ...clientForm, rua: e.target.value })}
@@ -5413,7 +5413,7 @@ function CadastroModule({ user, addToast, reloadData }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Número</label>
-                  <input
+                  <input name="numero"
                     type="text"
                     value={clientForm.numero}
                     onChange={(e) => setClientForm({ ...clientForm, numero: e.target.value })}
@@ -5425,7 +5425,7 @@ function CadastroModule({ user, addToast, reloadData }) {
               <div className="grid grid-cols-4 gap-4 mt-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Bairro</label>
-                  <input
+                  <input name="bairro"
                     type="text"
                     value={clientForm.bairro}
                     onChange={(e) => setClientForm({ ...clientForm, bairro: e.target.value })}
@@ -5435,7 +5435,7 @@ function CadastroModule({ user, addToast, reloadData }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Cidade</label>
-                  <input
+                  <input name="cidade"
                     type="text"
                     value={clientForm.cidade}
                     onChange={(e) => setClientForm({ ...clientForm, cidade: e.target.value })}
@@ -5445,7 +5445,7 @@ function CadastroModule({ user, addToast, reloadData }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Estado</label>
-                  <input
+                  <input name="estado"
                     type="text"
                     value={clientForm.estado}
                     onChange={(e) => setClientForm({ ...clientForm, estado: e.target.value.toUpperCase().slice(0, 2) })}
@@ -5456,7 +5456,7 @@ function CadastroModule({ user, addToast, reloadData }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">CEP</label>
-                  <input
+                  <input name="cep"
                     type="text"
                     value={clientForm.cep}
                     onChange={(e) => setClientForm({ ...clientForm, cep: formatCEP(e.target.value) })}
@@ -5470,7 +5470,7 @@ function CadastroModule({ user, addToast, reloadData }) {
 
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Observações</label>
-              <textarea
+              <textarea name="observacoes"
                 value={clientForm.observacoes}
                 onChange={(e) => setClientForm({ ...clientForm, observacoes: e.target.value })}
                 rows={3}
@@ -5497,7 +5497,7 @@ function CadastroModule({ user, addToast, reloadData }) {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Nome *</label>
-              <input
+              <input name="nome"
                 type="text"
                 value={employeeForm.nome}
                 onChange={(e) => setEmployeeForm({ ...employeeForm, nome: e.target.value })}
@@ -5508,7 +5508,7 @@ function CadastroModule({ user, addToast, reloadData }) {
             <div className="grid grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">CPF *</label>
-                <input
+                <input name="cpf"
                   type="text"
                   value={employeeForm.cpf}
                   onChange={(e) => setEmployeeForm({ ...employeeForm, cpf: formatCPF(e.target.value) })}
@@ -5519,7 +5519,7 @@ function CadastroModule({ user, addToast, reloadData }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">RG</label>
-                <input
+                <input name="rg"
                   type="text"
                   value={employeeForm.rg}
                   onChange={(e) => setEmployeeForm({ ...employeeForm, rg: e.target.value })}
@@ -5530,7 +5530,7 @@ function CadastroModule({ user, addToast, reloadData }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Telefone *</label>
-                <input
+                <input name="telefone"
                   type="text"
                   value={employeeForm.telefone}
                   onChange={(e) => setEmployeeForm({ ...employeeForm, telefone: formatPhone(e.target.value) })}
@@ -5542,7 +5542,7 @@ function CadastroModule({ user, addToast, reloadData }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
-              <input
+              <input name="email"
                 type="email"
                 value={employeeForm.email}
                 onChange={(e) => setEmployeeForm({ ...employeeForm, email: e.target.value })}
@@ -5553,7 +5553,7 @@ function CadastroModule({ user, addToast, reloadData }) {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Cargo</label>
-                <select
+                <select name="cargo"
                   value={employeeForm.cargo}
                   onChange={(e) => setEmployeeForm({ ...employeeForm, cargo: e.target.value })}
                   className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
@@ -5565,7 +5565,7 @@ function CadastroModule({ user, addToast, reloadData }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Salário (R$)</label>
-                <input
+                <input name="salario"
                   type="number"
                   step="0.01"
                   min="0"
@@ -5579,7 +5579,7 @@ function CadastroModule({ user, addToast, reloadData }) {
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Data de Admissão</label>
-                <input
+                <input name="dataAdmissao"
                   type="date"
                   value={employeeForm.dataAdmissao}
                   onChange={(e) => setEmployeeForm({ ...employeeForm, dataAdmissao: e.target.value })}
@@ -5588,7 +5588,7 @@ function CadastroModule({ user, addToast, reloadData }) {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Status</label>
-                <select
+                <select name="status"
                   value={employeeForm.status}
                   onChange={(e) => setEmployeeForm({ ...employeeForm, status: e.target.value })}
                   className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
@@ -5605,7 +5605,7 @@ function CadastroModule({ user, addToast, reloadData }) {
               <div className="grid grid-cols-3 gap-4">
                 <div className="col-span-2">
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Rua</label>
-                  <input
+                  <input name="rua"
                     type="text"
                     value={employeeForm.rua}
                     onChange={(e) => setEmployeeForm({ ...employeeForm, rua: e.target.value })}
@@ -5615,7 +5615,7 @@ function CadastroModule({ user, addToast, reloadData }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Número</label>
-                  <input
+                  <input name="numero"
                     type="text"
                     value={employeeForm.numero}
                     onChange={(e) => setEmployeeForm({ ...employeeForm, numero: e.target.value })}
@@ -5627,7 +5627,7 @@ function CadastroModule({ user, addToast, reloadData }) {
               <div className="grid grid-cols-4 gap-4 mt-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Bairro</label>
-                  <input
+                  <input name="bairro"
                     type="text"
                     value={employeeForm.bairro}
                     onChange={(e) => setEmployeeForm({ ...employeeForm, bairro: e.target.value })}
@@ -5637,7 +5637,7 @@ function CadastroModule({ user, addToast, reloadData }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Cidade</label>
-                  <input
+                  <input name="cidade"
                     type="text"
                     value={employeeForm.cidade}
                     onChange={(e) => setEmployeeForm({ ...employeeForm, cidade: e.target.value })}
@@ -5647,7 +5647,7 @@ function CadastroModule({ user, addToast, reloadData }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">Estado</label>
-                  <input
+                  <input name="estado"
                     type="text"
                     value={employeeForm.estado}
                     onChange={(e) => setEmployeeForm({ ...employeeForm, estado: e.target.value.toUpperCase().slice(0, 2) })}
@@ -5658,7 +5658,7 @@ function CadastroModule({ user, addToast, reloadData }) {
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-gray-300 mb-1.5">CEP</label>
-                  <input
+                  <input name="cep"
                     type="text"
                     value={employeeForm.cep}
                     onChange={(e) => setEmployeeForm({ ...employeeForm, cep: formatCEP(e.target.value) })}
@@ -5946,7 +5946,7 @@ function UserManagement({ currentUser, addToast }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Nome</label>
-              <input
+              <input name="nome"
                 type="text"
                 value={form.nome}
                 onChange={(e) => setForm({ ...form, nome: e.target.value })}
@@ -5955,7 +5955,7 @@ function UserManagement({ currentUser, addToast }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
-              <input
+              <input name="email"
                 type="email"
                 value={form.email}
                 onChange={(e) => setForm({ ...form, email: e.target.value })}
@@ -5969,7 +5969,7 @@ function UserManagement({ currentUser, addToast }) {
               <label className="block text-sm font-medium text-gray-300 mb-1.5">
                 Senha {editing && <span className="text-xs text-gray-500">(deixe vazio para manter)</span>}
               </label>
-              <input
+              <input name="password"
                 type="password"
                 autoComplete="new-password"
                 value={form.password}
@@ -5980,7 +5980,7 @@ function UserManagement({ currentUser, addToast }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar senha</label>
-              <input
+              <input name="confirmPassword"
                 type="password"
                 autoComplete="new-password"
                 value={form.confirmPassword}
@@ -5993,7 +5993,7 @@ function UserManagement({ currentUser, addToast }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Papel (Role)</label>
-              <select
+              <select name="role"
                 value={form.role}
                 onChange={(e) => setForm({ ...form, role: e.target.value })}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
@@ -6006,7 +6006,7 @@ function UserManagement({ currentUser, addToast }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Status</label>
-              <select
+              <select name="status"
                 value={form.status}
                 onChange={(e) => setForm({ ...form, status: e.target.value })}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
@@ -6019,7 +6019,7 @@ function UserManagement({ currentUser, addToast }) {
 
           <div className="border border-gray-700 rounded-lg p-4 bg-gray-900/40">
             <label className="flex items-center gap-2 mb-3 cursor-pointer">
-              <input
+              <input name="useCustomPermissions"
                 type="checkbox"
                 checked={form.useCustomPermissions}
                 onChange={(e) => setForm({ ...form, useCustomPermissions: e.target.checked })}
@@ -6034,7 +6034,7 @@ function UserManagement({ currentUser, addToast }) {
             <div className={`grid grid-cols-2 md:grid-cols-3 gap-2 ${form.useCustomPermissions ? "" : "opacity-40 pointer-events-none"}`}>
               {ALL_MODULES.map((m) => (
                 <label key={m.id} className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer hover:text-white">
-                  <input
+                  <input name="includes"
                     type="checkbox"
                     checked={form.customPermissions.includes(m.id)}
                     onChange={() => togglePermission(m.id)}
@@ -6084,7 +6084,7 @@ function CalendarFeedPanel({ feed, onRegenerate, onDisable, onCopy }) {
         <div>
           <label className="block text-xs font-medium text-gray-400 uppercase mb-1">URL HTTPS (Google Calendar, Outlook)</label>
           <div className="flex gap-2">
-            <input
+            <input name="httpsURL"
               readOnly
               value={httpsURL}
               onFocus={(e) => e.target.select()}
@@ -6102,7 +6102,7 @@ function CalendarFeedPanel({ feed, onRegenerate, onDisable, onCopy }) {
         <div>
           <label className="block text-xs font-medium text-gray-400 uppercase mb-1">URL webcal (Apple Calendar / iOS)</label>
           <div className="flex gap-2">
-            <input
+            <input name="webcalURL"
               readOnly
               value={webcalURL}
               onFocus={(e) => e.target.select()}
@@ -6408,7 +6408,7 @@ function SettingsModule({ user, addToast, reloadData }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Razão Social</label>
-              <input
+              <input name="razaoSocial"
                 type="text"
                 value={config.razaoSocial}
                 onChange={(e) => setConfig({ ...config, razaoSocial: e.target.value })}
@@ -6418,7 +6418,7 @@ function SettingsModule({ user, addToast, reloadData }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">CNPJ</label>
-              <input
+              <input name="cnpj"
                 type="text"
                 value={config.cnpj}
                 onChange={(e) => setConfig({ ...config, cnpj: formatCNPJ(e.target.value) })}
@@ -6431,7 +6431,7 @@ function SettingsModule({ user, addToast, reloadData }) {
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Telefone</label>
-              <input
+              <input name="telefone"
                 type="text"
                 value={config.telefone}
                 onChange={(e) => setConfig({ ...config, telefone: formatPhone(e.target.value) })}
@@ -6442,7 +6442,7 @@ function SettingsModule({ user, addToast, reloadData }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
-              <input
+              <input name="email"
                 type="email"
                 value={config.email}
                 onChange={(e) => setConfig({ ...config, email: e.target.value })}
@@ -6453,7 +6453,7 @@ function SettingsModule({ user, addToast, reloadData }) {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">Endereço</label>
-            <input
+            <input name="endereco"
               type="text"
               value={config.endereco}
               onChange={(e) => setConfig({ ...config, endereco: e.target.value })}
@@ -6631,7 +6631,7 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
       <div className="space-y-4">
         <div className="flex items-center gap-3">
           <label className="text-sm text-gray-300">Mês:</label>
-          <input
+          <input name="mes"
             type="month"
             value={mes}
             onChange={(e) => setMes(e.target.value)}
@@ -7087,7 +7087,7 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
               <label className="text-xs font-semibold text-gray-400 mb-2 block">
                 DESCRIÇÃO DETALHADA DO SERVIÇO
               </label>
-              <textarea
+              <textarea name="descricao"
                 value={descricao}
                 onChange={(e) => setDescricao(e.target.value)}
                 disabled={finalizado}
@@ -7106,6 +7106,7 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
                 <label className="block w-full py-3 mb-3 rounded-lg bg-gray-700 hover:bg-gray-600 text-center text-sm font-semibold cursor-pointer transition">
                   {uploading ? "Enviando..." : "📷 Adicionar fotos"}
                   <input
+                    name="fotos"
                     type="file"
                     accept="image/*"
                     capture="environment"
