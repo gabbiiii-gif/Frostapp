@@ -71,24 +71,26 @@
 
 /* Light mode — ativado via [data-theme="light"] no <body> */
 [data-theme="light"] {
-  --color-surface:          #f8fafc;
+  --color-surface:          #ffffff;
   --color-surface-raised:   #ffffff;
   --color-surface-card:     #ffffff;
   --color-surface-hover:    #f1f5f9;
-  --color-surface-muted:    #e8eef5;
+  --color-surface-muted:    #f8fafc;
 
-  --color-border-subtle:    rgba(0, 0, 0, 0.07);
-  --color-border-default:   rgba(0, 0, 0, 0.12);
+  --color-border-subtle:    rgba(15, 23, 42, 0.06);
+  --color-border-default:   rgba(15, 23, 42, 0.10);
   --color-border-brand:     rgba(27, 143, 232, 0.35);
 
-  --color-text-primary:     #0f172a;
-  --color-text-secondary:   #334155;
-  --color-text-muted:       #64748b;
+  /* Tons de texto mais claros — evita "preto sólido" no light mode */
+  --color-text-primary:     #1e293b;
+  --color-text-secondary:   #475569;
+  --color-text-muted:       #94a3b8;
   --color-text-disabled:    #cbd5e1;
-  --color-text-brand:       #1670c4;
+  --color-text-brand:       #1B8FE8;
 
-  --color-brand:            #1B8FE8;
-  --color-brand-hover:      #1568bb;
+  /* Azul de marca clareado para light mode (bg ativo da sidebar não fica pesado) */
+  --color-brand:            #3ba4f0;
+  --color-brand-hover:      #1B8FE8;
 
   --status-success-bg:      rgba(16, 185, 129, 0.10);
   --status-success-text:    #059669;
@@ -157,6 +159,34 @@ body[data-theme="light"] input::placeholder,
 body[data-theme="light"] textarea::placeholder {
   color: var(--color-text-muted) !important;
 }
+
+/* Light mode: clareia tons de azul saturados (sidebar ativa, botões).
+   Mantém legibilidade sem perder contraste do brand. */
+body[data-theme="light"] .bg-blue-600 { background-color: #3ba4f0 !important; }
+body[data-theme="light"] .bg-blue-700 { background-color: #1B8FE8 !important; }
+body[data-theme="light"] .bg-blue-500 { background-color: #60b6f5 !important; }
+body[data-theme="light"] .hover\:bg-blue-700:hover { background-color: #1B8FE8 !important; }
+
+body[data-theme="light"] .text-blue-400,
+body[data-theme="light"] .text-blue-500 { color: #1B8FE8 !important; }
+body[data-theme="light"] .text-blue-600 { color: #1670c4 !important; }
+body[data-theme="light"] .border-blue-500 { border-color: #3ba4f0 !important; }
+
+/* Light mode: status badges — texto branco fica difícil de ler em fundos claros do light;
+   reforça contraste mantendo a paleta dos status. */
+body[data-theme="light"] .bg-yellow-500 { background-color: #f59e0b !important; }
+body[data-theme="light"] .bg-orange-500 { background-color: #f97316 !important; }
+body[data-theme="light"] .bg-green-500 { background-color: #10b981 !important; }
+body[data-theme="light"] .bg-red-500 { background-color: #ef4444 !important; }
+body[data-theme="light"] .bg-cyan-500 { background-color: #06b6d4 !important; }
+body[data-theme="light"] .bg-gray-500 { background-color: #94a3b8 !important; }
+
+/* Light mode: hover claros nas linhas/cards (em vez de cinza escuro Tailwind) */
+body[data-theme="light"] .hover\:bg-gray-700:hover,
+body[data-theme="light"] .hover\:bg-gray-700\/50:hover { background-color: #f1f5f9 !important; }
+
+/* Light mode: divisores/headers de tabela */
+body[data-theme="light"] .divide-gray-700 > * + * { border-color: var(--color-border-subtle) !important; }
 
 /* ─── Body + fundo global ─────────────────────────────────────────────────── */
 body {

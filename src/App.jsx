@@ -30,6 +30,11 @@ const STATUS_MAP = {
   cancelado: { label: "Cancelado", color: "bg-red-500" },
   agendado: { label: "Agendado", color: "bg-cyan-500" },
   confirmado: { label: "Confirmado", color: "bg-blue-500" },
+  // ─── Status do fluxo da OS (alinhados ao STATUS_FLOW de ProcessModule) ──
+  aguardando: { label: "Aguardando", color: "bg-yellow-500" },
+  em_deslocamento: { label: "Em Deslocamento", color: "bg-cyan-500" },
+  em_execucao: { label: "Em Execução", color: "bg-blue-500" },
+  finalizado: { label: "Finalizado", color: "bg-green-500" },
   // ─── Novos status do fluxo Tech App → ERP ───────────────────────────────
   // Técnico chegou no local e iniciou o serviço
   em_servico: { label: "Em Serviço", color: "bg-blue-600" },
