@@ -188,6 +188,23 @@ body[data-theme="light"] .hover\:bg-gray-700\/50:hover { background-color: #f1f5
 /* Light mode: divisores/headers de tabela */
 body[data-theme="light"] .divide-gray-700 > * + * { border-color: var(--color-border-subtle) !important; }
 
+/* Light mode: gradientes do botão de login (from-blue-500 to-blue-600 / hover) */
+body[data-theme="light"] .from-blue-500 { --tw-gradient-from: #60b6f5 var(--tw-gradient-from-position) !important; --tw-gradient-to: rgb(96 182 245 / 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+body[data-theme="light"] .to-blue-600 { --tw-gradient-to: #3ba4f0 var(--tw-gradient-to-position) !important; }
+body[data-theme="light"] .hover\:from-blue-400:hover { --tw-gradient-from: #93c5fd var(--tw-gradient-from-position) !important; --tw-gradient-to: rgb(147 197 253 / 0) var(--tw-gradient-to-position); --tw-gradient-stops: var(--tw-gradient-from), var(--tw-gradient-to); }
+body[data-theme="light"] .hover\:to-blue-500:hover { --tw-gradient-to: #60b6f5 var(--tw-gradient-to-position) !important; }
+
+/* Light mode: alertas e textos coloridos com baixo contraste em fundo claro */
+body[data-theme="light"] .text-red-400 { color: #dc2626 !important; }
+body[data-theme="light"] .text-yellow-400 { color: #b45309 !important; }
+body[data-theme="light"] .text-green-400 { color: #047857 !important; }
+body[data-theme="light"] .text-orange-400 { color: #c2410c !important; }
+body[data-theme="light"] .text-cyan-400 { color: #0e7490 !important; }
+body[data-theme="light"] .border-red-500\/30 { border-color: rgba(220, 38, 38, 0.35) !important; }
+body[data-theme="light"] .border-yellow-500\/30 { border-color: rgba(180, 83, 9, 0.35) !important; }
+body[data-theme="light"] .bg-red-500\/10 { background-color: rgba(220, 38, 38, 0.08) !important; }
+body[data-theme="light"] .bg-yellow-500\/10 { background-color: rgba(180, 83, 9, 0.08) !important; }
+
 /* ─── Body + fundo global ─────────────────────────────────────────────────── */
 body {
   background-color: var(--color-surface);

@@ -1223,7 +1223,7 @@ function clearLoginAttempts() {
   try { sessionStorage.removeItem(LOGIN_ATTEMPTS_KEY); } catch { /* ignora */ }
 }
 
-function LoginScreen({ onLogin }) {
+function LoginScreen({ onLogin, theme, setTheme }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -1319,18 +1319,66 @@ function LoginScreen({ onLogin }) {
     }
   }, [email, password, onLogin, failedAttempts, lockoutUntil]);
 
+  // Paleta da Aurora muda com o tema — light usa azuis claros para combinar com superfície branca
+  const isLight = theme === "light";
+  const auroraColors = isLight
+    ? ["#bfdbfe", "#93c5fd", "#60a5fa"]
+    : ["#4e487f", "#433a5f", "#5227FF"];
+
   return (
-    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4" style={{ position: 'relative', overflow: 'hidden' }}>
+    <div
+      className="min-h-screen flex items-center justify-center p-4"
+      style={{
+        position: 'relative',
+        overflow: 'hidden',
+        background: isLight ? '#f8fafc' : '#0f172a',
+      }}
+    >
+      {/* Toggle tema — disponível antes do login (acessibilidade para usuários com preferência clara) */}
+      {typeof setTheme === "function" && (
+        <button
+          type="button"
+          onClick={() => setTheme(isLight ? "dark" : "light")}
+          className="absolute top-4 right-4 z-10 p-2 rounded-lg backdrop-blur-md transition"
+          style={{
+            background: isLight ? 'rgba(255,255,255,0.7)' : 'rgba(15,23,42,0.6)',
+            border: `1px solid ${isLight ? 'rgba(15,23,42,0.12)' : 'rgba(255,255,255,0.12)'}`,
+            color: isLight ? '#1e293b' : '#f1f5f9',
+          }}
+          title={isLight ? "Mudar para Dark Mode" : "Mudar para Light Mode"}
+          aria-label="Alternar tema"
+        >
+          {isLight ? (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.36-6.36l-1.42 1.42M7.05 16.95l-1.41 1.41m12.72 0l-1.41-1.41M7.05 7.05L5.64 5.64M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+            </svg>
+          )}
+        </button>
+      )}
+
       {/* Aurora animated background */}
-      <div style={{ position: 'absolute', inset: 0, zIndex: 0 }}>
+      <div style={{ position: 'absolute', inset: 0, zIndex: 0, opacity: isLight ? 0.55 : 1 }}>
         <Aurora
-          colorStops={["#4e487f", "#433a5f", "#5227FF"]}
+          colorStops={auroraColors}
           amplitude={1}
-          blend={0.43}
+          blend={isLight ? 0.6 : 0.43}
         />
       </div>
       <div className="w-full max-w-md animate-slideIn" style={{ position: 'relative', zIndex: 1 }}>
-        <div className="bg-gray-800/70 backdrop-blur-2xl rounded-2xl shadow-[0_20px_60px_rgba(0,0,0,0.4)] border border-white/10 p-6 sm:p-8 ring-1 ring-white/5">
+        <div
+          className="backdrop-blur-2xl rounded-2xl p-6 sm:p-8"
+          style={{
+            background: isLight ? 'rgba(255,255,255,0.85)' : 'rgba(31,41,55,0.7)',
+            border: `1px solid ${isLight ? 'rgba(15,23,42,0.10)' : 'rgba(255,255,255,0.10)'}`,
+            boxShadow: isLight
+              ? '0 20px 60px rgba(15,23,42,0.18), 0 0 0 1px rgba(15,23,42,0.04)'
+              : '0 20px 60px rgba(0,0,0,0.4)',
+          }}
+        >
           <div className="text-center mb-8">
             {/* Logo principal da tela de login */}
             {/* Login: floco animado (SVG com animacoes CSS) + titulo + subtitulo */}
@@ -6806,7 +6854,7 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
 // Shell totalmente separado renderizado quando o usuário logado tem role="tecnico".
 // Não usa sidebar — UI mobile-first focada exclusivamente nas demandas do técnico.
 // Fluxo: vê OS atribuídas → marca chegada → preenche relatório+fotos → finaliza.
-function TecnicoMobileApp({ user, onLogout, addToast }) {
+function TecnicoMobileApp({ user, onLogout, addToast, theme, setTheme }) {
   const [orders, setOrders] = useState([]);
   const [tab, setTab] = useState("ativas"); // ativas | historico
   const [selected, setSelected] = useState(null); // OS aberta no detalhe
@@ -6848,12 +6896,34 @@ function TecnicoMobileApp({ user, onLogout, addToast }) {
           <h1 className="text-base font-bold">{user.nome}</h1>
           <p className="text-xs text-gray-400">Técnico • FrostERP</p>
         </div>
-        <button
-          onClick={onLogout}
-          className="text-xs px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition"
-        >
-          Sair
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Toggle tema — técnico também alterna entre dark e light */}
+          {typeof setTheme === "function" && (
+            <button
+              type="button"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition"
+              title={theme === "dark" ? "Mudar para Light Mode" : "Mudar para Dark Mode"}
+              aria-label="Alternar tema"
+            >
+              {theme === "dark" ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.36-6.36l-1.42 1.42M7.05 16.95l-1.41 1.41m12.72 0l-1.41-1.41M7.05 7.05L5.64 5.64M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+                </svg>
+              )}
+            </button>
+          )}
+          <button
+            onClick={onLogout}
+            className="text-xs px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition"
+          >
+            Sair
+          </button>
+        </div>
       </header>
 
       {/* Tabs */}
@@ -7654,7 +7724,7 @@ export default function App() {
     return (
       <>
         <StyleSheet />
-        <LoginScreen onLogin={handleLogin} />
+        <LoginScreen onLogin={handleLogin} theme={theme} setTheme={setTheme} />
       </>
     );
   }
@@ -7664,7 +7734,7 @@ export default function App() {
     return (
       <>
         <ToastContainer toasts={toasts} removeToast={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
-        <TecnicoMobileApp user={user} onLogout={handleLogout} addToast={addToast} />
+        <TecnicoMobileApp user={user} onLogout={handleLogout} addToast={addToast} theme={theme} setTheme={setTheme} />
       </>
     );
   }
