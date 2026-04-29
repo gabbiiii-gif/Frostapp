@@ -8,6 +8,7 @@ import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSup
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
+import { FrostIcon } from "./FrostIcons.jsx";
 import AnimatedLogo from "./AnimatedLogo.jsx";
 
 // Detecta se a URL aponta para um arquivo de vídeo (preview do tecnico)
@@ -6163,7 +6164,7 @@ function CalendarFeedPanel({ feed, onRegenerate, onDisable, onCopy }) {
   );
 }
 
-function SettingsModule({ user, addToast, reloadData }) {
+function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
   const [config, setConfig] = useState({
     razaoSocial: "", cnpj: "", telefone: "", email: "", endereco: "",
   });
@@ -6405,6 +6406,55 @@ function SettingsModule({ user, addToast, reloadData }) {
         <h2 className="text-2xl font-bold text-white">Configurações</h2>
         <p className="text-gray-400 text-sm mt-1">Gerencie as configurações do sistema</p>
       </div>
+
+      {/* Aparência — alterna entre Dark e Light Mode (persistido em erp:theme) */}
+      {typeof setTheme === "function" && (
+        <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+          <h3 className="text-lg font-semibold text-white mb-1">Aparência</h3>
+          <p className="text-sm text-gray-400 mb-4">
+            Escolha o tema da interface. A preferência é salva e aplicada em todos os dispositivos.
+          </p>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => setTheme("dark")}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition ${
+                theme === "dark"
+                  ? "border-blue-500 bg-blue-600/15 text-white"
+                  : "border-gray-600 bg-gray-700/40 text-gray-300 hover:bg-gray-700"
+              }`}
+              aria-pressed={theme === "dark"}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+              </svg>
+              <div className="text-left">
+                <div className="text-sm font-medium">Dark Mode</div>
+                <div className="text-xs text-gray-400">Padrão • menor cansaço visual</div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setTheme("light")}
+              className={`flex items-center gap-3 px-4 py-3 rounded-xl border transition ${
+                theme === "light"
+                  ? "border-blue-500 bg-blue-600/15 text-white"
+                  : "border-gray-600 bg-gray-700/40 text-gray-300 hover:bg-gray-700"
+              }`}
+              aria-pressed={theme === "light"}
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.36-6.36l-1.42 1.42M7.05 16.95l-1.41 1.41m12.72 0l-1.41-1.41M7.05 7.05L5.64 5.64M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+              <div className="text-left">
+                <div className="text-sm font-medium">Light Mode</div>
+                <div className="text-xs text-gray-400">Claro • ambientes iluminados</div>
+              </div>
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Company Info */}
       <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
@@ -7249,6 +7299,18 @@ export default function App() {
   const [dateFilter, setDateFilter] = useState({ period: "30dias", startDate: "", endDate: "" });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // ─── Tema (dark/light) — persistido em DB e aplicado no body via data-theme ───
+  const [theme, setTheme] = useState(() => {
+    try {
+      return DB.get("erp:theme") || "dark";
+    } catch {
+      return "dark";
+    }
+  });
+  useEffect(() => {
+    document.body.setAttribute("data-theme", theme);
+    DB.set("erp:theme", theme);
+  }, [theme]);
   const [toasts, setToasts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [splashVisible, setSplashVisible] = useState(true);
@@ -7456,13 +7518,14 @@ export default function App() {
   // ─── Sidebar Nav Items ───
   // Cada item declara o módulo correspondente em ROLE_PERMISSIONS para controle de acesso
   const navItems = useMemo(() => {
+    // Ícones agora usam FrostIcon (variante minimal). Campo `iconName` mapeia para FrostIcons.jsx.
     const items = [
-      { id: "dashboard", label: "Dashboard", icon: "📊", module: "dashboard" },
-      { id: "processos", label: "Ordens de Serviço", icon: "🔧", module: "os" },
-      { id: "agenda", label: "Agenda", icon: "📅", module: "agenda" },
-      { id: "financeiro", label: "Financeiro", icon: "💰", module: "financeiro" },
-      { id: "cadastro", label: "Cadastros", icon: "👥", module: "clientes" },
-      { id: "config", label: "Configurações", icon: "⚙️", module: "config" },
+      { id: "dashboard", label: "Dashboard", iconName: "dashboard", module: "dashboard" },
+      { id: "processos", label: "Ordens de Serviço", iconName: "os", module: "os" },
+      { id: "agenda", label: "Agenda", iconName: "agenda", module: "agenda" },
+      { id: "financeiro", label: "Financeiro", iconName: "financeiro", module: "financeiro" },
+      { id: "cadastro", label: "Cadastros", iconName: "cadastros", module: "clientes" },
+      { id: "config", label: "Configurações", iconName: "config", module: "config" },
     ];
 
     if (!user) return [];
@@ -7656,7 +7719,15 @@ export default function App() {
                   : "text-gray-300 hover:bg-gray-700 hover:text-white"
               } ${sidebarCollapsed ? "justify-center" : ""}`}
             >
-              <span className="text-lg flex-shrink-0">{item.icon}</span>
+              {/* Ícone minimal — branco quando ativo, cinza quando inativo (segue padrão FrostERP Icon Pack) */}
+              <span className="flex-shrink-0">
+                <FrostIcon
+                  name={item.iconName}
+                  variant="minimal"
+                  size={18}
+                  color={activeModule === item.id ? "#ffffff" : "#94a3b8"}
+                />
+              </span>
               {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
             </button>
           ))}
@@ -7826,6 +7897,26 @@ export default function App() {
               </div>
             </div>
 
+            {/* Toggle Tema (Dark/Light) — alterna data-theme no body e persiste em DB */}
+            <button
+              onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
+              className="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-gray-700 transition"
+              title={theme === "dark" ? "Mudar para Light Mode" : "Mudar para Dark Mode"}
+              aria-label="Alternar tema"
+            >
+              {theme === "dark" ? (
+                // Sol — usuário irá para light
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.36-6.36l-1.42 1.42M7.05 16.95l-1.41 1.41m12.72 0l-1.41-1.41M7.05 7.05L5.64 5.64M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                </svg>
+              ) : (
+                // Lua — usuário irá para dark
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+                </svg>
+              )}
+            </button>
+
             {/* Logout */}
             <button
               onClick={handleLogout}
@@ -7864,7 +7955,7 @@ export default function App() {
             <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
           )}
           {activeModule === "config" && (
-            <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} />
+            <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} theme={theme} setTheme={setTheme} />
           )}
         </main>
       </div>

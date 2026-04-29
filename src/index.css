@@ -26,6 +26,138 @@
   --radius-xl: 1rem;
 }
 
+/* ─── Tema: tokens semânticos para Dark/Light ─────────────────────────────── */
+/* Dark mode (padrão) — alinhado ao tema atual da app */
+:root {
+  --color-surface:          #0f172a;
+  --color-surface-raised:   #1c2a3f;
+  --color-surface-card:     #141f30;
+  --color-surface-hover:    #223047;
+  --color-surface-muted:    #0a1120;
+
+  --color-border-subtle:    rgba(148, 163, 184, 0.10);
+  --color-border-default:   rgba(148, 163, 184, 0.18);
+  --color-border-brand:     rgba(27, 143, 232, 0.30);
+
+  --color-text-primary:     #f1f5f9;
+  --color-text-secondary:   #cbd5e1;
+  --color-text-muted:       #64748b;
+  --color-text-disabled:    #334155;
+  --color-text-brand:       #60a5fa;
+
+  --color-brand:            #1B8FE8;
+  --color-brand-hover:      #1670c4;
+
+  --status-success-bg:      rgba(16, 185, 129, 0.12);
+  --status-success-text:    #34d399;
+  --status-success-border:  rgba(16, 185, 129, 0.30);
+
+  --status-warning-bg:      rgba(245, 158, 11, 0.12);
+  --status-warning-text:    #fbbf24;
+  --status-warning-border:  rgba(245, 158, 11, 0.30);
+
+  --status-danger-bg:       rgba(239, 68, 68, 0.12);
+  --status-danger-text:     #f87171;
+  --status-danger-border:   rgba(239, 68, 68, 0.30);
+
+  --status-info-bg:         rgba(27, 143, 232, 0.12);
+  --status-info-text:       #60a5fa;
+  --status-info-border:     rgba(27, 143, 232, 0.30);
+
+  --status-orange-bg:       rgba(249, 115, 22, 0.12);
+  --status-orange-text:     #fb923c;
+  --status-orange-border:   rgba(249, 115, 22, 0.30);
+}
+
+/* Light mode — ativado via [data-theme="light"] no <body> */
+[data-theme="light"] {
+  --color-surface:          #f8fafc;
+  --color-surface-raised:   #ffffff;
+  --color-surface-card:     #ffffff;
+  --color-surface-hover:    #f1f5f9;
+  --color-surface-muted:    #e8eef5;
+
+  --color-border-subtle:    rgba(0, 0, 0, 0.07);
+  --color-border-default:   rgba(0, 0, 0, 0.12);
+  --color-border-brand:     rgba(27, 143, 232, 0.35);
+
+  --color-text-primary:     #0f172a;
+  --color-text-secondary:   #334155;
+  --color-text-muted:       #64748b;
+  --color-text-disabled:    #cbd5e1;
+  --color-text-brand:       #1670c4;
+
+  --color-brand:            #1B8FE8;
+  --color-brand-hover:      #1568bb;
+
+  --status-success-bg:      rgba(16, 185, 129, 0.10);
+  --status-success-text:    #059669;
+  --status-success-border:  rgba(16, 185, 129, 0.30);
+
+  --status-warning-bg:      rgba(245, 158, 11, 0.10);
+  --status-warning-text:    #d97706;
+  --status-warning-border:  rgba(245, 158, 11, 0.30);
+
+  --status-danger-bg:       rgba(239, 68, 68, 0.10);
+  --status-danger-text:     #dc2626;
+  --status-danger-border:   rgba(239, 68, 68, 0.30);
+
+  --status-info-bg:         rgba(27, 143, 232, 0.10);
+  --status-info-text:       #1670c4;
+  --status-info-border:     rgba(27, 143, 232, 0.30);
+
+  --status-orange-bg:       rgba(249, 115, 22, 0.10);
+  --status-orange-text:     #ea580c;
+  --status-orange-border:   rgba(249, 115, 22, 0.30);
+}
+
+/* Aplica tokens no body quando light mode ativo.
+   Tailwind classes (bg-gray-900 etc.) permanecem nos componentes existentes;
+   light mode neutraliza-as via filter abaixo para preservar layout sem refactor massivo. */
+body[data-theme="light"] {
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+}
+
+/* Light mode: inverte tons escuros do Tailwind aplicados em backgrounds/textos.
+   Estratégia minimalista — força as classes gray-700/800/900 + text-white/gray-x00 a usarem variáveis claras. */
+body[data-theme="light"] .bg-gray-900 { background-color: var(--color-surface) !important; }
+body[data-theme="light"] .bg-gray-800 { background-color: var(--color-surface-raised) !important; }
+body[data-theme="light"] .bg-gray-700 { background-color: var(--color-surface-hover) !important; }
+body[data-theme="light"] .bg-gray-750 { background-color: var(--color-surface-hover) !important; }
+body[data-theme="light"] .bg-gray-700\/50 { background-color: var(--color-surface-hover) !important; }
+body[data-theme="light"] .bg-gray-700\/30 { background-color: var(--color-surface-hover) !important; }
+body[data-theme="light"] .bg-gray-900\/40 { background-color: var(--color-surface-muted) !important; }
+
+body[data-theme="light"] .text-white { color: var(--color-text-primary) !important; }
+body[data-theme="light"] .text-gray-100 { color: var(--color-text-primary) !important; }
+body[data-theme="light"] .text-gray-200 { color: var(--color-text-secondary) !important; }
+body[data-theme="light"] .text-gray-300 { color: var(--color-text-secondary) !important; }
+body[data-theme="light"] .text-gray-400 { color: var(--color-text-muted) !important; }
+body[data-theme="light"] .text-gray-500 { color: var(--color-text-muted) !important; }
+body[data-theme="light"] .text-gray-600 { color: var(--color-text-disabled) !important; }
+
+body[data-theme="light"] .border-gray-600,
+body[data-theme="light"] .border-gray-700,
+body[data-theme="light"] .border-gray-800 {
+  border-color: var(--color-border-default) !important;
+}
+body[data-theme="light"] .border-gray-700\/50 {
+  border-color: var(--color-border-subtle) !important;
+}
+
+body[data-theme="light"] input,
+body[data-theme="light"] select,
+body[data-theme="light"] textarea {
+  background-color: var(--color-surface-raised) !important;
+  color: var(--color-text-primary) !important;
+  border-color: var(--color-border-default) !important;
+}
+body[data-theme="light"] input::placeholder,
+body[data-theme="light"] textarea::placeholder {
+  color: var(--color-text-muted) !important;
+}
+
 /* ─── Body + fundo global ─────────────────────────────────────────────────── */
 body {
   background-color: var(--color-surface);
