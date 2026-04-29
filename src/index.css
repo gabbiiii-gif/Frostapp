@@ -205,6 +205,17 @@ body[data-theme="light"] .border-yellow-500\/30 { border-color: rgba(180, 83, 9,
 body[data-theme="light"] .bg-red-500\/10 { background-color: rgba(220, 38, 38, 0.08) !important; }
 body[data-theme="light"] .bg-yellow-500\/10 { background-color: rgba(180, 83, 9, 0.08) !important; }
 
+/* Light mode: cards/painéis ganham sombra suave (contraste contra surface igual) */
+body[data-theme="light"] .bg-gray-800,
+body[data-theme="light"] .bg-gray-700 {
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+}
+/* Sidebar/header excecao — sem sombra por serem áreas estruturais */
+body[data-theme="light"] aside.bg-gray-800,
+body[data-theme="light"] header.bg-gray-800 {
+  box-shadow: none;
+}
+
 /* ─── Body + fundo global ─────────────────────────────────────────────────── */
 body {
   background-color: var(--color-surface);

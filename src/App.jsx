@@ -185,6 +185,43 @@ if (!window.storage) {
   };
 }
 
+// ─── Multi-tenant: company ativa e prefixos com escopo ──────────────────────
+// Quando há uma company ativa (usuário logado em uma empresa), DB.list filtra
+// e DB.set decora registros com `companyId` automaticamente. Master user opera
+// com __activeCompanyId=null e enxerga todos os registros (DB.listAll bypassa).
+let __activeCompanyId = null;
+
+// Prefixos cujos registros pertencem a uma company específica
+const SCOPED_PREFIXES = [
+  "erp:client:",
+  "erp:employee:",
+  "erp:os:",
+  "erp:schedule:",
+  "erp:finance:",
+  "erp:user:",
+  "erp:webdesk:",
+  "erp:invoice:",
+  "erp:pdv:",
+  "erp:banking:",
+  "erp:transferencia:",
+  "erp:notificacao:",
+  "erp:transaction:",
+  "erp:inventory:",
+  "erp:product:",
+];
+
+function isScopedKey(key) {
+  if (!key) return false;
+  return SCOPED_PREFIXES.some((p) => key.startsWith(p));
+}
+
+function setActiveCompanyId(id) {
+  __activeCompanyId = id || null;
+}
+function getActiveCompanyId() {
+  return __activeCompanyId;
+}
+
 const DB = {
   get(key) {
     try {
@@ -198,8 +235,20 @@ const DB = {
 
   set(key, value) {
     try {
-      window.storage.setItem(key, JSON.stringify(value));
-      syncToSupabase(key, value);
+      // Decora registros com companyId quando há company ativa e o prefixo é com escopo
+      let toStore = value;
+      if (
+        __activeCompanyId &&
+        isScopedKey(key) &&
+        toStore &&
+        typeof toStore === "object" &&
+        !Array.isArray(toStore) &&
+        !toStore.companyId
+      ) {
+        toStore = { ...toStore, companyId: __activeCompanyId };
+      }
+      window.storage.setItem(key, JSON.stringify(toStore));
+      syncToSupabase(key, toStore);
       return true;
     } catch {
       return false;
@@ -227,12 +276,89 @@ const DB = {
           if (val !== null) results.push(val);
         }
       }
+      // Filtra por company quando há contexto de tenant ativo e o prefixo é com escopo.
+      // Registros sem companyId são tratados como "legados" e ficam visíveis (migração tagga depois).
+      if (__activeCompanyId && isScopedKey(prefix)) {
+        return results.filter((r) => !r || !r.companyId || r.companyId === __activeCompanyId);
+      }
+      return results;
+    } catch {
+      return [];
+    }
+  },
+
+  // Lista crua — usado pelo MasterApp para enxergar registros de todas as empresas
+  listAll(prefix) {
+    try {
+      const results = [];
+      const len = window.storage.length;
+      for (let i = 0; i < len; i++) {
+        const key = window.storage.key(i);
+        if (key && key.startsWith(prefix)) {
+          const val = DB.get(key);
+          if (val !== null) results.push(val);
+        }
+      }
       return results;
     } catch {
       return [];
     }
   },
 };
+
+// ─── Multi-tenant: migração + helpers de company ─────────────────────────────
+// Garante que existe uma "empresa padrão" e tagga todos os registros antigos
+// com `companyId`. Idempotente — pode ser chamado em todo boot.
+const DEFAULT_COMPANY_ID = "cmp_default";
+
+function ensureCompanyMigration() {
+  try {
+    // Se já existe alguma company, não cria padrão
+    const companies = DB.listAll("erp:company:");
+    let defaultCompanyId = null;
+    if (companies.length === 0) {
+      // Cria company padrão a partir do erp:config (se existir)
+      const cfg = DB.get("erp:config") || {};
+      const company = {
+        id: DEFAULT_COMPANY_ID,
+        nome: cfg.nomeEmpresa || cfg.razaoSocial || "Empresa Padrão",
+        cnpj: cfg.cnpj || "",
+        telefone: cfg.telefone || "",
+        email: cfg.email || "",
+        endereco: cfg.endereco || "",
+        ativo: true,
+        criadoEm: new Date().toISOString(),
+      };
+      // grava direto sem decoração (registros de company não têm companyId)
+      window.storage.setItem("erp:company:" + company.id, JSON.stringify(company));
+      try { syncToSupabase("erp:company:" + company.id, company); } catch { /* ignora */ }
+      defaultCompanyId = DEFAULT_COMPANY_ID;
+    } else {
+      defaultCompanyId = companies[0].id;
+    }
+
+    // Tagga registros legados sem companyId
+    const len = window.storage.length;
+    const keysToFix = [];
+    for (let i = 0; i < len; i++) {
+      const key = window.storage.key(i);
+      if (key && isScopedKey(key)) keysToFix.push(key);
+    }
+    keysToFix.forEach((k) => {
+      const val = DB.get(k);
+      if (val && typeof val === "object" && !val.companyId) {
+        const tagged = { ...val, companyId: defaultCompanyId };
+        try {
+          window.storage.setItem(k, JSON.stringify(tagged));
+          syncToSupabase(k, tagged);
+        } catch { /* ignora */ }
+      }
+    });
+    return defaultCompanyId;
+  } catch {
+    return null;
+  }
+}
 
 // ─── UTILITY FUNCTIONS ─────────────────────────────────────────────────────────
 
@@ -1223,7 +1349,7 @@ function clearLoginAttempts() {
   try { sessionStorage.removeItem(LOGIN_ATTEMPTS_KEY); } catch { /* ignora */ }
 }
 
-function LoginScreen({ onLogin, theme, setTheme }) {
+function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -1448,10 +1574,19 @@ function LoginScreen({ onLogin, theme, setTheme }) {
             </button>
           </form>
 
-          <div className="mt-6 pt-6 border-t border-gray-700">
+          <div className="mt-6 pt-6 border-t border-gray-700 flex flex-col items-center gap-2">
             <p className="text-gray-500 text-xs text-center">
               FrostERP &copy; {new Date().getFullYear()}
             </p>
+            {typeof onSwitchToMaster === "function" && (
+              <button
+                type="button"
+                onClick={onSwitchToMaster}
+                className="text-xs text-gray-400 hover:text-blue-400 transition"
+              >
+                👑 Acesso Master
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -1688,6 +1823,386 @@ function FirstUserSetup({ onComplete }) {
   );
 }
 
+// ─── MASTER USER (multi-tenant): primeiro setup, login e dashboard de empresas ──
+// Master é o usuário "do dono do app" — cadastra novas empresas (companies) e
+// um admin inicial em cada uma. Não pertence a nenhuma company.
+
+const MASTER_PREFIX = "master:user:";
+
+function FirstMasterSetup({ onComplete, theme, setTheme }) {
+  const [nome, setNome] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = useCallback(async () => {
+    setError("");
+    if (!nome.trim() || !email.trim() || !password) {
+      setError("Preencha todos os campos.");
+      return;
+    }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!emailRegex.test(normalizedEmail)) { setError("Email inválido."); return; }
+    if (password.length < 8) { setError("Senha mínima 8 caracteres."); return; }
+    if (password !== confirm) { setError("Senhas não conferem."); return; }
+    setSaving(true);
+    try {
+      const newMaster = {
+        id: genId(),
+        email: normalizedEmail,
+        nome: nome.trim(),
+        password: await hashPassword(password),
+        role: "master",
+        createdAt: new Date().toISOString(),
+        sessionTokenHash: null,
+      };
+      // Master usa prefixo dedicado e nunca é decorado com companyId
+      window.storage.setItem(MASTER_PREFIX + newMaster.id, JSON.stringify(newMaster));
+      try { syncToSupabase(MASTER_PREFIX + newMaster.id, newMaster); } catch { /* ignora */ }
+      onComplete(newMaster);
+    } finally {
+      setSaving(false);
+    }
+  }, [nome, email, password, confirm, onComplete]);
+
+  const isLight = theme === "light";
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: isLight ? "#f8fafc" : "#0f172a" }}>
+      <div className="w-full max-w-md animate-slideIn">
+        <div
+          className="rounded-2xl p-8"
+          style={{
+            background: isLight ? "rgba(255,255,255,0.95)" : "rgba(31,41,55,0.85)",
+            border: `1px solid ${isLight ? "rgba(15,23,42,0.10)" : "rgba(255,255,255,0.10)"}`,
+            boxShadow: isLight ? "0 20px 60px rgba(15,23,42,0.18)" : "0 20px 60px rgba(0,0,0,0.4)",
+          }}
+        >
+          <div className="text-center mb-6">
+            <div className="text-4xl mb-2">👑</div>
+            <h2 className="text-2xl font-bold text-white">Cadastro do Master</h2>
+            <p className="text-gray-400 text-sm mt-2">
+              Este usuário cadastra <strong className="text-white">empresas</strong> que vão usar o app.
+            </p>
+          </div>
+          <div className="space-y-4">
+            <input name="nome" type="text" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
+            <input name="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
+            <input name="password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha (min. 8)" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
+            <input name="confirm" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Confirmar senha" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
+            {error && <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">{error}</div>}
+            <button onClick={handleSave} disabled={saving} className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50">
+              {saving ? "Criando..." : "Criar Master"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MasterLoginScreen({ onLogin, onCancel, theme, setTheme }) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = useCallback(async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!email.trim() || !password.trim()) { setError("Preencha todos os campos."); return; }
+    const normalized = email.trim().toLowerCase();
+    setLoading(true);
+    try {
+      // Lista direto (não filtra por company — master não tem company)
+      const masters = DB.listAll(MASTER_PREFIX);
+      let found = null;
+      for (const m of masters) {
+        if ((m.email || "").trim().toLowerCase() === normalized) {
+          const result = await checkPassword(password, m.password);
+          if (result.match) {
+            if (result.needsRehash) m.password = await hashPassword(password);
+            window.storage.setItem(MASTER_PREFIX + m.id, JSON.stringify(m));
+            found = m; break;
+          }
+        }
+      }
+      if (found) onLogin(found);
+      else setError("Email ou senha incorretos.");
+    } finally {
+      setLoading(false);
+    }
+  }, [email, password, onLogin]);
+
+  const isLight = theme === "light";
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4" style={{ background: isLight ? "#f8fafc" : "#0f172a", position: "relative" }}>
+      {typeof setTheme === "function" && (
+        <button
+          type="button"
+          onClick={() => setTheme(isLight ? "dark" : "light")}
+          className="absolute top-4 right-4 z-10 p-2 rounded-lg backdrop-blur-md transition"
+          style={{
+            background: isLight ? "rgba(255,255,255,0.7)" : "rgba(15,23,42,0.6)",
+            border: `1px solid ${isLight ? "rgba(15,23,42,0.12)" : "rgba(255,255,255,0.12)"}`,
+            color: isLight ? "#1e293b" : "#f1f5f9",
+          }}
+          aria-label="Alternar tema"
+        >
+          {isLight ? (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
+          ) : (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.36-6.36l-1.42 1.42M7.05 16.95l-1.41 1.41m12.72 0l-1.41-1.41M7.05 7.05L5.64 5.64M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+          )}
+        </button>
+      )}
+      <div className="w-full max-w-md animate-slideIn">
+        <div
+          className="rounded-2xl p-8"
+          style={{
+            background: isLight ? "rgba(255,255,255,0.95)" : "rgba(31,41,55,0.85)",
+            border: `1px solid ${isLight ? "rgba(15,23,42,0.10)" : "rgba(255,255,255,0.10)"}`,
+            boxShadow: isLight ? "0 20px 60px rgba(15,23,42,0.18)" : "0 20px 60px rgba(0,0,0,0.4)",
+          }}
+        >
+          <div className="text-center mb-6">
+            <div className="text-4xl mb-2">👑</div>
+            <h2 className="text-2xl font-bold text-white">Acesso Master</h2>
+            <p className="text-gray-400 text-sm mt-2">Painel de gestão de empresas</p>
+          </div>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <input name="email" type="email" autoComplete="email" value={email} onChange={(e) => { setEmail(e.target.value); setError(""); }} placeholder="Email" autoFocus className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
+            <input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => { setPassword(e.target.value); setError(""); }} placeholder="Senha" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
+            {error && <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">{error}</div>}
+            <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50">
+              {loading ? "Entrando..." : "Entrar como Master"}
+            </button>
+            <button type="button" onClick={onCancel} className="w-full text-sm text-gray-400 hover:text-white transition py-2">
+              ← Voltar para login da empresa
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
+  const [companies, setCompanies] = useState([]);
+  const [showForm, setShowForm] = useState(false);
+  const [reload, setReload] = useState(0);
+
+  // Form state
+  const [cNome, setCNome] = useState("");
+  const [cCnpj, setCCnpj] = useState("");
+  const [cTelefone, setCTelefone] = useState("");
+  const [cEmail, setCEmail] = useState("");
+  const [adminNome, setAdminNome] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminSenha, setAdminSenha] = useState("");
+  const [formError, setFormError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  // Carrega empresas (listAll para enxergar todas — master não tem companyId)
+  useEffect(() => {
+    setCompanies(DB.listAll("erp:company:"));
+  }, [reload]);
+
+  const resetForm = () => {
+    setCNome(""); setCCnpj(""); setCTelefone(""); setCEmail("");
+    setAdminNome(""); setAdminEmail(""); setAdminSenha("");
+    setFormError("");
+  };
+
+  const handleCreateCompany = useCallback(async (e) => {
+    e.preventDefault();
+    setFormError("");
+    if (!cNome.trim()) { setFormError("Informe o nome da empresa."); return; }
+    if (!adminNome.trim() || !adminEmail.trim() || !adminSenha) {
+      setFormError("Preencha o admin inicial (nome, email, senha)."); return;
+    }
+    if (adminSenha.length < 8) { setFormError("Senha do admin: mínimo 8 caracteres."); return; }
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const normalizedAdminEmail = adminEmail.trim().toLowerCase();
+    if (!emailRegex.test(normalizedAdminEmail)) { setFormError("Email do admin inválido."); return; }
+
+    // Verifica conflito de email entre todas as empresas
+    const allUsers = DB.listAll("erp:user:");
+    if (allUsers.some((u) => (u.email || "").trim().toLowerCase() === normalizedAdminEmail)) {
+      setFormError("Já existe usuário com este email."); return;
+    }
+
+    setSaving(true);
+    try {
+      const companyId = "cmp_" + genId();
+      const company = {
+        id: companyId,
+        nome: cNome.trim(),
+        cnpj: cCnpj.trim(),
+        telefone: cTelefone.trim(),
+        email: cEmail.trim(),
+        ativo: true,
+        criadoEm: new Date().toISOString(),
+        criadoPor: master?.id,
+      };
+      // Persiste sem decoração (companies não pertencem a outra company)
+      window.storage.setItem("erp:company:" + companyId, JSON.stringify(company));
+      try { syncToSupabase("erp:company:" + companyId, company); } catch { /* ignora */ }
+
+      // Cria admin inicial dessa empresa
+      const adminUser = {
+        id: genId(),
+        email: normalizedAdminEmail,
+        nome: adminNome.trim(),
+        password: await hashPassword(adminSenha),
+        role: "admin",
+        avatar: adminNome.trim().slice(0, 2).toUpperCase(),
+        createdAt: new Date().toISOString(),
+        status: "ativo",
+        forcePasswordChange: true,
+        sessionTokenHash: null,
+        customPermissions: null,
+        isSuperAdmin: true,
+        companyId, // tag explícito (master opera sem company ativa)
+      };
+      window.storage.setItem("erp:user:" + adminUser.id, JSON.stringify(adminUser));
+      try { syncToSupabase("erp:user:" + adminUser.id, adminUser); } catch { /* ignora */ }
+
+      addToast(`Empresa "${company.nome}" criada com admin ${adminUser.email}.`, "success");
+      resetForm();
+      setShowForm(false);
+      setReload((r) => r + 1);
+    } finally {
+      setSaving(false);
+    }
+  }, [cNome, cCnpj, cTelefone, cEmail, adminNome, adminEmail, adminSenha, master, addToast]);
+
+  const toggleAtivo = useCallback((company) => {
+    const updated = { ...company, ativo: !company.ativo };
+    window.storage.setItem("erp:company:" + company.id, JSON.stringify(updated));
+    try { syncToSupabase("erp:company:" + company.id, updated); } catch { /* ignora */ }
+    setReload((r) => r + 1);
+    addToast(`Empresa ${updated.ativo ? "ativada" : "bloqueada"}.`, "info");
+  }, [addToast]);
+
+  return (
+    <div className="min-h-screen bg-gray-900 text-gray-100 font-['DM_Sans'] fade-in">
+      <StyleSheet />
+      <header className="sticky top-0 z-20 bg-gray-800 border-b border-gray-700 px-6 py-3 flex items-center justify-between shadow-lg">
+        <div className="flex items-center gap-3">
+          <span className="text-2xl">👑</span>
+          <div>
+            <h1 className="text-base font-bold">Painel Master</h1>
+            <p className="text-xs text-gray-400">{master?.nome} • Gestão de empresas</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {typeof setTheme === "function" && (
+            <button
+              type="button"
+              onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+              className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition"
+              aria-label="Alternar tema"
+              title="Alternar tema"
+            >
+              {theme === "dark" ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M12 3v2m0 14v2m9-9h-2M5 12H3m15.36-6.36l-1.42 1.42M7.05 16.95l-1.41 1.41m12.72 0l-1.41-1.41M7.05 7.05L5.64 5.64M16 12a4 4 0 11-8 0 4 4 0 018 0z" /></svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" /></svg>
+              )}
+            </button>
+          )}
+          <button onClick={onLogout} className="text-xs px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition">
+            Sair
+          </button>
+        </div>
+      </header>
+
+      <main className="p-6 max-w-5xl mx-auto space-y-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-2xl font-bold text-white">Empresas</h2>
+            <p className="text-sm text-gray-400 mt-1">{companies.length} cadastrada(s) — dados isolados por empresa</p>
+          </div>
+          <button onClick={() => setShowForm(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition shadow-lg shadow-blue-600/20">
+            + Nova Empresa
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {companies.length === 0 && (
+            <div className="col-span-full text-center py-16 text-gray-500 bg-gray-800 border border-gray-700 rounded-xl">
+              Nenhuma empresa cadastrada ainda.
+            </div>
+          )}
+          {companies.map((c) => {
+            // Conta usuários e OS dessa empresa para diagnóstico rápido
+            const allUsers = DB.listAll("erp:user:").filter((u) => u.companyId === c.id);
+            const allOS = DB.listAll("erp:os:").filter((o) => o.companyId === c.id);
+            return (
+              <div key={c.id} className="bg-gray-800 border border-gray-700 rounded-xl p-5 transition hover:border-blue-500">
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h3 className="font-semibold text-white">{c.nome}</h3>
+                    <p className="text-xs text-gray-400 mt-0.5">{c.cnpj || "sem CNPJ"}</p>
+                  </div>
+                  <span className={`text-xs px-2 py-0.5 rounded-full ${c.ativo ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+                    {c.ativo ? "Ativa" : "Bloqueada"}
+                  </span>
+                </div>
+                <div className="text-xs text-gray-400 space-y-1 mb-3">
+                  {c.email && <div>📧 {c.email}</div>}
+                  {c.telefone && <div>📞 {c.telefone}</div>}
+                  <div>👥 {allUsers.length} usuário(s) • 🛠 {allOS.length} OS</div>
+                  <div className="text-gray-500">Criada {new Date(c.criadoEm).toLocaleDateString("pt-BR")}</div>
+                </div>
+                <button onClick={() => toggleAtivo(c)} className={`w-full text-sm py-2 rounded-lg transition ${c.ativo ? "bg-gray-700 hover:bg-gray-600 text-gray-300" : "bg-green-600 hover:bg-green-700 text-white"}`}>
+                  {c.ativo ? "Bloquear" : "Reativar"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </main>
+
+      {showForm && (
+        <Modal isOpen={true} title="Cadastrar nova empresa" onClose={() => { setShowForm(false); resetForm(); }} size="lg">
+          <form onSubmit={handleCreateCompany} className="space-y-4">
+            <h4 className="text-sm font-semibold text-white">Empresa</h4>
+            <div className="grid grid-cols-2 gap-3">
+              <input name="cNome" type="text" value={cNome} onChange={(e) => setCNome(e.target.value)} placeholder="Razão social *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+              <input name="cCnpj" type="text" value={cCnpj} onChange={(e) => setCCnpj(formatCNPJ(e.target.value))} placeholder="CNPJ" maxLength={18} className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+              <input name="cTelefone" type="text" value={cTelefone} onChange={(e) => setCTelefone(formatPhone(e.target.value))} placeholder="Telefone" maxLength={15} className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+              <input name="cEmail" type="email" value={cEmail} onChange={(e) => setCEmail(e.target.value)} placeholder="Email da empresa" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+            </div>
+
+            <h4 className="text-sm font-semibold text-white pt-2">Admin inicial</h4>
+            <div className="grid grid-cols-2 gap-3">
+              <input name="adminNome" type="text" value={adminNome} onChange={(e) => setAdminNome(e.target.value)} placeholder="Nome do admin *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+              <input name="adminEmail" type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="Email do admin *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+              <input name="adminSenha" type="password" value={adminSenha} onChange={(e) => setAdminSenha(e.target.value)} placeholder="Senha provisória (min. 8) *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white col-span-2" />
+            </div>
+            <p className="text-xs text-gray-400">O admin será forçado a trocar a senha no primeiro login.</p>
+
+            {formError && <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">{formError}</div>}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <button type="button" onClick={() => { setShowForm(false); resetForm(); }} className="px-4 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 transition">Cancelar</button>
+              <button type="submit" disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition disabled:opacity-50">
+                {saving ? "Criando..." : "Criar empresa"}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ─── DASHBOARD ──────────────────────────────────────────────────────────────────
 
 // Dashboard completo — OS, Agenda, Cadastros e Financeiro (receita realizada do mês)
@@ -1880,9 +2395,10 @@ function Dashboard({ user, dateFilter, onNavigate }) {
           </div>
           <ResponsiveContainer width="100%" height={280}>
             <LineChart data={lineChartData}>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-              <XAxis dataKey="name" stroke="#9ca3af" fontSize={12} />
-              <YAxis stroke="#9ca3af" fontSize={12} allowDecimals={false} />
+              {/* Stroke do grid lê variável do tema — visível em dark e light */}
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-default)" />
+              <XAxis dataKey="name" stroke="var(--color-text-muted)" fontSize={12} />
+              <YAxis stroke="var(--color-text-muted)" fontSize={12} allowDecimals={false} />
               <Tooltip
                 contentStyle={{ backgroundColor: "#1f2937", border: "1px solid #374151", borderRadius: "8px", color: "#fff" }}
               />
@@ -7401,6 +7917,18 @@ export default function App() {
   const [showNotifications, setShowNotifications] = useState(false);
   const [pendingPasswordChange, setPendingPasswordChange] = useState(null);
   const [needsFirstUser, setNeedsFirstUser] = useState(false);
+  // ─── Master mode (multi-tenant) ───────────────────────────────────────────
+  // masterMode: ?master=1 na URL OU sessão master ativa. Mostra fluxo de login master.
+  const [masterMode, setMasterMode] = useState(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get("master") === "1") return true;
+      const raw = sessionStorage.getItem("frost_master_session");
+      return !!raw;
+    } catch { return false; }
+  });
+  const [masterUser, setMasterUser] = useState(null);
+  const [needsFirstMaster, setNeedsFirstMaster] = useState(false);
   const searchRef = useRef(null);
   const lastActivityRef = useRef(Date.now());
 
@@ -7417,11 +7945,28 @@ export default function App() {
     hydrateFromSupabase().then(async () => {
       // Inicialização: popula dados demo se for o primeiro acesso (sem usuários)
       await seedDatabase();
+      // Multi-tenant: garante company padrão e tagga registros legados
+      ensureCompanyMigration();
       loadAllData();
       setLoading(false);
+      // Master mode: verifica se já existe master cadastrado
+      if (masterMode) {
+        const masters = DB.listAll(MASTER_PREFIX);
+        if (masters.length === 0) setNeedsFirstMaster(true);
+        // Restaura sessão master se houver
+        try {
+          const raw = sessionStorage.getItem("frost_master_session");
+          if (raw) {
+            const sess = JSON.parse(raw);
+            const found = DB.get(MASTER_PREFIX + sess.id);
+            if (found) setMasterUser(found);
+            else sessionStorage.removeItem("frost_master_session");
+          }
+        } catch { /* ignora */ }
+      }
       // Se não há nenhum usuário cadastrado, exige criação do super admin
-      const usersCount = DB.list("erp:user:").length;
-      if (usersCount === 0) setNeedsFirstUser(true);
+      const usersCount = DB.listAll("erp:user:").length;
+      if (usersCount === 0 && !masterMode) setNeedsFirstUser(true);
       // Restauração de sessão via sessionStorage — agora valida token contra hash do usuário
       try {
         const sessionRaw = sessionStorage.getItem("frost_session");
@@ -7434,6 +7979,8 @@ export default function App() {
             // Valida HASH do token armazenado no usuário — impede forjar sessão pelo DevTools
             const tokenHash = await sha256Hex(session.token);
             if (savedUser && savedUser.status === "ativo" && savedUser.sessionTokenHash === tokenHash) {
+              // Restaura scope da company antes de marcar user (loadAllData pode rodar em seguida)
+              setActiveCompanyId(savedUser.companyId || DEFAULT_COMPANY_ID);
               setUser(savedUser);
               lastActivityRef.current = Date.now();
               sessionStorage.setItem("frost_session", JSON.stringify({ ...session, lastActivity: Date.now() }));
@@ -7627,11 +8174,37 @@ export default function App() {
     const tokenHash = await sha256Hex(token);
     const updated = { ...u, sessionTokenHash: tokenHash, lastLoginAt: new Date().toISOString() };
     DB.set("erp:user:" + updated.id, updated);
+    // Multi-tenant: ativa scope da company desse usuário (afeta DB.list/DB.set posteriores)
+    setActiveCompanyId(updated.companyId || DEFAULT_COMPANY_ID);
     sessionStorage.setItem("frost_session", JSON.stringify({
       userId: updated.id, loginAt: Date.now(), lastActivity: Date.now(), token,
     }));
     return updated;
   }, []);
+
+  // ─── Master: handlers de login/logout (sessão paralela à do tenant) ─────
+  const handleMasterLogin = useCallback((m) => {
+    setActiveCompanyId(null); // master não tem company
+    sessionStorage.setItem("frost_master_session", JSON.stringify({ id: m.id, loginAt: Date.now() }));
+    setMasterUser(m);
+    setNeedsFirstMaster(false);
+  }, []);
+
+  const handleMasterLogout = useCallback(() => {
+    sessionStorage.removeItem("frost_master_session");
+    setMasterUser(null);
+    // Sai do modo master e volta para login normal — limpa ?master=1
+    setMasterMode(false);
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("master");
+      window.history.replaceState({}, "", url.toString());
+    } catch { /* ignora */ }
+  }, []);
+
+  const handleFirstMasterCreated = useCallback((m) => {
+    handleMasterLogin(m);
+  }, [handleMasterLogin]);
 
   // ─── Login Handler — salva sessão e verifica troca de senha obrigatória ───
   const handleLogin = useCallback(async (u) => {
@@ -7672,6 +8245,8 @@ export default function App() {
       const fresh = DB.get("erp:user:" + user.id);
       if (fresh) DB.set("erp:user:" + user.id, { ...fresh, sessionTokenHash: null });
     }
+    // Limpa scope da company para evitar leak entre logins
+    setActiveCompanyId(null);
     setUser(null);
     setPendingPasswordChange(null);
     setActiveModule("dashboard");
@@ -7700,6 +8275,45 @@ export default function App() {
     );
   }
 
+  // ─── Master mode: fluxos paralelos ao login da empresa ──────────────────
+  if (masterMode && !masterUser) {
+    if (needsFirstMaster) {
+      return (
+        <>
+          <StyleSheet />
+          <FirstMasterSetup onComplete={handleFirstMasterCreated} theme={theme} setTheme={setTheme} />
+        </>
+      );
+    }
+    return (
+      <>
+        <StyleSheet />
+        <MasterLoginScreen
+          onLogin={handleMasterLogin}
+          onCancel={() => setMasterMode(false)}
+          theme={theme}
+          setTheme={setTheme}
+        />
+      </>
+    );
+  }
+
+  if (masterUser) {
+    return (
+      <>
+        <StyleSheet />
+        <ToastContainer toasts={toasts} removeToast={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
+        <MasterApp
+          master={masterUser}
+          onLogout={handleMasterLogout}
+          addToast={addToast}
+          theme={theme}
+          setTheme={setTheme}
+        />
+      </>
+    );
+  }
+
   // Primeiro acesso: nenhum usuário cadastrado → cria super admin
   if (needsFirstUser && !user) {
     return (
@@ -7724,7 +8338,12 @@ export default function App() {
     return (
       <>
         <StyleSheet />
-        <LoginScreen onLogin={handleLogin} theme={theme} setTheme={setTheme} />
+        <LoginScreen
+          onLogin={handleLogin}
+          theme={theme}
+          setTheme={setTheme}
+          onSwitchToMaster={() => setMasterMode(true)}
+        />
       </>
     );
   }
