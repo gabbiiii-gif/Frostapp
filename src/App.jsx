@@ -8836,25 +8836,27 @@ export default function App() {
           const companyName = activeCompany?.nome || "FROSTErp";
           const companyLogo = activeCompany?.logoUrl;
           return (
-            <div className={`flex items-center gap-3 px-4 py-5 border-b border-gray-700 ${sidebarCollapsed ? "justify-center" : ""}`}>
+            <div className={`flex items-center gap-3 px-3 py-4 border-b border-gray-700 ${sidebarCollapsed ? "justify-center" : ""}`}>
               {companyLogo ? (
+                // object-contain preserva aspecto (logos retangulares não viram quadrado cortado).
+                // Tamanhos maiores para destacar identidade visual da empresa.
                 <img
                   src={companyLogo}
                   alt={companyName}
-                  className={sidebarCollapsed ? "h-8 w-8 rounded-md object-cover" : "h-10 w-10 rounded-md object-cover"}
+                  className={sidebarCollapsed ? "h-12 w-12 rounded-lg object-contain bg-white/5 p-1" : "h-16 w-16 rounded-lg object-contain bg-white/5 p-1.5 flex-shrink-0"}
                   onError={(e) => { e.target.onerror = null; e.target.src = "/frosterp-snowflake.svg"; }}
                 />
               ) : (
                 <img
                   src="/frosterp-snowflake.svg"
                   alt={companyName}
-                  className={sidebarCollapsed ? "h-8 w-auto" : "h-10 w-auto"}
+                  className={sidebarCollapsed ? "h-12 w-auto" : "h-14 w-auto flex-shrink-0"}
                 />
               )}
               {!sidebarCollapsed && (
                 <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white truncate" title={companyName}>{companyName}</p>
-                  <p className="text-[11px] text-gray-400">Gestão Integrada</p>
+                  <p className="text-base font-bold text-white truncate leading-tight" title={companyName}>{companyName}</p>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Gestão Integrada</p>
                 </div>
               )}
             </div>
