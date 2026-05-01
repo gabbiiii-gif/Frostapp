@@ -2023,6 +2023,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   const [cTelefone, setCTelefone] = useState("");
   const [cEmail, setCEmail] = useState("");
   const [cLogoUrl, setCLogoUrl] = useState("");
+  const [cMaxUsuarios, setCMaxUsuarios] = useState(0); // 0 = ilimitado
   const [adminNome, setAdminNome] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [adminSenha, setAdminSenha] = useState("");
@@ -2052,6 +2053,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
 
   const resetForm = () => {
     setCNome(""); setCCnpj(""); setCTelefone(""); setCEmail(""); setCLogoUrl("");
+    setCMaxUsuarios(0);
     setAdminNome(""); setAdminEmail(""); setAdminSenha("");
     setFormError("");
     setEditingCompany(null);
@@ -2085,6 +2087,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
         telefone: cTelefone.trim(),
         email: cEmail.trim(),
         logoUrl: cLogoUrl.trim(),
+        maxUsuarios: Math.max(0, parseInt(cMaxUsuarios, 10) || 0),
         ativo: true,
         criadoEm: new Date().toISOString(),
         criadoPor: master?.id,
@@ -2120,7 +2123,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
     } finally {
       setSaving(false);
     }
-  }, [cNome, cCnpj, cTelefone, cEmail, cLogoUrl, adminNome, adminEmail, adminSenha, master, addToast, writeAudit]);
+  }, [cNome, cCnpj, cTelefone, cEmail, cLogoUrl, cMaxUsuarios, adminNome, adminEmail, adminSenha, master, addToast, writeAudit]);
 
   const toggleAtivo = useCallback((company) => {
     const updated = { ...company, ativo: !company.ativo };
@@ -2161,6 +2164,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
     setCTelefone(c.telefone || "");
     setCEmail(c.email || "");
     setCLogoUrl(c.logoUrl || "");
+    setCMaxUsuarios(typeof c.maxUsuarios === "number" ? c.maxUsuarios : 0);
     setShowForm(true);
   }, []);
 
@@ -2176,6 +2180,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
       telefone: cTelefone.trim(),
       email: cEmail.trim(),
       logoUrl: cLogoUrl.trim(),
+      maxUsuarios: Math.max(0, parseInt(cMaxUsuarios, 10) || 0),
       atualizadoEm: new Date().toISOString(),
     };
     window.storage.setItem("erp:company:" + updated.id, JSON.stringify(updated));
@@ -2185,7 +2190,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
     setShowForm(false);
     resetForm();
     setReload((r) => r + 1);
-  }, [editingCompany, cNome, cCnpj, cTelefone, cEmail, cLogoUrl, addToast, writeAudit]);
+  }, [editingCompany, cNome, cCnpj, cTelefone, cEmail, cLogoUrl, cMaxUsuarios, addToast, writeAudit]);
 
   // Filtra empresas por busca e status
   const filteredCompanies = useMemo(() => {
@@ -2336,7 +2341,17 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
                 <div className="text-xs text-gray-400 space-y-1 mb-3">
                   {c.email && <div className="truncate">📧 {c.email}</div>}
                   {c.telefone && <div>📞 {c.telefone}</div>}
-                  <div>👥 {allUsers.length} usuário(s) • 🛠 {allOS.length} OS</div>
+                  <div>
+                    👥 {allUsers.length}
+                    {c.maxUsuarios > 0 ? (
+                      <span className={allUsers.length >= c.maxUsuarios ? "text-red-400 font-semibold" : "text-gray-400"}>
+                        {" "}/ {c.maxUsuarios} usuário(s)
+                      </span>
+                    ) : (
+                      <span> usuário(s) • ilimitado</span>
+                    )}
+                    {" • 🛠 "}{allOS.length} OS
+                  </div>
                   <div className="text-gray-500">Criada {new Date(c.criadoEm).toLocaleDateString("pt-BR")}</div>
                 </div>
                 <div className="grid grid-cols-3 gap-2">
@@ -2365,6 +2380,19 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
               <input name="cCnpj" type="text" value={cCnpj} onChange={(e) => setCCnpj(formatCNPJ(e.target.value))} placeholder="CNPJ" maxLength={18} className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
               <input name="cTelefone" type="text" value={cTelefone} onChange={(e) => setCTelefone(formatPhone(e.target.value))} placeholder="Telefone" maxLength={15} className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
               <input name="cEmail" type="email" value={cEmail} onChange={(e) => setCEmail(e.target.value)} placeholder="Email da empresa" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+              <div className="col-span-2">
+                <label className="block text-xs text-gray-400 mb-1">Limite de usuários (0 = ilimitado)</label>
+                <input
+                  name="cMaxUsuarios"
+                  type="number"
+                  min="0"
+                  value={cMaxUsuarios}
+                  onChange={(e) => setCMaxUsuarios(e.target.value)}
+                  placeholder="Ex: 5"
+                  className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white w-full"
+                />
+                <p className="text-[11px] text-gray-500 mt-1">Ao atingir o limite, novos usuários não poderão ser cadastrados pelos admins desta empresa.</p>
+              </div>
               <LogoPicker value={cLogoUrl} onChange={setCLogoUrl} addToast={addToast} />
             </div>
 
@@ -6796,6 +6824,19 @@ function UserManagement({ currentUser, addToast }) {
       if (form.password !== form.confirmPassword) {
         addToast("As senhas não conferem.", "error"); return;
       }
+      // Limite de usuários por empresa (definido pelo Master).
+      // Considera apenas usuários ativos no scope da company atual.
+      if (currentUser?.companyId) {
+        const company = DB.get("erp:company:" + currentUser.companyId);
+        const limit = company?.maxUsuarios || 0;
+        if (limit > 0) {
+          const ativos = users.filter((u) => u.status !== "inativo").length;
+          if (ativos >= limit) {
+            addToast(`Limite de ${limit} usuário(s) atingido. Solicite ampliação ao Master.`, "error");
+            return;
+          }
+        }
+      }
     } else if (form.password) {
       // Em edição, troca de senha é opcional
       if (form.password.length < 8) {
@@ -6890,6 +6931,21 @@ function UserManagement({ currentUser, addToast }) {
         <div>
           <h3 className="text-lg font-semibold text-white">Usuários do Sistema</h3>
           <p className="text-gray-400 text-sm mt-0.5">Gerencie quem tem acesso e o que cada um pode fazer.</p>
+          {/* Mostra uso vs. limite definido pelo Master */}
+          {(() => {
+            if (!currentUser?.companyId) return null;
+            const company = DB.get("erp:company:" + currentUser.companyId);
+            const limit = company?.maxUsuarios || 0;
+            if (limit <= 0) return null;
+            const ativos = users.filter((u) => u.status !== "inativo").length;
+            const cor = ativos >= limit ? "text-red-400" : ativos >= limit * 0.8 ? "text-yellow-400" : "text-gray-400";
+            return (
+              <p className={`text-xs mt-1 ${cor}`}>
+                Uso: <strong>{ativos}</strong> de <strong>{limit}</strong> usuário(s) permitidos
+                {ativos >= limit && " — limite atingido"}
+              </p>
+            );
+          })()}
         </div>
         <button
           onClick={openCreate}
