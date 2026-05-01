@@ -2365,13 +2365,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
               <input name="cCnpj" type="text" value={cCnpj} onChange={(e) => setCCnpj(formatCNPJ(e.target.value))} placeholder="CNPJ" maxLength={18} className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
               <input name="cTelefone" type="text" value={cTelefone} onChange={(e) => setCTelefone(formatPhone(e.target.value))} placeholder="Telefone" maxLength={15} className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
               <input name="cEmail" type="email" value={cEmail} onChange={(e) => setCEmail(e.target.value)} placeholder="Email da empresa" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
-              <input name="cLogoUrl" type="url" value={cLogoUrl} onChange={(e) => setCLogoUrl(e.target.value)} placeholder="URL da logo (opcional, ex: https://...)" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white col-span-2" />
-              {cLogoUrl && (
-                <div className="col-span-2 flex items-center gap-3 bg-gray-900/40 border border-gray-700 rounded-lg p-3">
-                  <img src={cLogoUrl} alt="preview" className="w-12 h-12 rounded-lg object-cover bg-gray-700" onError={(e) => { e.target.style.display = "none"; }} />
-                  <p className="text-xs text-gray-400">Pré-visualização da logo</p>
-                </div>
-              )}
+              <LogoPicker value={cLogoUrl} onChange={setCLogoUrl} addToast={addToast} />
             </div>
 
             {!editingCompany && (
@@ -2413,6 +2407,194 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
         <Modal isOpen={true} title="Auditoria — Ações do Master" onClose={() => setShowAuditLog(false)} size="lg">
           <MasterAuditLog onClose={() => setShowAuditLog(false)} />
         </Modal>
+      )}
+    </div>
+  );
+}
+
+// LogoPicker — componente unificado pra escolher logo da empresa.
+// Suporta: upload de arquivo (com compressão), URL externa, colar do clipboard,
+// e drag-drop. Resultado é sempre uma string (data URL ou http URL) salva em logoUrl.
+// Limite de 300KB no arquivo final pra não inchar localStorage/Supabase.
+function LogoPicker({ value, onChange, addToast }) {
+  const [mode, setMode] = useState("file"); // file | url
+  const [urlInput, setUrlInput] = useState("");
+  const [dragOver, setDragOver] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const fileInputRef = useRef(null);
+
+  // Comprime imagem via canvas — mantém aspecto, reduz pra max 256px e qualidade JPEG 0.85
+  // Retorna data URL. Aceita PNG transparente preservando.
+  const compressImage = useCallback(async (file) => {
+    if (file.size > 5 * 1024 * 1024) {
+      throw new Error("Arquivo > 5MB. Escolha imagem menor.");
+    }
+    const dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const img = await new Promise((resolve, reject) => {
+      const i = new Image();
+      i.onload = () => resolve(i);
+      i.onerror = reject;
+      i.src = dataUrl;
+    });
+    const MAX = 256;
+    let w = img.width;
+    let h = img.height;
+    if (w > MAX || h > MAX) {
+      const ratio = Math.min(MAX / w, MAX / h);
+      w = Math.round(w * ratio);
+      h = Math.round(h * ratio);
+    }
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0, w, h);
+    // PNG preserva transparência; outros formatos vão pra JPEG (menor)
+    const isPng = file.type === "image/png";
+    const out = canvas.toDataURL(isPng ? "image/png" : "image/jpeg", 0.85);
+    // Hard limit: 300KB no resultado final
+    if (out.length > 300 * 1024 * 1.4) {
+      // Tenta de novo em JPEG menor
+      const fallback = canvas.toDataURL("image/jpeg", 0.7);
+      if (fallback.length > 300 * 1024 * 1.4) {
+        throw new Error("Imagem muito grande mesmo após compressão. Use logo até 256x256.");
+      }
+      return fallback;
+    }
+    return out;
+  }, []);
+
+  const handleFile = useCallback(async (file) => {
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      addToast?.("Apenas arquivos de imagem.", "error");
+      return;
+    }
+    setBusy(true);
+    try {
+      const compressed = await compressImage(file);
+      onChange(compressed);
+      addToast?.("Logo carregada.", "success");
+    } catch (err) {
+      addToast?.(err.message || "Falha ao processar imagem.", "error");
+    } finally {
+      setBusy(false);
+    }
+  }, [compressImage, onChange, addToast]);
+
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    setDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file) handleFile(file);
+  }, [handleFile]);
+
+  const handlePaste = useCallback(async () => {
+    try {
+      const items = await navigator.clipboard.read();
+      for (const item of items) {
+        for (const type of item.types) {
+          if (type.startsWith("image/")) {
+            const blob = await item.getType(type);
+            const file = new File([blob], "clipboard.png", { type });
+            handleFile(file);
+            return;
+          }
+        }
+      }
+      addToast?.("Nenhuma imagem no clipboard.", "info");
+    } catch {
+      addToast?.("Permissão de clipboard negada.", "error");
+    }
+  }, [handleFile, addToast]);
+
+  const applyUrl = useCallback(() => {
+    const u = urlInput.trim();
+    if (!u) return;
+    if (!/^https?:\/\//i.test(u)) {
+      addToast?.("URL deve começar com http:// ou https://", "error");
+      return;
+    }
+    onChange(u);
+    setUrlInput("");
+    addToast?.("URL aplicada.", "success");
+  }, [urlInput, onChange, addToast]);
+
+  return (
+    <div className="col-span-2 space-y-2">
+      {/* Tabs */}
+      <div className="flex gap-1 bg-gray-900/40 border border-gray-700 rounded-lg p-1">
+        <button type="button" onClick={() => setMode("file")} className={`flex-1 text-xs py-1.5 rounded-md transition ${mode === "file" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"}`}>
+          📁 Arquivo
+        </button>
+        <button type="button" onClick={() => setMode("url")} className={`flex-1 text-xs py-1.5 rounded-md transition ${mode === "url" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"}`}>
+          🔗 URL
+        </button>
+        <button type="button" onClick={handlePaste} className="flex-1 text-xs py-1.5 rounded-md text-gray-300 hover:bg-gray-700 transition" title="Colar imagem do clipboard">
+          📋 Colar
+        </button>
+      </div>
+
+      {mode === "file" && (
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition ${dragOver ? "border-blue-500 bg-blue-500/10" : "border-gray-600 hover:border-gray-500 bg-gray-700/30"}`}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+            className="hidden"
+            onChange={(e) => handleFile(e.target.files?.[0])}
+          />
+          <p className="text-xs text-gray-300">
+            {busy ? "⏳ Processando..." : "📤 Clique ou arraste a logo aqui"}
+          </p>
+          <p className="text-[10px] text-gray-500 mt-1">PNG, JPG, WEBP, SVG ou GIF • máx 5MB • redimensionada para 256px</p>
+        </div>
+      )}
+
+      {mode === "url" && (
+        <div className="flex gap-2">
+          <input
+            type="url"
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            placeholder="https://..."
+            className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applyUrl(); } }}
+          />
+          <button type="button" onClick={applyUrl} className="px-3 py-2 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg">
+            Aplicar
+          </button>
+        </div>
+      )}
+
+      {/* Preview + remover */}
+      {value && (
+        <div className="flex items-center gap-3 bg-gray-900/40 border border-gray-700 rounded-lg p-3">
+          <img
+            src={value}
+            alt="preview"
+            className="w-14 h-14 rounded-lg object-cover bg-gray-700"
+            onError={(e) => { e.target.style.opacity = "0.3"; }}
+          />
+          <div className="flex-1 min-w-0">
+            <p className="text-xs text-gray-300">Logo atual</p>
+            <p className="text-[10px] text-gray-500 truncate">{value.startsWith("data:") ? `Imagem incorporada (${Math.round(value.length / 1024)}KB)` : value}</p>
+          </div>
+          <button type="button" onClick={() => onChange("")} className="text-xs px-2 py-1 rounded-md bg-red-600/20 hover:bg-red-600/40 text-red-300 transition">
+            Remover
+          </button>
+        </div>
       )}
     </div>
   );
