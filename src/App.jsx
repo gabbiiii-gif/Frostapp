@@ -1424,6 +1424,22 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster }) {
       }
 
       if (found) {
+        // Bloqueio por empresa — Master pode marcar empresa como inativa,
+        // e neste caso nenhum usuário daquela empresa consegue logar.
+        if (found.companyId) {
+          const company = DB.get("erp:company:" + found.companyId);
+          if (company && company.ativo === false) {
+            setError("Empresa bloqueada. Contate o administrador.");
+            setLoading(false);
+            return;
+          }
+        }
+        // Bloqueio individual do usuário (status já controlado via gestão de usuários)
+        if (found.status && found.status !== "ativo") {
+          setError("Usuário desativado. Contate o administrador.");
+          setLoading(false);
+          return;
+        }
         setFailedAttempts(0);
         setLockoutUntil(null);
         clearLoginAttempts();
@@ -1995,12 +2011,18 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   const [companies, setCompanies] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [reload, setReload] = useState(0);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState("all"); // all | ativa | bloqueada
+  const [confirmDelete, setConfirmDelete] = useState(null); // empresa a excluir
+  const [editingCompany, setEditingCompany] = useState(null); // empresa em edição
+  const [showAuditLog, setShowAuditLog] = useState(false);
 
   // Form state
   const [cNome, setCNome] = useState("");
   const [cCnpj, setCCnpj] = useState("");
   const [cTelefone, setCTelefone] = useState("");
   const [cEmail, setCEmail] = useState("");
+  const [cLogoUrl, setCLogoUrl] = useState("");
   const [adminNome, setAdminNome] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [adminSenha, setAdminSenha] = useState("");
@@ -2012,10 +2034,27 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
     setCompanies(DB.listAll("erp:company:"));
   }, [reload]);
 
+  // Audit log Master — registra ações do master (criar/bloquear/excluir empresa)
+  const writeAudit = useCallback((action, payload) => {
+    try {
+      const entry = {
+        id: genId(),
+        ts: new Date().toISOString(),
+        masterId: master?.id,
+        masterNome: master?.nome,
+        action,
+        ...payload,
+      };
+      window.storage.setItem("master:audit:" + entry.id, JSON.stringify(entry));
+      try { syncToSupabase("master:audit:" + entry.id, entry); } catch { /* ignora */ }
+    } catch { /* não-crítico */ }
+  }, [master]);
+
   const resetForm = () => {
-    setCNome(""); setCCnpj(""); setCTelefone(""); setCEmail("");
+    setCNome(""); setCCnpj(""); setCTelefone(""); setCEmail(""); setCLogoUrl("");
     setAdminNome(""); setAdminEmail(""); setAdminSenha("");
     setFormError("");
+    setEditingCompany(null);
   };
 
   const handleCreateCompany = useCallback(async (e) => {
@@ -2045,6 +2084,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
         cnpj: cCnpj.trim(),
         telefone: cTelefone.trim(),
         email: cEmail.trim(),
+        logoUrl: cLogoUrl.trim(),
         ativo: true,
         criadoEm: new Date().toISOString(),
         criadoPor: master?.id,
@@ -2052,6 +2092,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
       // Persiste sem decoração (companies não pertencem a outra company)
       window.storage.setItem("erp:company:" + companyId, JSON.stringify(company));
       try { syncToSupabase("erp:company:" + companyId, company); } catch { /* ignora */ }
+      writeAudit("create_company", { companyId, companyNome: company.nome });
 
       // Cria admin inicial dessa empresa
       const adminUser = {
@@ -2079,15 +2120,97 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
     } finally {
       setSaving(false);
     }
-  }, [cNome, cCnpj, cTelefone, cEmail, adminNome, adminEmail, adminSenha, master, addToast]);
+  }, [cNome, cCnpj, cTelefone, cEmail, cLogoUrl, adminNome, adminEmail, adminSenha, master, addToast, writeAudit]);
 
   const toggleAtivo = useCallback((company) => {
     const updated = { ...company, ativo: !company.ativo };
     window.storage.setItem("erp:company:" + company.id, JSON.stringify(updated));
     try { syncToSupabase("erp:company:" + company.id, updated); } catch { /* ignora */ }
     setReload((r) => r + 1);
+    writeAudit(updated.ativo ? "unblock_company" : "block_company", { companyId: company.id, companyNome: company.nome });
     addToast(`Empresa ${updated.ativo ? "ativada" : "bloqueada"}.`, "info");
-  }, [addToast]);
+  }, [addToast, writeAudit]);
+
+  // Excluir empresa em cascata — remove company + todos os registros decorados com companyId.
+  // Itera prefixos com escopo (SCOPED_PREFIXES) e apaga o que pertencer à empresa.
+  const handleDelete = useCallback((company) => {
+    if (!company) return;
+    const cid = company.id;
+    let removed = 0;
+    SCOPED_PREFIXES.forEach((prefix) => {
+      const rows = DB.listAll(prefix);
+      rows.forEach((r) => {
+        if (r && r.companyId === cid) {
+          DB.delete(prefix + r.id);
+          removed += 1;
+        }
+      });
+    });
+    DB.delete("erp:company:" + cid);
+    writeAudit("delete_company", { companyId: cid, companyNome: company.nome, registrosRemovidos: removed });
+    setReload((r) => r + 1);
+    setConfirmDelete(null);
+    addToast(`Empresa "${company.nome}" excluída. ${removed} registro(s) removido(s).`, "success");
+  }, [addToast, writeAudit]);
+
+  // Abrir modal em modo edição — preenche estado com dados atuais
+  const openEdit = useCallback((c) => {
+    setEditingCompany(c);
+    setCNome(c.nome || "");
+    setCCnpj(c.cnpj || "");
+    setCTelefone(c.telefone || "");
+    setCEmail(c.email || "");
+    setCLogoUrl(c.logoUrl || "");
+    setShowForm(true);
+  }, []);
+
+  // Salvar edição (sem mexer no admin/usuários)
+  const handleSaveEdit = useCallback((e) => {
+    e.preventDefault();
+    if (!editingCompany) return;
+    if (!cNome.trim()) { setFormError("Informe o nome da empresa."); return; }
+    const updated = {
+      ...editingCompany,
+      nome: cNome.trim(),
+      cnpj: cCnpj.trim(),
+      telefone: cTelefone.trim(),
+      email: cEmail.trim(),
+      logoUrl: cLogoUrl.trim(),
+      atualizadoEm: new Date().toISOString(),
+    };
+    window.storage.setItem("erp:company:" + updated.id, JSON.stringify(updated));
+    try { syncToSupabase("erp:company:" + updated.id, updated); } catch { /* ignora */ }
+    writeAudit("update_company", { companyId: updated.id, companyNome: updated.nome });
+    addToast("Empresa atualizada.", "success");
+    setShowForm(false);
+    resetForm();
+    setReload((r) => r + 1);
+  }, [editingCompany, cNome, cCnpj, cTelefone, cEmail, cLogoUrl, addToast, writeAudit]);
+
+  // Filtra empresas por busca e status
+  const filteredCompanies = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    return companies.filter((c) => {
+      if (filter === "ativa" && !c.ativo) return false;
+      if (filter === "bloqueada" && c.ativo) return false;
+      if (!s) return true;
+      return (
+        (c.nome || "").toLowerCase().includes(s) ||
+        (c.cnpj || "").toLowerCase().includes(s) ||
+        (c.email || "").toLowerCase().includes(s)
+      );
+    });
+  }, [companies, search, filter]);
+
+  // Stats globais — contagem total de registros por entidade em todas as empresas
+  const globalStats = useMemo(() => {
+    const totalUsers = DB.listAll("erp:user:").length;
+    const totalOS = DB.listAll("erp:os:").length;
+    const totalClients = DB.listAll("erp:client:").length;
+    const ativas = companies.filter((c) => c.ativo).length;
+    const bloqueadas = companies.length - ativas;
+    return { totalUsers, totalOS, totalClients, ativas, bloqueadas };
+  }, [companies, reload]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className="min-h-screen bg-gray-900 text-gray-100 font-['DM_Sans'] fade-in">
@@ -2122,47 +2245,111 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
         </div>
       </header>
 
-      <main className="p-6 max-w-5xl mx-auto space-y-6">
-        <div className="flex items-center justify-between">
+      <main className="p-6 max-w-6xl mx-auto space-y-6">
+        {/* Stats globais — visão rápida do sistema multi-tenant */}
+        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+            <p className="text-xs text-gray-400">Empresas</p>
+            <p className="text-2xl font-bold text-white mt-1">{companies.length}</p>
+          </div>
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+            <p className="text-xs text-gray-400">Ativas</p>
+            <p className="text-2xl font-bold text-green-400 mt-1">{globalStats.ativas}</p>
+          </div>
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+            <p className="text-xs text-gray-400">Bloqueadas</p>
+            <p className="text-2xl font-bold text-red-400 mt-1">{globalStats.bloqueadas}</p>
+          </div>
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+            <p className="text-xs text-gray-400">Usuários</p>
+            <p className="text-2xl font-bold text-blue-400 mt-1">{globalStats.totalUsers}</p>
+          </div>
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+            <p className="text-xs text-gray-400">OS / Clientes</p>
+            <p className="text-2xl font-bold text-cyan-400 mt-1">{globalStats.totalOS} / {globalStats.totalClients}</p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between flex-wrap gap-3">
           <div>
             <h2 className="text-2xl font-bold text-white">Empresas</h2>
-            <p className="text-sm text-gray-400 mt-1">{companies.length} cadastrada(s) — dados isolados por empresa</p>
+            <p className="text-sm text-gray-400 mt-1">{filteredCompanies.length} de {companies.length} — dados isolados por empresa</p>
           </div>
-          <button onClick={() => setShowForm(true)} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition shadow-lg shadow-blue-600/20">
-            + Nova Empresa
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <input
+              name="searchCompany"
+              type="text"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Buscar nome, CNPJ ou email..."
+              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white w-64"
+            />
+            <select
+              name="filterStatus"
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white"
+            >
+              <option value="all">Todas</option>
+              <option value="ativa">Ativas</option>
+              <option value="bloqueada">Bloqueadas</option>
+            </select>
+            <button onClick={() => setShowAuditLog(true)} className="px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition" title="Histórico de ações do Master">
+              📜 Auditoria
+            </button>
+            <button onClick={() => { resetForm(); setShowForm(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition shadow-lg shadow-blue-600/20">
+              + Nova Empresa
+            </button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {companies.length === 0 && (
+          {filteredCompanies.length === 0 && (
             <div className="col-span-full text-center py-16 text-gray-500 bg-gray-800 border border-gray-700 rounded-xl">
-              Nenhuma empresa cadastrada ainda.
+              {companies.length === 0 ? "Nenhuma empresa cadastrada ainda." : "Nenhum resultado para o filtro."}
             </div>
           )}
-          {companies.map((c) => {
+          {filteredCompanies.map((c) => {
             // Conta usuários e OS dessa empresa para diagnóstico rápido
             const allUsers = DB.listAll("erp:user:").filter((u) => u.companyId === c.id);
             const allOS = DB.listAll("erp:os:").filter((o) => o.companyId === c.id);
             return (
               <div key={c.id} className="bg-gray-800 border border-gray-700 rounded-xl p-5 transition hover:border-blue-500">
                 <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <h3 className="font-semibold text-white">{c.nome}</h3>
-                    <p className="text-xs text-gray-400 mt-0.5">{c.cnpj || "sem CNPJ"}</p>
+                  <div className="flex items-center gap-3 min-w-0">
+                    {c.logoUrl ? (
+                      <img src={c.logoUrl} alt={c.nome} className="w-10 h-10 rounded-lg object-cover bg-gray-700" />
+                    ) : (
+                      <div className="w-10 h-10 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center font-bold text-sm">
+                        {(c.nome || "?").slice(0, 2).toUpperCase()}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <h3 className="font-semibold text-white truncate">{c.nome}</h3>
+                      <p className="text-xs text-gray-400 mt-0.5">{c.cnpj || "sem CNPJ"}</p>
+                    </div>
                   </div>
-                  <span className={`text-xs px-2 py-0.5 rounded-full ${c.ativo ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+                  <span className={`text-xs px-2 py-0.5 rounded-full whitespace-nowrap ${c.ativo ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
                     {c.ativo ? "Ativa" : "Bloqueada"}
                   </span>
                 </div>
                 <div className="text-xs text-gray-400 space-y-1 mb-3">
-                  {c.email && <div>📧 {c.email}</div>}
+                  {c.email && <div className="truncate">📧 {c.email}</div>}
                   {c.telefone && <div>📞 {c.telefone}</div>}
                   <div>👥 {allUsers.length} usuário(s) • 🛠 {allOS.length} OS</div>
                   <div className="text-gray-500">Criada {new Date(c.criadoEm).toLocaleDateString("pt-BR")}</div>
                 </div>
-                <button onClick={() => toggleAtivo(c)} className={`w-full text-sm py-2 rounded-lg transition ${c.ativo ? "bg-gray-700 hover:bg-gray-600 text-gray-300" : "bg-green-600 hover:bg-green-700 text-white"}`}>
-                  {c.ativo ? "Bloquear" : "Reativar"}
-                </button>
+                <div className="grid grid-cols-3 gap-2">
+                  <button onClick={() => openEdit(c)} className="text-xs py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition" title="Editar dados da empresa">
+                    Editar
+                  </button>
+                  <button onClick={() => toggleAtivo(c)} className={`text-xs py-2 rounded-lg transition ${c.ativo ? "bg-yellow-600/20 hover:bg-yellow-600/40 text-yellow-300" : "bg-green-600 hover:bg-green-700 text-white"}`}>
+                    {c.ativo ? "Bloquear" : "Reativar"}
+                  </button>
+                  <button onClick={() => setConfirmDelete(c)} className="text-xs py-2 rounded-lg bg-red-600/20 hover:bg-red-600/40 text-red-300 transition" title="Excluir empresa e todos os dados">
+                    Excluir
+                  </button>
+                </div>
               </div>
             );
           })}
@@ -2170,35 +2357,114 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
       </main>
 
       {showForm && (
-        <Modal isOpen={true} title="Cadastrar nova empresa" onClose={() => { setShowForm(false); resetForm(); }} size="lg">
-          <form onSubmit={handleCreateCompany} className="space-y-4">
+        <Modal isOpen={true} title={editingCompany ? "Editar empresa" : "Cadastrar nova empresa"} onClose={() => { setShowForm(false); resetForm(); }} size="lg">
+          <form onSubmit={editingCompany ? handleSaveEdit : handleCreateCompany} className="space-y-4">
             <h4 className="text-sm font-semibold text-white">Empresa</h4>
             <div className="grid grid-cols-2 gap-3">
               <input name="cNome" type="text" value={cNome} onChange={(e) => setCNome(e.target.value)} placeholder="Razão social *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
               <input name="cCnpj" type="text" value={cCnpj} onChange={(e) => setCCnpj(formatCNPJ(e.target.value))} placeholder="CNPJ" maxLength={18} className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
               <input name="cTelefone" type="text" value={cTelefone} onChange={(e) => setCTelefone(formatPhone(e.target.value))} placeholder="Telefone" maxLength={15} className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
               <input name="cEmail" type="email" value={cEmail} onChange={(e) => setCEmail(e.target.value)} placeholder="Email da empresa" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+              <input name="cLogoUrl" type="url" value={cLogoUrl} onChange={(e) => setCLogoUrl(e.target.value)} placeholder="URL da logo (opcional, ex: https://...)" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white col-span-2" />
+              {cLogoUrl && (
+                <div className="col-span-2 flex items-center gap-3 bg-gray-900/40 border border-gray-700 rounded-lg p-3">
+                  <img src={cLogoUrl} alt="preview" className="w-12 h-12 rounded-lg object-cover bg-gray-700" onError={(e) => { e.target.style.display = "none"; }} />
+                  <p className="text-xs text-gray-400">Pré-visualização da logo</p>
+                </div>
+              )}
             </div>
 
-            <h4 className="text-sm font-semibold text-white pt-2">Admin inicial</h4>
-            <div className="grid grid-cols-2 gap-3">
-              <input name="adminNome" type="text" value={adminNome} onChange={(e) => setAdminNome(e.target.value)} placeholder="Nome do admin *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
-              <input name="adminEmail" type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="Email do admin *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
-              <input name="adminSenha" type="password" value={adminSenha} onChange={(e) => setAdminSenha(e.target.value)} placeholder="Senha provisória (min. 8) *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white col-span-2" />
-            </div>
-            <p className="text-xs text-gray-400">O admin será forçado a trocar a senha no primeiro login.</p>
+            {!editingCompany && (
+              <>
+                <h4 className="text-sm font-semibold text-white pt-2">Admin inicial</h4>
+                <div className="grid grid-cols-2 gap-3">
+                  <input name="adminNome" type="text" value={adminNome} onChange={(e) => setAdminNome(e.target.value)} placeholder="Nome do admin *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+                  <input name="adminEmail" type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="Email do admin *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+                  <input name="adminSenha" type="password" value={adminSenha} onChange={(e) => setAdminSenha(e.target.value)} placeholder="Senha provisória (min. 8) *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white col-span-2" />
+                </div>
+                <p className="text-xs text-gray-400">O admin será forçado a trocar a senha no primeiro login.</p>
+              </>
+            )}
 
             {formError && <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">{formError}</div>}
 
             <div className="flex justify-end gap-2 pt-2">
               <button type="button" onClick={() => { setShowForm(false); resetForm(); }} className="px-4 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 transition">Cancelar</button>
               <button type="submit" disabled={saving} className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition disabled:opacity-50">
-                {saving ? "Criando..." : "Criar empresa"}
+                {saving ? "Salvando..." : (editingCompany ? "Salvar alterações" : "Criar empresa")}
               </button>
             </div>
           </form>
         </Modal>
       )}
+
+      {/* Confirmação de exclusão — exige digitar o nome da empresa */}
+      {confirmDelete && (
+        <ConfirmDialog
+          message={`Excluir a empresa "${confirmDelete.nome}" remove TODOS os dados (usuários, clientes, OS, financeiro, etc). Operação irreversível.`}
+          requireType={confirmDelete.nome}
+          onConfirm={() => handleDelete(confirmDelete)}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+
+      {/* Auditoria — log de ações do Master */}
+      {showAuditLog && (
+        <Modal isOpen={true} title="Auditoria — Ações do Master" onClose={() => setShowAuditLog(false)} size="lg">
+          <MasterAuditLog onClose={() => setShowAuditLog(false)} />
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// Componente do log de auditoria — lê master:audit:* e mostra cronologia decrescente.
+function MasterAuditLog() {
+  const entries = useMemo(() => {
+    const list = [];
+    for (let i = 0; i < window.storage.length; i++) {
+      const k = window.storage.key(i);
+      if (k && k.startsWith("master:audit:")) {
+        try {
+          const v = JSON.parse(window.storage.getItem(k));
+          list.push(v);
+        } catch { /* ignora entrada corrompida */ }
+      }
+    }
+    return list.sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+  }, []);
+
+  const labelMap = {
+    create_company: { label: "Empresa criada", color: "text-green-400" },
+    update_company: { label: "Empresa atualizada", color: "text-blue-400" },
+    block_company: { label: "Empresa bloqueada", color: "text-yellow-400" },
+    unblock_company: { label: "Empresa reativada", color: "text-green-400" },
+    delete_company: { label: "Empresa EXCLUÍDA", color: "text-red-400" },
+  };
+
+  if (entries.length === 0) {
+    return <p className="text-sm text-gray-400">Nenhuma ação registrada ainda.</p>;
+  }
+  return (
+    <div className="space-y-2 max-h-[60vh] overflow-y-auto">
+      {entries.map((e) => {
+        const meta = labelMap[e.action] || { label: e.action, color: "text-gray-300" };
+        return (
+          <div key={e.id} className="bg-gray-700/50 border border-gray-700 rounded-lg p-3 text-sm">
+            <div className="flex items-center justify-between gap-2">
+              <span className={`font-semibold ${meta.color}`}>{meta.label}</span>
+              <span className="text-xs text-gray-400">{new Date(e.ts).toLocaleString("pt-BR")}</span>
+            </div>
+            <div className="text-xs text-gray-300 mt-1">
+              {e.companyNome && <span>Empresa: <strong>{e.companyNome}</strong></span>}
+              {typeof e.registrosRemovidos === "number" && (
+                <span className="ml-2 text-red-300">• {e.registrosRemovidos} registro(s) removido(s)</span>
+              )}
+            </div>
+            {e.masterNome && <div className="text-[11px] text-gray-500 mt-1">por {e.masterNome}</div>}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -7979,11 +8245,21 @@ export default function App() {
             // Valida HASH do token armazenado no usuário — impede forjar sessão pelo DevTools
             const tokenHash = await sha256Hex(session.token);
             if (savedUser && savedUser.status === "ativo" && savedUser.sessionTokenHash === tokenHash) {
-              // Restaura scope da company antes de marcar user (loadAllData pode rodar em seguida)
-              setActiveCompanyId(savedUser.companyId || DEFAULT_COMPANY_ID);
-              setUser(savedUser);
-              lastActivityRef.current = Date.now();
-              sessionStorage.setItem("frost_session", JSON.stringify({ ...session, lastActivity: Date.now() }));
+              // Empresa bloqueada pelo Master também invalida a sessão
+              const companyOk = (() => {
+                if (!savedUser.companyId) return true;
+                const c = DB.get("erp:company:" + savedUser.companyId);
+                return !c || c.ativo !== false;
+              })();
+              if (!companyOk) {
+                sessionStorage.removeItem("frost_session");
+              } else {
+                // Restaura scope da company antes de marcar user (loadAllData pode rodar em seguida)
+                setActiveCompanyId(savedUser.companyId || DEFAULT_COMPANY_ID);
+                setUser(savedUser);
+                lastActivityRef.current = Date.now();
+                sessionStorage.setItem("frost_session", JSON.stringify({ ...session, lastActivity: Date.now() }));
+              }
             } else {
               // Token inválido ou usuário desativado — limpa sessão
               sessionStorage.removeItem("frost_session");
@@ -8370,18 +8646,38 @@ export default function App() {
           sidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"
         } ${sidebarCollapsed ? "w-16" : "w-64"}`}
       >
-        {/* Logo */}
-        <div className={`flex items-center gap-3 px-4 py-5 border-b border-gray-700 ${sidebarCollapsed ? "justify-center" : ""}`}>
-          {/* Sidebar: logo 02 + subtitulo Gestao Integrada */}
-          <img
-            src="/frosterp-snowflake.svg"
-            alt="FROSTErp"
-            className={sidebarCollapsed ? "h-8 w-auto" : "h-10 w-auto"}
-          />
-          {!sidebarCollapsed && (
-            <p className="text-xs text-gray-400">Gestão Integrada</p>
-          )}
-        </div>
+        {/* Logo + identificação da empresa logada — substitui marca padrão pela logo+nome
+            da empresa do usuário ativo. Quando não há logoUrl cadastrada, mostra fallback
+            (snowflake do FrostERP) com inicial da empresa para distinção visual. */}
+        {(() => {
+          const activeCompany = user?.companyId ? DB.get("erp:company:" + user.companyId) : null;
+          const companyName = activeCompany?.nome || "FROSTErp";
+          const companyLogo = activeCompany?.logoUrl;
+          return (
+            <div className={`flex items-center gap-3 px-4 py-5 border-b border-gray-700 ${sidebarCollapsed ? "justify-center" : ""}`}>
+              {companyLogo ? (
+                <img
+                  src={companyLogo}
+                  alt={companyName}
+                  className={sidebarCollapsed ? "h-8 w-8 rounded-md object-cover" : "h-10 w-10 rounded-md object-cover"}
+                  onError={(e) => { e.target.onerror = null; e.target.src = "/frosterp-snowflake.svg"; }}
+                />
+              ) : (
+                <img
+                  src="/frosterp-snowflake.svg"
+                  alt={companyName}
+                  className={sidebarCollapsed ? "h-8 w-auto" : "h-10 w-auto"}
+                />
+              )}
+              {!sidebarCollapsed && (
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white truncate" title={companyName}>{companyName}</p>
+                  <p className="text-[11px] text-gray-400">Gestão Integrada</p>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Collapse button (desktop) */}
         <button

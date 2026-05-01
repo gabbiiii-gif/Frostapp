@@ -69,12 +69,14 @@
   --status-orange-border:   rgba(249, 115, 22, 0.30);
 }
 
-/* Light mode — ativado via [data-theme="light"] no <body> */
+/* Light mode — ativado via [data-theme="light"] no <body>
+   Página com tom suave (slate-50) e cards brancos para criar separação visual.
+   Antes: tudo branco causava cards "sumindo" no fundo. */
 [data-theme="light"] {
-  --color-surface:          #ffffff;
+  --color-surface:          #f1f5f9;
   --color-surface-raised:   #ffffff;
   --color-surface-card:     #ffffff;
-  --color-surface-hover:    #f1f5f9;
+  --color-surface-hover:    #e2e8f0;
   --color-surface-muted:    #f8fafc;
 
   --color-border-subtle:    rgba(15, 23, 42, 0.06);
@@ -214,6 +216,71 @@ body[data-theme="light"] .bg-gray-700 {
 body[data-theme="light"] aside.bg-gray-800,
 body[data-theme="light"] header.bg-gray-800 {
   box-shadow: none;
+}
+
+/* Light mode: variantes de opacidade dos cinzas — antes ficavam preto translúcido
+   sobre fundo claro, deixando blocos quase ilegíveis. Forçamos tons claros. */
+body[data-theme="light"] .bg-gray-800\/50,
+body[data-theme="light"] .bg-gray-800\/40,
+body[data-theme="light"] .bg-gray-800\/30,
+body[data-theme="light"] .bg-gray-800\/60,
+body[data-theme="light"] .bg-gray-800\/80,
+body[data-theme="light"] .bg-gray-800\/95 {
+  background-color: rgba(241, 245, 249, 0.85) !important;
+}
+body[data-theme="light"] .bg-gray-900\/50,
+body[data-theme="light"] .bg-gray-900\/60,
+body[data-theme="light"] .bg-gray-900\/80,
+body[data-theme="light"] .bg-gray-900\/95 {
+  background-color: rgba(248, 250, 252, 0.92) !important;
+}
+body[data-theme="light"] .bg-gray-700\/40,
+body[data-theme="light"] .bg-gray-700\/60,
+body[data-theme="light"] .bg-gray-700\/80 {
+  background-color: rgba(226, 232, 240, 0.85) !important;
+}
+
+/* Backdrops de Modal/Toast — manter escuro para contraste com card claro */
+body[data-theme="light"] .bg-black\/50,
+body[data-theme="light"] .bg-black\/60,
+body[data-theme="light"] .bg-black\/70 {
+  background-color: rgba(15, 23, 42, 0.45) !important;
+}
+
+/* Sombras suaves nos containers raised quando idênticos ao surface (slate vs white) */
+body[data-theme="light"] aside.bg-gray-800 {
+  border-right-color: var(--color-border-default) !important;
+}
+body[data-theme="light"] header.bg-gray-800 {
+  border-bottom-color: var(--color-border-default) !important;
+}
+
+/* Botões secundários com bg-gray-700 ficam quase invisíveis em light;
+   reforçar com borda discreta para distinguir do fundo. */
+body[data-theme="light"] button.bg-gray-700,
+body[data-theme="light"] button.bg-gray-700\/50 {
+  border: 1px solid var(--color-border-default);
+}
+
+/* Variantes /20 e /10 para badges/tags coloridas — dark mode usa cor sobre alpha
+   escuro; light precisa de alpha mais claro pra ler. Mantém saturação. */
+body[data-theme="light"] .bg-blue-500\/20 { background-color: rgba(59, 164, 240, 0.15) !important; }
+body[data-theme="light"] .bg-blue-600\/20 { background-color: rgba(27, 143, 232, 0.15) !important; }
+body[data-theme="light"] .bg-green-500\/20 { background-color: rgba(16, 185, 129, 0.15) !important; }
+body[data-theme="light"] .bg-yellow-500\/20 { background-color: rgba(245, 158, 11, 0.18) !important; }
+body[data-theme="light"] .bg-red-500\/20 { background-color: rgba(239, 68, 68, 0.15) !important; }
+body[data-theme="light"] .bg-orange-500\/20 { background-color: rgba(249, 115, 22, 0.15) !important; }
+body[data-theme="light"] .bg-cyan-500\/20 { background-color: rgba(6, 182, 212, 0.15) !important; }
+
+/* Hovers com tons claros para áreas de tabela/lista */
+body[data-theme="light"] .hover\:bg-gray-800:hover { background-color: #f8fafc !important; }
+body[data-theme="light"] .hover\:bg-gray-600:hover { background-color: #e2e8f0 !important; }
+
+/* Inputs/selects: leve sombra interna para indicar campo (sem isso somem na tela branca) */
+body[data-theme="light"] input,
+body[data-theme="light"] select,
+body[data-theme="light"] textarea {
+  box-shadow: inset 0 1px 0 rgba(15, 23, 42, 0.04);
 }
 
 /* ─── Body + fundo global ─────────────────────────────────────────────────── */
