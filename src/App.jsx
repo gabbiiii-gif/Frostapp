@@ -8835,30 +8835,38 @@ export default function App() {
           const activeCompany = user?.companyId ? DB.get("erp:company:" + user.companyId) : null;
           const companyName = activeCompany?.nome || "FROSTErp";
           const companyLogo = activeCompany?.logoUrl;
-          return (
-            <div className={`flex items-center gap-3 px-3 py-4 border-b border-gray-700 ${sidebarCollapsed ? "justify-center" : ""}`}>
+          // Logo expandida: ocupa quase toda largura da sidebar (w-64), height alto, sem moldura.
+          // Logos retangulares (a maioria) ficam grandes e legíveis.
+          // Colapsada: só ícone quadrado pequeno (sem nome).
+          return sidebarCollapsed ? (
+            <div className="flex items-center justify-center px-2 py-3 border-b border-gray-700">
               {companyLogo ? (
-                // object-contain preserva aspecto (logos retangulares não viram quadrado cortado).
-                // Tamanhos maiores para destacar identidade visual da empresa.
                 <img
                   src={companyLogo}
                   alt={companyName}
-                  className={sidebarCollapsed ? "h-12 w-12 rounded-lg object-contain bg-white/5 p-1" : "h-16 w-16 rounded-lg object-contain bg-white/5 p-1.5 flex-shrink-0"}
+                  className="h-10 w-10 rounded-md object-contain"
                   onError={(e) => { e.target.onerror = null; e.target.src = "/frosterp-snowflake.svg"; }}
                 />
               ) : (
+                <img src="/frosterp-snowflake.svg" alt={companyName} className="h-10 w-auto" />
+              )}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center gap-2 px-3 py-4 border-b border-gray-700">
+              {companyLogo ? (
                 <img
-                  src="/frosterp-snowflake.svg"
+                  src={companyLogo}
                   alt={companyName}
-                  className={sidebarCollapsed ? "h-12 w-auto" : "h-14 w-auto flex-shrink-0"}
+                  className="max-h-20 w-auto max-w-full object-contain"
+                  onError={(e) => { e.target.onerror = null; e.target.src = "/frosterp-snowflake.svg"; }}
                 />
+              ) : (
+                <img src="/frosterp-snowflake.svg" alt={companyName} className="h-16 w-auto" />
               )}
-              {!sidebarCollapsed && (
-                <div className="min-w-0">
-                  <p className="text-base font-bold text-white truncate leading-tight" title={companyName}>{companyName}</p>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Gestão Integrada</p>
-                </div>
-              )}
+              <div className="text-center w-full">
+                <p className="text-sm font-bold text-white truncate leading-tight" title={companyName}>{companyName}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">Gestão Integrada</p>
+              </div>
             </div>
           );
         })()}
