@@ -222,10 +222,48 @@ function getActiveCompanyId() {
   return __activeCompanyId;
 }
 
+// Singletons que precisam ser escopados por empresa (singleton = chave única, não lista).
+// Antes "erp:config" era global e dados da Empresa A vazavam para Empresa B.
+// Agora: redirecionamos para "erp:config:<companyId>" quando há tenant ativo.
+const SCOPED_SINGLETONS = ["erp:config", "erp:calendarFeedToken", "erp:lastBackup"];
+function rewriteSingletonKey(key) {
+  if (!__activeCompanyId) return key;
+  return SCOPED_SINGLETONS.includes(key) ? key + ":" + __activeCompanyId : key;
+}
+
+// Migração one-shot dos singletons globais legados para a primeira empresa que logar.
+// Não afeta empresas criadas depois — elas iniciam com singletons em branco.
+// Marker garante idempotência mesmo após reload.
+function migrateLegacyConfigOnce(companyId) {
+  if (!companyId) return;
+  try {
+    const claimMarker = window.storage.getItem("erp:legacySingletonsClaimedBy");
+    if (claimMarker) return;
+    let migrated = false;
+    SCOPED_SINGLETONS.forEach((legacy) => {
+      const legacyRaw = window.storage.getItem(legacy);
+      const scopedKey = legacy + ":" + companyId;
+      const scopedRaw = window.storage.getItem(scopedKey);
+      if (legacyRaw && !scopedRaw) {
+        window.storage.setItem(scopedKey, legacyRaw);
+        migrated = true;
+        try { syncToSupabase(scopedKey, JSON.parse(legacyRaw)); } catch { /* ignora */ }
+      }
+    });
+    if (migrated) {
+      window.storage.setItem("erp:legacySingletonsClaimedBy", companyId);
+    } else {
+      // Mesmo sem dados a migrar, fecha a janela pra novas empresas não tentarem
+      window.storage.setItem("erp:legacySingletonsClaimedBy", companyId);
+    }
+  } catch { /* migração é best-effort */ }
+}
+
 const DB = {
   get(key) {
     try {
-      const raw = window.storage.getItem(key);
+      const realKey = rewriteSingletonKey(key);
+      const raw = window.storage.getItem(realKey);
       if (raw === null || raw === undefined) return null;
       return JSON.parse(raw);
     } catch {
@@ -235,6 +273,7 @@ const DB = {
 
   set(key, value) {
     try {
+      const realKey = rewriteSingletonKey(key);
       // Decora registros com companyId quando há company ativa e o prefixo é com escopo
       let toStore = value;
       if (
@@ -247,8 +286,8 @@ const DB = {
       ) {
         toStore = { ...toStore, companyId: __activeCompanyId };
       }
-      window.storage.setItem(key, JSON.stringify(toStore));
-      syncToSupabase(key, toStore);
+      window.storage.setItem(realKey, JSON.stringify(toStore));
+      syncToSupabase(realKey, toStore);
       return true;
     } catch {
       return false;
@@ -257,8 +296,9 @@ const DB = {
 
   delete(key) {
     try {
-      window.storage.removeItem(key);
-      deleteFromSupabase(key);
+      const realKey = rewriteSingletonKey(key);
+      window.storage.removeItem(realKey);
+      deleteFromSupabase(realKey);
       return true;
     } catch {
       return false;
@@ -8494,6 +8534,7 @@ export default function App() {
               } else {
                 // Restaura scope da company antes de marcar user (loadAllData pode rodar em seguida)
                 setActiveCompanyId(savedUser.companyId || DEFAULT_COMPANY_ID);
+                migrateLegacyConfigOnce(savedUser.companyId || DEFAULT_COMPANY_ID);
                 setUser(savedUser);
                 lastActivityRef.current = Date.now();
                 sessionStorage.setItem("frost_session", JSON.stringify({ ...session, lastActivity: Date.now() }));
@@ -8690,6 +8731,9 @@ export default function App() {
     DB.set("erp:user:" + updated.id, updated);
     // Multi-tenant: ativa scope da company desse usuário (afeta DB.list/DB.set posteriores)
     setActiveCompanyId(updated.companyId || DEFAULT_COMPANY_ID);
+    // Migração one-shot do erp:config legado (global) para a primeira company que logar.
+    // Empresas criadas depois NÃO herdam — começam com config em branco.
+    migrateLegacyConfigOnce(updated.companyId || DEFAULT_COMPANY_ID);
     sessionStorage.setItem("frost_session", JSON.stringify({
       userId: updated.id, loginAt: Date.now(), lastActivity: Date.now(), token,
     }));
