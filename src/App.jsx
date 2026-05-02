@@ -208,7 +208,14 @@ const SCOPED_PREFIXES = [
   "erp:transaction:",
   "erp:inventory:",
   "erp:product:",
+  "erp:audit:",
+  "erp:autoBackup:",
 ];
+
+// Usuário ativo — para que DB consiga registrar autoria nos logs de auditoria.
+let __activeUser = null;
+function setActiveUser(u) { __activeUser = u || null; }
+function getActiveUser() { return __activeUser; }
 
 function isScopedKey(key) {
   if (!key) return false;
@@ -225,7 +232,7 @@ function getActiveCompanyId() {
 // Singletons que precisam ser escopados por empresa (singleton = chave única, não lista).
 // Antes "erp:config" era global e dados da Empresa A vazavam para Empresa B.
 // Agora: redirecionamos para "erp:config:<companyId>" quando há tenant ativo.
-const SCOPED_SINGLETONS = ["erp:config", "erp:calendarFeedToken", "erp:lastBackup"];
+const SCOPED_SINGLETONS = ["erp:config", "erp:calendarFeedToken", "erp:lastBackup", "erp:autoBackupMeta"];
 function rewriteSingletonKey(key) {
   if (!__activeCompanyId) return key;
   return SCOPED_SINGLETONS.includes(key) ? key + ":" + __activeCompanyId : key;
@@ -259,6 +266,105 @@ function migrateLegacyConfigOnce(companyId) {
   } catch { /* migração é best-effort */ }
 }
 
+// Backup automático semanal — gera snapshot por empresa se passou 7+ dias do último.
+// Mantém apenas as últimas 4 (1 mês). Excluí senhas/tokens dos usuários.
+// Disparado no login (não bloqueia o fluxo) e no restore de sessão.
+function ensureAutoBackup(companyId) {
+  try {
+    if (!companyId) return null;
+    const meta = DB.get("erp:autoBackupMeta") || {};
+    const last = meta.lastTs ? new Date(meta.lastTs).getTime() : 0;
+    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+    if (Date.now() - last < WEEK_MS) return null;
+
+    // Coleta dados via DB.list (já filtrado pelo scope da company ativa,
+    // mas garantimos passando companyId explícito quando possível).
+    const collect = (prefix) => DB.listAll(prefix).filter((r) => r && r.companyId === companyId);
+    const users = collect("erp:user:").map((u) => ({
+      ...u,
+      // Remove credenciais — backup deve ser portável sem virar vetor de ataque
+      password: undefined,
+      sessionTokenHash: undefined,
+    }));
+    const snapshot = {
+      version: 1,
+      ts: new Date().toISOString(),
+      companyId,
+      clients: collect("erp:client:"),
+      employees: collect("erp:employee:"),
+      services: collect("erp:os:"),
+      schedule: collect("erp:schedule:"),
+      finance: collect("erp:finance:"),
+      users,
+      config: window.storage.getItem("erp:config:" + companyId) ? JSON.parse(window.storage.getItem("erp:config:" + companyId)) : null,
+    };
+    const id = "ab_" + Date.now();
+    const key = "erp:autoBackup:" + id;
+    snapshot.id = id;
+    window.storage.setItem(key, JSON.stringify(snapshot));
+    try { syncToSupabase(key, snapshot); } catch { /* ignora */ }
+
+    // Mantém apenas as 4 últimas por empresa (descarta as mais antigas)
+    const all = DB.listAll("erp:autoBackup:")
+      .filter((b) => b && b.companyId === companyId)
+      .sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+    all.slice(4).forEach((b) => {
+      if (b.id) {
+        try {
+          window.storage.removeItem("erp:autoBackup:" + b.id);
+          deleteFromSupabase("erp:autoBackup:" + b.id);
+        } catch { /* ignora */ }
+      }
+    });
+
+    DB.set("erp:autoBackupMeta", { lastTs: snapshot.ts, lastId: id });
+    return snapshot;
+  } catch { return null; }
+}
+
+// Auditoria por empresa — registra mutações de entidades críticas (OS, clientes,
+// funcionários, finanças, usuários). Logs são scoped por companyId, somente admin
+// vê. Skipa silenciosamente keys não auditadas e a própria entrada de auditoria.
+const AUDITED_PREFIXES = [
+  "erp:os:", "erp:client:", "erp:employee:", "erp:finance:", "erp:user:",
+];
+function shouldAudit(key) {
+  if (!key) return false;
+  if (key.startsWith("erp:audit:") || key.startsWith("master:") || key.startsWith("erp:autoBackup")) return false;
+  return AUDITED_PREFIXES.some((p) => key.startsWith(p));
+}
+function summarizeRecord(prefix, value) {
+  if (!value || typeof value !== "object") return "";
+  if (prefix === "erp:os:") return `OS ${value.numero || value.id} — ${value.clienteNome || ""}`.trim();
+  if (prefix === "erp:client:") return value.nome || value.razaoSocial || value.id || "";
+  if (prefix === "erp:employee:") return value.nome || value.id || "";
+  if (prefix === "erp:user:") return `${value.nome || ""} <${value.email || ""}>`;
+  if (prefix === "erp:finance:") return `${value.tipo || ""} R$${value.valor || 0} — ${value.descricao || ""}`.trim();
+  return value.id || "";
+}
+function recordAudit(action, key, value, prevValue) {
+  try {
+    if (!shouldAudit(key)) return;
+    if (!__activeCompanyId) return; // master ou pré-login não loga
+    const prefix = AUDITED_PREFIXES.find((p) => key.startsWith(p));
+    const id = "aud_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+    const entry = {
+      id,
+      ts: new Date().toISOString(),
+      action,
+      entity: prefix ? prefix.replace(/^erp:|:$/g, "") : "?",
+      entityId: (value && value.id) || (prevValue && prevValue.id) || null,
+      summary: summarizeRecord(prefix, value || prevValue),
+      userId: __activeUser?.id || null,
+      userNome: __activeUser?.nome || "Sistema",
+      companyId: __activeCompanyId,
+    };
+    const auditKey = "erp:audit:" + id;
+    window.storage.setItem(auditKey, JSON.stringify(entry));
+    try { syncToSupabase(auditKey, entry); } catch { /* ignora */ }
+  } catch { /* não-crítico */ }
+}
+
 const DB = {
   get(key) {
     try {
@@ -274,6 +380,15 @@ const DB = {
   set(key, value) {
     try {
       const realKey = rewriteSingletonKey(key);
+      // Detecta create vs update lendo registro anterior (audit precisa disso)
+      const auditable = shouldAudit(key);
+      let prev = null;
+      if (auditable) {
+        try {
+          const raw = window.storage.getItem(realKey);
+          if (raw) prev = JSON.parse(raw);
+        } catch { /* ignora */ }
+      }
       // Decora registros com companyId quando há company ativa e o prefixo é com escopo
       let toStore = value;
       if (
@@ -288,6 +403,9 @@ const DB = {
       }
       window.storage.setItem(realKey, JSON.stringify(toStore));
       syncToSupabase(realKey, toStore);
+      if (auditable) {
+        recordAudit(prev ? "update" : "create", key, toStore, prev);
+      }
       return true;
     } catch {
       return false;
@@ -297,8 +415,16 @@ const DB = {
   delete(key) {
     try {
       const realKey = rewriteSingletonKey(key);
+      let prev = null;
+      if (shouldAudit(key)) {
+        try {
+          const raw = window.storage.getItem(realKey);
+          if (raw) prev = JSON.parse(raw);
+        } catch { /* ignora */ }
+      }
       window.storage.removeItem(realKey);
       deleteFromSupabase(realKey);
+      if (prev) recordAudit("delete", key, null, prev);
       return true;
     } catch {
       return false;
@@ -7277,6 +7403,181 @@ function CalendarFeedPanel({ feed, onRegenerate, onDisable, onCopy }) {
   );
 }
 
+// Painel de auditoria da empresa — lista mutações scoped por companyId via DB.list("erp:audit:")
+function CompanyAuditPanel() {
+  const [entries, setEntries] = useState([]);
+  const [filterAction, setFilterAction] = useState("all"); // all | create | update | delete
+  const [filterEntity, setFilterEntity] = useState("all");
+  const [search, setSearch] = useState("");
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    const list = DB.list("erp:audit:").sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+    setEntries(list);
+  }, [reload]);
+
+  const filtered = useMemo(() => {
+    const s = search.trim().toLowerCase();
+    return entries.filter((e) => {
+      if (filterAction !== "all" && e.action !== filterAction) return false;
+      if (filterEntity !== "all" && e.entity !== filterEntity) return false;
+      if (!s) return true;
+      return (
+        (e.summary || "").toLowerCase().includes(s) ||
+        (e.userNome || "").toLowerCase().includes(s)
+      );
+    });
+  }, [entries, filterAction, filterEntity, search]);
+
+  const actionColor = {
+    create: "text-green-400",
+    update: "text-blue-400",
+    delete: "text-red-400",
+  };
+  const actionLabel = { create: "criou", update: "alterou", delete: "excluiu" };
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Auditoria da Empresa</h3>
+          <p className="text-gray-400 text-sm mt-0.5">Quem alterou o quê (OS, clientes, funcionários, finanças, usuários).</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar..."
+            className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white w-48"
+          />
+          <select value={filterAction} onChange={(e) => setFilterAction(e.target.value)} className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white">
+            <option value="all">Toda ação</option>
+            <option value="create">Criou</option>
+            <option value="update">Alterou</option>
+            <option value="delete">Excluiu</option>
+          </select>
+          <select value={filterEntity} onChange={(e) => setFilterEntity(e.target.value)} className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white">
+            <option value="all">Toda entidade</option>
+            <option value="os">OS</option>
+            <option value="client">Clientes</option>
+            <option value="employee">Funcionários</option>
+            <option value="finance">Financeiro</option>
+            <option value="user">Usuários</option>
+          </select>
+          <button onClick={() => setReload((r) => r + 1)} className="px-3 py-1.5 text-xs rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200">
+            Atualizar
+          </button>
+        </div>
+      </div>
+      {filtered.length === 0 ? (
+        <p className="text-sm text-gray-400 py-6 text-center">Nenhum registro de auditoria.</p>
+      ) : (
+        <div className="space-y-1.5 max-h-96 overflow-y-auto">
+          {filtered.slice(0, 200).map((e) => (
+            <div key={e.id} className="bg-gray-700/50 border border-gray-700 rounded-lg px-3 py-2 text-sm flex items-center gap-3">
+              <span className={`text-xs font-bold whitespace-nowrap ${actionColor[e.action] || "text-gray-300"}`}>
+                {actionLabel[e.action] || e.action}
+              </span>
+              <span className="text-gray-300 truncate flex-1" title={e.summary}>{e.summary || "(sem resumo)"}</span>
+              <span className="text-xs text-gray-400 whitespace-nowrap">{e.userNome}</span>
+              <span className="text-[10px] text-gray-500 whitespace-nowrap">{new Date(e.ts).toLocaleString("pt-BR")}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {filtered.length > 200 && (
+        <p className="text-xs text-gray-500 mt-2">Mostrando 200 mais recentes de {filtered.length}.</p>
+      )}
+    </div>
+  );
+}
+
+// Painel de backups automáticos — lista snapshots da empresa e permite download/restore
+function AutoBackupPanel({ addToast }) {
+  const [backups, setBackups] = useState([]);
+  const [meta, setMeta] = useState(null);
+  const [reload, setReload] = useState(0);
+  const [restoring, setRestoring] = useState(null);
+
+  useEffect(() => {
+    const list = DB.list("erp:autoBackup:").sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+    setBackups(list);
+    setMeta(DB.get("erp:autoBackupMeta"));
+  }, [reload]);
+
+  const triggerNow = useCallback(() => {
+    // Força próxima geração ignorando cooldown — útil pra testar/garantir snapshot
+    DB.set("erp:autoBackupMeta", { lastTs: null });
+    const result = ensureAutoBackup(getActiveCompanyId());
+    if (result) {
+      addToast("Backup automático gerado.", "success");
+    } else {
+      addToast("Não foi possível gerar agora.", "error");
+    }
+    setReload((r) => r + 1);
+  }, [addToast]);
+
+  const downloadBackup = useCallback((b) => {
+    try {
+      const blob = new Blob([JSON.stringify(b, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `frost-backup-${b.id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      addToast("Falha ao exportar backup.", "error");
+    }
+  }, [addToast]);
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Backup Automático</h3>
+          <p className="text-gray-400 text-sm mt-0.5">
+            Snapshot semanal automático. Mantém os últimos 4.
+            {meta?.lastTs && <> Último: <strong>{new Date(meta.lastTs).toLocaleString("pt-BR")}</strong>.</>}
+          </p>
+        </div>
+        <button onClick={triggerNow} className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition">
+          Gerar agora
+        </button>
+      </div>
+      {backups.length === 0 ? (
+        <p className="text-sm text-gray-400 py-4 text-center">Nenhum backup automático ainda.</p>
+      ) : (
+        <div className="space-y-2">
+          {backups.map((b) => {
+            const counts = (b.clients?.length || 0) + (b.services?.length || 0) + (b.finance?.length || 0) + (b.employees?.length || 0) + (b.users?.length || 0);
+            return (
+              <div key={b.id} className="bg-gray-700/50 border border-gray-700 rounded-lg p-3 flex items-center gap-3 flex-wrap">
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm text-white">{new Date(b.ts).toLocaleString("pt-BR")}</p>
+                  <p className="text-[11px] text-gray-400">
+                    {counts} registros • clientes:{b.clients?.length || 0} • OS:{b.services?.length || 0} • finanças:{b.finance?.length || 0} • usuários:{b.users?.length || 0}
+                  </p>
+                </div>
+                <button onClick={() => downloadBackup(b)} className="px-3 py-1.5 text-xs rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200">
+                  Baixar JSON
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      <p className="text-[11px] text-gray-500 mt-3">
+        Backup contém clientes, OS, agenda, funcionários, finanças, configuração e usuários (sem senhas).
+        Use o exportar manual em "Backup &amp; Restore" pra restaurar.
+      </p>
+    </div>
+  );
+}
+
 function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
   const [config, setConfig] = useState({
     razaoSocial: "", cnpj: "", telefone: "", email: "", endereco: "",
@@ -7675,6 +7976,13 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
 
       {/* Gerenciamento de Usuários (apenas admin) */}
       <UserManagement currentUser={user} addToast={addToast} />
+
+      {/* Auditoria por empresa — admin pode revisar mutações de OS, clientes,
+          funcionários, finanças e usuários (quem fez, o quê, quando) */}
+      {user.role === "admin" && <CompanyAuditPanel />}
+
+      {/* Backup automático semanal — admin acompanha snapshots gerados */}
+      {user.role === "admin" && <AutoBackupPanel addToast={addToast} />}
 
       {/* System Info */}
       <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
@@ -8534,7 +8842,9 @@ export default function App() {
               } else {
                 // Restaura scope da company antes de marcar user (loadAllData pode rodar em seguida)
                 setActiveCompanyId(savedUser.companyId || DEFAULT_COMPANY_ID);
+                setActiveUser(savedUser);
                 migrateLegacyConfigOnce(savedUser.companyId || DEFAULT_COMPANY_ID);
+                try { ensureAutoBackup(savedUser.companyId || DEFAULT_COMPANY_ID); } catch { /* ignora */ }
                 setUser(savedUser);
                 lastActivityRef.current = Date.now();
                 sessionStorage.setItem("frost_session", JSON.stringify({ ...session, lastActivity: Date.now() }));
@@ -8731,9 +9041,12 @@ export default function App() {
     DB.set("erp:user:" + updated.id, updated);
     // Multi-tenant: ativa scope da company desse usuário (afeta DB.list/DB.set posteriores)
     setActiveCompanyId(updated.companyId || DEFAULT_COMPANY_ID);
+    setActiveUser(updated);
     // Migração one-shot do erp:config legado (global) para a primeira company que logar.
     // Empresas criadas depois NÃO herdam — começam com config em branco.
     migrateLegacyConfigOnce(updated.companyId || DEFAULT_COMPANY_ID);
+    // Backup automático semanal — se já passou 7+ dias do último, gera novo
+    try { ensureAutoBackup(updated.companyId || DEFAULT_COMPANY_ID); } catch { /* não bloqueia login */ }
     sessionStorage.setItem("frost_session", JSON.stringify({
       userId: updated.id, loginAt: Date.now(), lastActivity: Date.now(), token,
     }));
@@ -8805,6 +9118,7 @@ export default function App() {
     }
     // Limpa scope da company para evitar leak entre logins
     setActiveCompanyId(null);
+    setActiveUser(null);
     setUser(null);
     setPendingPasswordChange(null);
     setActiveModule("dashboard");
