@@ -208,6 +208,10 @@ const SCOPED_PREFIXES = [
   "erp:transaction:",
   "erp:inventory:",
   "erp:product:",
+  "erp:supplier:",
+  "erp:stock:",
+  "erp:stockMov:",
+  "erp:service:",
   "erp:audit:",
   "erp:autoBackup:",
 ];
@@ -652,6 +656,80 @@ function hashPasswordLegacy(pwd) {
 // ─── Hash seguro com PBKDF2 via Web Crypto API ───────────────────���──────────
 // Retorna formato "pbkdf2:<base64-salt>:<base64-hash>"
 // Usa salt aleatório por usuário, 100k iterações, SHA-256
+// ─── TOTP / 2FA — RFC 6238 puro com Web Crypto (sem libs externas) ─────────
+// Base32 (RFC 4648) — apps de autenticação esperam o secret nesse formato.
+const BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+function base32Encode(bytes) {
+  let bits = 0, value = 0, output = "";
+  for (let i = 0; i < bytes.length; i++) {
+    value = (value << 8) | bytes[i];
+    bits += 8;
+    while (bits >= 5) {
+      output += BASE32_ALPHABET[(value >>> (bits - 5)) & 31];
+      bits -= 5;
+    }
+  }
+  if (bits > 0) output += BASE32_ALPHABET[(value << (5 - bits)) & 31];
+  return output;
+}
+function base32Decode(str) {
+  const clean = str.replace(/=+$/, "").toUpperCase().replace(/\s+/g, "");
+  const out = [];
+  let bits = 0, value = 0;
+  for (let i = 0; i < clean.length; i++) {
+    const idx = BASE32_ALPHABET.indexOf(clean[i]);
+    if (idx < 0) continue;
+    value = (value << 5) | idx;
+    bits += 5;
+    if (bits >= 8) {
+      out.push((value >>> (bits - 8)) & 0xff);
+      bits -= 8;
+    }
+  }
+  return new Uint8Array(out);
+}
+// Gera secret novo de 20 bytes (160 bits) — padrão RFC 4226
+function generateTotpSecret() {
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  return base32Encode(bytes);
+}
+// Gera código TOTP de 6 dígitos para um momento (default agora). RFC 6238: T0=0, step=30s, SHA-1.
+async function totpCode(secret, time = Date.now()) {
+  if (!crypto?.subtle) return null;
+  const counter = Math.floor(time / 1000 / 30);
+  const buf = new ArrayBuffer(8);
+  const view = new DataView(buf);
+  view.setUint32(0, 0);
+  view.setUint32(4, counter);
+  const keyBytes = base32Decode(secret);
+  const key = await crypto.subtle.importKey("raw", keyBytes, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const sig = new Uint8Array(await crypto.subtle.sign("HMAC", key, buf));
+  const offset = sig[sig.length - 1] & 0x0f;
+  const bin =
+    ((sig[offset] & 0x7f) << 24) |
+    ((sig[offset + 1] & 0xff) << 16) |
+    ((sig[offset + 2] & 0xff) << 8) |
+    (sig[offset + 3] & 0xff);
+  return String(bin % 1000000).padStart(6, "0");
+}
+// Verifica código aceitando ±1 janela (30s) pra tolerar drift de relógio
+async function verifyTotp(secret, code) {
+  if (!secret || !code || String(code).length !== 6) return false;
+  const now = Date.now();
+  const target = String(code).padStart(6, "0");
+  const candidates = await Promise.all([
+    totpCode(secret, now - 30000),
+    totpCode(secret, now),
+    totpCode(secret, now + 30000),
+  ]);
+  return candidates.includes(target);
+}
+// Constrói URI otpauth:// padrão (Google Authenticator, Authy, 1Password leem direto)
+function buildOtpAuthUri({ issuer, accountName, secret }) {
+  const enc = encodeURIComponent;
+  return `otpauth://totp/${enc(issuer)}:${enc(accountName)}?secret=${secret}&issuer=${enc(issuer)}&algorithm=SHA1&digits=6&period=30`;
+}
+
 async function hashPassword(pwd, existingSalt = null) {
   // Fallback para navegadores sem Web Crypto (contextos inseguros)
   if (!crypto?.subtle) {
@@ -1515,11 +1593,14 @@ function clearLoginAttempts() {
   try { sessionStorage.removeItem(LOGIN_ATTEMPTS_KEY); } catch { /* ignora */ }
 }
 
-function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster }) {
+function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassword }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  // Estado intermediário do 2FA — quando senha OK mas usuário tem TOTP ativado
+  const [pending2FA, setPending2FA] = useState(null);
+  const [totpCodeInput, setTotpCodeInput] = useState("");
   // Inicializa a partir do sessionStorage para que o lockout persista entre recargas
   const initial = readLoginAttempts();
   const [failedAttempts, setFailedAttempts] = useState(initial.count);
@@ -1609,6 +1690,12 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster }) {
         setFailedAttempts(0);
         setLockoutUntil(null);
         clearLoginAttempts();
+        // Se o usuário tem 2FA ativado, segura o login até validar o código TOTP
+        if (found.twoFactorEnabled && found.twoFactorSecret) {
+          setPending2FA(found);
+          setLoading(false);
+          return;
+        }
         onLogin(found);
       } else {
         const attempts = (persisted.count || failedAttempts) + 1;
@@ -1626,6 +1713,27 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster }) {
       setLoading(false);
     }
   }, [email, password, onLogin, failedAttempts, lockoutUntil]);
+
+  const handleVerify2FA = useCallback(async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!pending2FA) return;
+    const code = totpCodeInput.trim();
+    if (code.length !== 6) { setError("Digite o código de 6 dígitos."); return; }
+    setLoading(true);
+    try {
+      const ok = await verifyTotp(pending2FA.twoFactorSecret, code);
+      if (ok) {
+        setPending2FA(null);
+        setTotpCodeInput("");
+        onLogin(pending2FA);
+      } else {
+        setError("Código inválido. Tente novamente.");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [pending2FA, totpCodeInput, onLogin]);
 
   // Paleta da Aurora muda com o tema — light usa azuis claros para combinar com superfície branca
   const isLight = theme === "light";
@@ -1695,6 +1803,45 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster }) {
             <p className="text-gray-400 text-sm mt-1">Sistema de Gestão Integrada</p>
           </div>
 
+          {pending2FA ? (
+            // ─── Etapa 2 do login: validação TOTP ───
+            <form onSubmit={handleVerify2FA} className="space-y-4">
+              <div className="text-center">
+                <div className="w-12 h-12 mx-auto rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xl mb-3">🔐</div>
+                <p className="text-sm text-gray-300">Verificação em 2 etapas</p>
+                <p className="text-xs text-gray-500 mt-1">Digite o código de 6 dígitos do seu app autenticador</p>
+              </div>
+              <input
+                name="totp"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                autoFocus
+                value={totpCodeInput}
+                onChange={(e) => { setTotpCodeInput(e.target.value.replace(/\D/g, "")); setError(""); }}
+                placeholder="000000"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white text-center text-2xl tracking-widest font-mono focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
+              />
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">{error}</div>
+              )}
+              <button
+                type="submit"
+                disabled={loading || totpCodeInput.length !== 6}
+                className="w-full bg-gradient-to-b from-blue-500 to-blue-600 text-white py-3 rounded-lg font-medium hover:from-blue-400 hover:to-blue-500 transition disabled:opacity-50 min-h-[44px]"
+              >
+                {loading ? "Verificando..." : "Confirmar código"}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setPending2FA(null); setTotpCodeInput(""); setError(""); }}
+                className="w-full text-xs text-gray-400 hover:text-white transition"
+              >
+                Cancelar e voltar ao login
+              </button>
+            </form>
+          ) : (
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label htmlFor="login-email" className="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
@@ -1755,6 +1902,7 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster }) {
               )}
             </button>
           </form>
+          )}
 
           <div className="mt-6 pt-6 border-t border-gray-700 flex flex-col items-center gap-2">
             <p className="text-gray-500 text-xs text-center">
@@ -6041,21 +6189,80 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
 
 // ─── CADASTRO MODULE ─────────────────────────────────────────────────────────
 
+const PRODUTO_CATEGORIAS = ["Peça", "Equipamento", "Gás Refrigerante", "Acessório", "Ferramenta", "Consumível", "Outro"];
+const PRODUTO_UNIDADES = ["UN", "PC", "CX", "KG", "G", "L", "ML", "M", "M²", "M³", "PAR"];
+const FORNECEDOR_CATEGORIAS = ["Peças", "Equipamentos", "Gás Refrigerante", "Ferramentas", "Serviços", "Frete", "Outros"];
+const SERVICO_CATEGORIAS = ["Manutenção", "Instalação", "Limpeza", "Solda", "Recarga de Gás", "Inspeção", "Projeto", "Outros"];
+const SERVICO_UNIDADES = ["Serviço", "Hora", "Visita", "Diária", "M²"];
+const STOCK_MOV_TIPOS = { entrada: "Entrada", saida: "Saída", ajuste: "Ajuste" };
+const MOV_TIPO_COLOR = { entrada: "text-green-400", saida: "text-red-400", ajuste: "text-yellow-400" };
+
+// Formulários vazios mantidos no escopo do módulo: estabilizam useCallback (deps reais ficam vazias)
+// e evitam recriar o objeto em cada render do CadastroModule.
+const EMPTY_SUPPLIER_FORM = {
+  nome: "", tipo: "pj", cpf: "", cnpj: "", ie: "",
+  contato: "", telefone: "", email: "",
+  categoria: "Peças",
+  rua: "", numero: "", bairro: "", cidade: "", estado: "", cep: "",
+  observacoes: "", status: "ativo",
+};
+const EMPTY_PRODUCT_FORM = {
+  codigo: "", codigoBarras: "", nome: "",
+  categoria: "Peça", unidade: "UN",
+  precoCusto: "", precoVenda: "",
+  fornecedorId: "", ncm: "",
+  descricao: "", status: "ativo",
+};
+const EMPTY_STOCK_FORM = {
+  produtoId: "",
+  saldo: "0",
+  estoqueMinimo: "0",
+  estoqueMaximo: "",
+  localizacao: "",
+  observacoes: "",
+};
+const EMPTY_SERVICE_FORM = {
+  codigo: "", nome: "",
+  categoria: "Manutenção", unidade: "Serviço",
+  precoBase: "", duracaoMin: "60",
+  descricao: "", status: "ativo",
+};
+
 function CadastroModule({ user, addToast, reloadData }) {
   const [activeTab, setActiveTab] = useState("clientes");
   const [clients, setClients] = useState([]);
   const [employees, setEmployees] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [stocks, setStocks] = useState([]);
+  const [stockMovs, setStockMovs] = useState([]);
+  const [services, setServices] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [search, setSearch] = useState("");
   const [detailView, setDetailView] = useState(null);
   const [detailTab, setDetailTab] = useState("dados");
+  // Modal extra dedicado a movimentação de estoque (entrada/saída/ajuste)
+  const [movModal, setMovModal] = useState(null);
 
   const loadClients = useCallback(() => { setClients(DB.list("erp:client:")); }, []);
   const loadEmployees = useCallback(() => { setEmployees(DB.list("erp:employee:")); }, []);
+  const loadSuppliers = useCallback(() => { setSuppliers(DB.list("erp:supplier:")); }, []);
+  const loadProducts = useCallback(() => { setProducts(DB.list("erp:product:")); }, []);
+  const loadStocks = useCallback(() => { setStocks(DB.list("erp:stock:")); }, []);
+  const loadStockMovs = useCallback(() => { setStockMovs(DB.list("erp:stockMov:")); }, []);
+  const loadServices = useCallback(() => { setServices(DB.list("erp:service:")); }, []);
 
-  useEffect(() => { loadClients(); loadEmployees(); }, [loadClients, loadEmployees]);
+  useEffect(() => {
+    loadClients();
+    loadEmployees();
+    loadSuppliers();
+    loadProducts();
+    loadStocks();
+    loadStockMovs();
+    loadServices();
+  }, [loadClients, loadEmployees, loadSuppliers, loadProducts, loadStocks, loadStockMovs, loadServices]);
 
   // ─── Client Form ───
   // rg: apenas para pessoa física
@@ -6074,6 +6281,11 @@ function CadastroModule({ user, addToast, reloadData }) {
 
   const [clientForm, setClientForm] = useState(emptyClientForm);
   const [employeeForm, setEmployeeForm] = useState(emptyEmployeeForm);
+  const [supplierForm, setSupplierForm] = useState(EMPTY_SUPPLIER_FORM);
+  const [productForm, setProductForm] = useState(EMPTY_PRODUCT_FORM);
+  const [stockForm, setStockForm] = useState(EMPTY_STOCK_FORM);
+  const [serviceForm, setServiceForm] = useState(EMPTY_SERVICE_FORM);
+  const [movForm, setMovForm] = useState({ tipo: "entrada", quantidade: "", motivo: "", data: toISODate(new Date()) });
 
   // ─── Filtered lists ───
   const filteredClients = useMemo(() => {
@@ -6102,6 +6314,86 @@ function CadastroModule({ user, addToast, reloadData }) {
       )
       .sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
   }, [employees, search]);
+
+  const filteredSuppliers = useMemo(() => {
+    const sorted = [...suppliers].sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+    if (!search.trim()) return sorted;
+    const s = search.toLowerCase();
+    return sorted.filter(
+      (f) =>
+        (f.nome || "").toLowerCase().includes(s) ||
+        (f.cnpj || "").replace(/\D/g, "").includes(s.replace(/\D/g, "")) ||
+        (f.cpf || "").replace(/\D/g, "").includes(s.replace(/\D/g, "")) ||
+        (f.contato || "").toLowerCase().includes(s) ||
+        (f.categoria || "").toLowerCase().includes(s) ||
+        (f.telefone || "").replace(/\D/g, "").includes(s.replace(/\D/g, ""))
+    );
+  }, [suppliers, search]);
+
+  const filteredProducts = useMemo(() => {
+    const sorted = [...products].sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+    if (!search.trim()) return sorted;
+    const s = search.toLowerCase();
+    return sorted.filter(
+      (p) =>
+        (p.nome || "").toLowerCase().includes(s) ||
+        (p.codigo || "").toLowerCase().includes(s) ||
+        (p.codigoBarras || "").toLowerCase().includes(s) ||
+        (p.categoria || "").toLowerCase().includes(s)
+    );
+  }, [products, search]);
+
+  // Index por id evita lookup O(N*M) ao enriquecer estoques com dados do produto
+  const productsById = useMemo(() => {
+    const map = new Map();
+    products.forEach((p) => map.set(p.id, p));
+    return map;
+  }, [products]);
+
+  const stockRows = useMemo(() => {
+    return stocks.map((st) => {
+      const prod = productsById.get(st.produtoId);
+      const saldo = Number(st.saldo) || 0;
+      const min = Number(st.estoqueMinimo) || 0;
+      const custo = Number(prod?.precoCusto) || 0;
+      const status = saldo <= 0 ? "zerado" : saldo <= min ? "critico" : "ok";
+      return {
+        ...st,
+        nome: prod?.nome || "(produto removido)",
+        produtoNome: prod?.nome || "(produto removido)",
+        produtoCodigo: prod?.codigo || "—",
+        unidade: prod?.unidade || "UN",
+        categoriaProduto: prod?.categoria || "—",
+        precoCusto: custo,
+        valorTotal: saldo * custo,
+        statusEstoque: status,
+      };
+    });
+  }, [stocks, productsById]);
+
+  const filteredStocks = useMemo(() => {
+    const sorted = [...stockRows].sort((a, b) => (a.produtoNome || "").localeCompare(b.produtoNome || ""));
+    if (!search.trim()) return sorted;
+    const s = search.toLowerCase();
+    return sorted.filter(
+      (st) =>
+        (st.produtoNome || "").toLowerCase().includes(s) ||
+        (st.produtoCodigo || "").toLowerCase().includes(s) ||
+        (st.localizacao || "").toLowerCase().includes(s)
+    );
+  }, [stockRows, search]);
+
+  const filteredServices = useMemo(() => {
+    const sorted = [...services].sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+    if (!search.trim()) return sorted;
+    const s = search.toLowerCase();
+    return sorted.filter(
+      (sv) =>
+        (sv.nome || "").toLowerCase().includes(s) ||
+        (sv.codigo || "").toLowerCase().includes(s) ||
+        (sv.categoria || "").toLowerCase().includes(s)
+    );
+  }, [services, search]);
 
   // ─── Client CRUD ───
   const openCreateClient = useCallback(() => {
@@ -6301,6 +6593,363 @@ function CadastroModule({ user, addToast, reloadData }) {
     }
   }, [confirmDelete, loadEmployees, addToast, reloadData]);
 
+  // ─── Supplier (Fornecedor) CRUD ───
+  const openCreateSupplier = useCallback(() => {
+    setEditing(null);
+    setSupplierForm(EMPTY_SUPPLIER_FORM);
+    setModalOpen(true);
+  }, []);
+
+  const openEditSupplier = useCallback((row) => {
+    setEditing(row);
+    setSupplierForm({
+      nome: row.nome || "",
+      tipo: row.tipo || "pj",
+      cpf: row.cpf || "",
+      cnpj: row.cnpj || "",
+      ie: row.ie || "",
+      contato: row.contato || "",
+      telefone: row.telefone || "",
+      email: row.email || "",
+      categoria: row.categoria || "Peças",
+      rua: row.endereco?.rua || "",
+      numero: row.endereco?.numero || "",
+      bairro: row.endereco?.bairro || "",
+      cidade: row.endereco?.cidade || "",
+      estado: row.endereco?.estado || "",
+      cep: row.endereco?.cep || "",
+      observacoes: row.observacoes || "",
+      status: row.status || "ativo",
+    });
+    setModalOpen(true);
+  }, []);
+
+  const handleSaveSupplier = useCallback(() => {
+    if (!supplierForm.nome.trim()) { addToast("Informe o nome do fornecedor.", "error"); return; }
+    if (!supplierForm.telefone.trim()) { addToast("Informe o telefone do fornecedor.", "error"); return; }
+
+    const data = {
+      nome: supplierForm.nome.trim(),
+      tipo: supplierForm.tipo,
+      cpf: supplierForm.tipo === "pf" ? supplierForm.cpf : "",
+      cnpj: supplierForm.tipo === "pj" ? supplierForm.cnpj : "",
+      ie: supplierForm.ie.trim(),
+      contato: supplierForm.contato.trim(),
+      telefone: supplierForm.telefone,
+      email: supplierForm.email.trim(),
+      categoria: supplierForm.categoria,
+      endereco: {
+        rua: supplierForm.rua.trim(),
+        numero: supplierForm.numero.trim(),
+        bairro: supplierForm.bairro.trim(),
+        cidade: supplierForm.cidade.trim(),
+        estado: supplierForm.estado.trim(),
+        cep: supplierForm.cep.trim(),
+      },
+      observacoes: supplierForm.observacoes.trim(),
+      status: supplierForm.status,
+    };
+
+    if (editing) {
+      DB.set("erp:supplier:" + editing.id, { ...editing, ...data, updatedAt: new Date().toISOString() });
+      addToast("Fornecedor atualizado com sucesso.", "success");
+    } else {
+      const newRow = { ...data, id: genId(), createdAt: new Date().toISOString() };
+      DB.set("erp:supplier:" + newRow.id, newRow);
+      addToast(`Fornecedor ${newRow.nome} cadastrado com sucesso.`, "success");
+    }
+    setModalOpen(false);
+    loadSuppliers();
+    if (reloadData) reloadData();
+  }, [supplierForm, editing, loadSuppliers, addToast, reloadData]);
+
+  const confirmDeleteSupplierAction = useCallback(() => {
+    if (!confirmDelete) return;
+    // Bloqueia exclusão de fornecedor referenciado por produtos — mantém integridade referencial
+    const linkedCount = products.filter((p) => p.fornecedorId === confirmDelete.id).length;
+    if (linkedCount > 0) {
+      addToast(`Fornecedor possui ${linkedCount} produto(s) vinculado(s). Remova-os antes.`, "error");
+      setConfirmDelete(null);
+      return;
+    }
+    DB.delete("erp:supplier:" + confirmDelete.id);
+    addToast("Fornecedor excluído.", "success");
+    setConfirmDelete(null);
+    loadSuppliers();
+    if (reloadData) reloadData();
+  }, [confirmDelete, products, loadSuppliers, addToast, reloadData]);
+
+  // ─── Product (Produto) CRUD ───
+  const openCreateProduct = useCallback(() => {
+    setEditing(null);
+    setProductForm(EMPTY_PRODUCT_FORM);
+    setModalOpen(true);
+  }, []);
+
+  const openEditProduct = useCallback((row) => {
+    setEditing(row);
+    setProductForm({
+      codigo: row.codigo || "",
+      codigoBarras: row.codigoBarras || "",
+      nome: row.nome || "",
+      categoria: row.categoria || "Peça",
+      unidade: row.unidade || "UN",
+      precoCusto: row.precoCusto != null ? String(row.precoCusto) : "",
+      precoVenda: row.precoVenda != null ? String(row.precoVenda) : "",
+      fornecedorId: row.fornecedorId || "",
+      ncm: row.ncm || "",
+      descricao: row.descricao || "",
+      status: row.status || "ativo",
+    });
+    setModalOpen(true);
+  }, []);
+
+  const handleSaveProduct = useCallback(() => {
+    if (!productForm.nome.trim()) { addToast("Informe o nome do produto.", "error"); return; }
+    if (!productForm.codigo.trim()) { addToast("Informe o código (SKU) do produto.", "error"); return; }
+    // Garante código único (case-insensitive)
+    const codeNorm = productForm.codigo.trim().toLowerCase();
+    const dup = products.find((p) => (p.codigo || "").toLowerCase() === codeNorm && (!editing || p.id !== editing.id));
+    if (dup) { addToast("Já existe produto com esse código.", "error"); return; }
+
+    const fornecedor = suppliers.find((s) => s.id === productForm.fornecedorId);
+    const data = {
+      codigo: productForm.codigo.trim(),
+      codigoBarras: productForm.codigoBarras.trim(),
+      nome: productForm.nome.trim(),
+      categoria: productForm.categoria,
+      unidade: productForm.unidade,
+      precoCusto: parseFloat(String(productForm.precoCusto).replace(",", ".")) || 0,
+      precoVenda: parseFloat(String(productForm.precoVenda).replace(",", ".")) || 0,
+      fornecedorId: productForm.fornecedorId || "",
+      fornecedorNome: fornecedor?.nome || "",
+      ncm: productForm.ncm.trim(),
+      descricao: productForm.descricao.trim(),
+      status: productForm.status,
+    };
+
+    if (editing) {
+      DB.set("erp:product:" + editing.id, { ...editing, ...data, updatedAt: new Date().toISOString() });
+      addToast("Produto atualizado com sucesso.", "success");
+    } else {
+      const newRow = { ...data, id: genId(), createdAt: new Date().toISOString() };
+      DB.set("erp:product:" + newRow.id, newRow);
+      // Cria automaticamente um registro de estoque zerado para o novo produto
+      const stk = {
+        id: genId(),
+        produtoId: newRow.id,
+        saldo: 0,
+        estoqueMinimo: 0,
+        estoqueMaximo: 0,
+        localizacao: "",
+        observacoes: "",
+        createdAt: new Date().toISOString(),
+      };
+      DB.set("erp:stock:" + stk.id, stk);
+      addToast(`Produto ${newRow.nome} cadastrado com estoque inicial zerado.`, "success");
+    }
+    setModalOpen(false);
+    loadProducts();
+    loadStocks();
+    if (reloadData) reloadData();
+  }, [productForm, editing, products, suppliers, loadProducts, loadStocks, addToast, reloadData]);
+
+  const confirmDeleteProductAction = useCallback(() => {
+    if (!confirmDelete) return;
+    // Cascata: remove produto + estoques + movimentações usando arrays já carregados em state
+    const stks = stocks.filter((s) => s.produtoId === confirmDelete.id);
+    stks.forEach((s) => DB.delete("erp:stock:" + s.id));
+    const movs = stockMovs.filter((m) => m.produtoId === confirmDelete.id);
+    movs.forEach((m) => DB.delete("erp:stockMov:" + m.id));
+    DB.delete("erp:product:" + confirmDelete.id);
+    addToast(`Produto e ${stks.length + movs.length} registro(s) vinculado(s) removidos.`, "success");
+    setConfirmDelete(null);
+    loadProducts();
+    loadStocks();
+    loadStockMovs();
+    if (reloadData) reloadData();
+  }, [confirmDelete, stocks, stockMovs, loadProducts, loadStocks, loadStockMovs, addToast, reloadData]);
+
+  // ─── Stock (Estoque) CRUD ───
+  // Edição direta de estoque ajusta saldo/min/max/localização. Movimentações
+  // (entrada/saída/ajuste) ficam no modal `movModal` e geram histórico em erp:stockMov.
+  const openCreateStock = useCallback(() => {
+    if (products.length === 0) {
+      addToast("Cadastre um produto antes de criar um estoque.", "error");
+      return;
+    }
+    setEditing(null);
+    setStockForm(EMPTY_STOCK_FORM);
+    setModalOpen(true);
+  }, [products, addToast]);
+
+  const openEditStock = useCallback((row) => {
+    setEditing(row);
+    setStockForm({
+      produtoId: row.produtoId || "",
+      saldo: String(row.saldo ?? 0),
+      estoqueMinimo: String(row.estoqueMinimo ?? 0),
+      estoqueMaximo: row.estoqueMaximo != null ? String(row.estoqueMaximo) : "",
+      localizacao: row.localizacao || "",
+      observacoes: row.observacoes || "",
+    });
+    setModalOpen(true);
+  }, []);
+
+  const handleSaveStock = useCallback(() => {
+    if (!stockForm.produtoId) { addToast("Selecione o produto.", "error"); return; }
+    // Não permite mais de um registro de estoque por produto
+    const dup = stocks.find((s) => s.produtoId === stockForm.produtoId && (!editing || s.id !== editing.id));
+    if (dup) { addToast("Esse produto já possui registro de estoque.", "error"); return; }
+
+    const data = {
+      produtoId: stockForm.produtoId,
+      saldo: parseFloat(String(stockForm.saldo).replace(",", ".")) || 0,
+      estoqueMinimo: parseFloat(String(stockForm.estoqueMinimo).replace(",", ".")) || 0,
+      estoqueMaximo: stockForm.estoqueMaximo === "" ? 0 : parseFloat(String(stockForm.estoqueMaximo).replace(",", ".")) || 0,
+      localizacao: stockForm.localizacao.trim(),
+      observacoes: stockForm.observacoes.trim(),
+    };
+
+    if (editing) {
+      DB.set("erp:stock:" + editing.id, { ...editing, ...data, updatedAt: new Date().toISOString() });
+      addToast("Estoque atualizado.", "success");
+    } else {
+      const newRow = { ...data, id: genId(), createdAt: new Date().toISOString() };
+      DB.set("erp:stock:" + newRow.id, newRow);
+      addToast("Estoque registrado.", "success");
+    }
+    setModalOpen(false);
+    loadStocks();
+    if (reloadData) reloadData();
+  }, [stockForm, editing, stocks, loadStocks, addToast, reloadData]);
+
+  const confirmDeleteStockAction = useCallback(() => {
+    if (!confirmDelete) return;
+    const movs = stockMovs.filter((m) => m.produtoId === confirmDelete.produtoId);
+    movs.forEach((m) => DB.delete("erp:stockMov:" + m.id));
+    DB.delete("erp:stock:" + confirmDelete.id);
+    addToast(`Estoque e ${movs.length} movimentação(ões) removida(s).`, "success");
+    setConfirmDelete(null);
+    loadStocks();
+    loadStockMovs();
+    if (reloadData) reloadData();
+  }, [confirmDelete, stockMovs, loadStocks, loadStockMovs, addToast, reloadData]);
+
+  // Abre modal de movimentação para uma linha de estoque
+  const openMovModal = useCallback((stockRow) => {
+    setMovForm({ tipo: "entrada", quantidade: "", motivo: "", data: toISODate(new Date()) });
+    setMovModal(stockRow);
+  }, []);
+
+  // Aplica movimentação: ajusta saldo do estoque + grava histórico em erp:stockMov
+  const handleSaveMov = useCallback(() => {
+    if (!movModal) return;
+    const qtd = parseFloat(String(movForm.quantidade).replace(",", ".")) || 0;
+    if (qtd <= 0) { addToast("Quantidade deve ser maior que zero.", "error"); return; }
+
+    const stk = DB.get("erp:stock:" + movModal.id);
+    if (!stk) { addToast("Estoque não encontrado.", "error"); setMovModal(null); return; }
+
+    const saldoAtual = Number(stk.saldo) || 0;
+    let novoSaldo = saldoAtual;
+    if (movForm.tipo === "entrada") novoSaldo = saldoAtual + qtd;
+    else if (movForm.tipo === "saida") {
+      if (qtd > saldoAtual) { addToast("Saldo insuficiente para essa saída.", "error"); return; }
+      novoSaldo = saldoAtual - qtd;
+    } else if (movForm.tipo === "ajuste") novoSaldo = qtd;
+
+    const updatedStock = { ...stk, saldo: novoSaldo, ultimaMovimentacao: new Date().toISOString() };
+    DB.set("erp:stock:" + stk.id, updatedStock);
+
+    const mov = {
+      id: genId(),
+      produtoId: stk.produtoId,
+      stockId: stk.id,
+      tipo: movForm.tipo,
+      quantidade: qtd,
+      saldoAnterior: saldoAtual,
+      saldoNovo: novoSaldo,
+      motivo: movForm.motivo.trim(),
+      data: movForm.data,
+      usuarioId: user?.id || "",
+      usuarioNome: user?.nome || "",
+      createdAt: new Date().toISOString(),
+    };
+    DB.set("erp:stockMov:" + mov.id, mov);
+
+    addToast(`${STOCK_MOV_TIPOS[movForm.tipo]} registrada. Saldo: ${novoSaldo}`, "success");
+    setMovModal(null);
+    loadStocks();
+    loadStockMovs();
+    if (reloadData) reloadData();
+  }, [movModal, movForm, user, loadStocks, loadStockMovs, addToast, reloadData]);
+
+  // ─── Service (Serviço) CRUD ───
+  const openCreateService = useCallback(() => {
+    setEditing(null);
+    setServiceForm(EMPTY_SERVICE_FORM);
+    setModalOpen(true);
+  }, []);
+
+  const openEditService = useCallback((row) => {
+    setEditing(row);
+    setServiceForm({
+      codigo: row.codigo || "",
+      nome: row.nome || "",
+      categoria: row.categoria || "Manutenção",
+      unidade: row.unidade || "Serviço",
+      precoBase: row.precoBase != null ? String(row.precoBase) : "",
+      duracaoMin: row.duracaoMin != null ? String(row.duracaoMin) : "60",
+      descricao: row.descricao || "",
+      status: row.status || "ativo",
+    });
+    setModalOpen(true);
+  }, []);
+
+  const handleSaveService = useCallback(() => {
+    if (!serviceForm.nome.trim()) { addToast("Informe o nome do serviço.", "error"); return; }
+    if (!serviceForm.codigo.trim()) { addToast("Informe o código do serviço.", "error"); return; }
+    const codeNorm = serviceForm.codigo.trim().toLowerCase();
+    const dup = services.find((s) => (s.codigo || "").toLowerCase() === codeNorm && (!editing || s.id !== editing.id));
+    if (dup) { addToast("Já existe serviço com esse código.", "error"); return; }
+
+    const data = {
+      codigo: serviceForm.codigo.trim(),
+      nome: serviceForm.nome.trim(),
+      categoria: serviceForm.categoria,
+      unidade: serviceForm.unidade,
+      precoBase: parseFloat(String(serviceForm.precoBase).replace(",", ".")) || 0,
+      duracaoMin: parseInt(String(serviceForm.duracaoMin), 10) || 0,
+      descricao: serviceForm.descricao.trim(),
+      status: serviceForm.status,
+    };
+
+    if (editing) {
+      DB.set("erp:service:" + editing.id, { ...editing, ...data, updatedAt: new Date().toISOString() });
+      addToast("Serviço atualizado.", "success");
+    } else {
+      const newRow = { ...data, id: genId(), createdAt: new Date().toISOString() };
+      DB.set("erp:service:" + newRow.id, newRow);
+      addToast(`Serviço ${newRow.nome} cadastrado.`, "success");
+    }
+    setModalOpen(false);
+    loadServices();
+    if (reloadData) reloadData();
+  }, [serviceForm, editing, services, loadServices, addToast, reloadData]);
+
+  const confirmDeleteServiceAction = useCallback(() => {
+    if (!confirmDelete) return;
+    DB.delete("erp:service:" + confirmDelete.id);
+    addToast("Serviço excluído.", "success");
+    setConfirmDelete(null);
+    loadServices();
+    if (reloadData) reloadData();
+  }, [confirmDelete, loadServices, addToast, reloadData]);
+
+  // Apenas admin/gerente podem excluir produtos/fornecedores/estoques/serviços
+  const canDelete = user.role === "admin" || user.role === "gerente";
+
   // ─── Client Detail View — restrito a dados + OS após remoção dos módulos financeiro/fiscal
   const clientDetailData = useMemo(() => {
     if (!detailView) return null;
@@ -6343,6 +6992,85 @@ function CadastroModule({ user, addToast, reloadData }) {
       render: (v) => <StatusBadge status={v} />,
     },
   ];
+
+  // ─── Supplier columns ───
+  const supplierColumns = [
+    { key: "nome", label: "Nome / Razão Social" },
+    {
+      key: "documento", label: "CPF/CNPJ",
+      render: (_, row) => row.tipo === "pf" ? (row.cpf || "—") : (row.cnpj || "—"),
+    },
+    { key: "contato", label: "Contato", render: (v) => v || "—" },
+    { key: "telefone", label: "Telefone", render: (v) => v || "—" },
+    { key: "categoria", label: "Categoria", render: (v) => v || "—" },
+    { key: "status", label: "Status", render: (v) => <StatusBadge status={v} /> },
+  ];
+
+  // ─── Product columns ───
+  const productColumns = [
+    { key: "codigo", label: "Código" },
+    { key: "nome", label: "Produto" },
+    { key: "categoria", label: "Categoria" },
+    { key: "unidade", label: "Un." },
+    { key: "precoCusto", label: "Custo", render: (v) => formatCurrency(v) },
+    { key: "precoVenda", label: "Venda", render: (v) => formatCurrency(v) },
+    {
+      key: "fornecedorNome", label: "Fornecedor",
+      render: (v) => v || "—",
+    },
+    { key: "status", label: "Status", render: (v) => <StatusBadge status={v} /> },
+  ];
+
+  // ─── Stock columns ───
+  const stockColumns = [
+    { key: "produtoCodigo", label: "Código" },
+    { key: "produtoNome", label: "Produto" },
+    { key: "categoriaProduto", label: "Categoria" },
+    {
+      key: "saldo", label: "Saldo",
+      render: (v, row) => `${Number(v) || 0} ${row.unidade || ""}`.trim(),
+    },
+    {
+      key: "estoqueMinimo", label: "Mínimo",
+      render: (v) => v ?? 0,
+    },
+    {
+      key: "valorTotal", label: "Valor em Estoque",
+      render: (v) => formatCurrency(v),
+    },
+    { key: "localizacao", label: "Localização", render: (v) => v || "—" },
+    {
+      key: "statusEstoque", label: "Situação",
+      render: (v) => {
+        const map = { ok: { label: "OK", color: "bg-green-500" }, critico: { label: "Crítico", color: "bg-yellow-500" }, zerado: { label: "Zerado", color: "bg-red-500" } };
+        const it = map[v] || map.ok;
+        return <span className={`text-xs px-2 py-0.5 rounded-full text-white ${it.color}`}>{it.label}</span>;
+      },
+    },
+  ];
+
+  // ─── Service columns ───
+  const serviceColumns = [
+    { key: "codigo", label: "Código" },
+    { key: "nome", label: "Serviço" },
+    { key: "categoria", label: "Categoria" },
+    { key: "unidade", label: "Unidade" },
+    { key: "precoBase", label: "Preço Base", render: (v) => formatCurrency(v) },
+    {
+      key: "duracaoMin", label: "Duração",
+      render: (v) => v ? (v >= 60 ? `${Math.floor(v / 60)}h${v % 60 ? ` ${v % 60}min` : ""}` : `${v}min`) : "—",
+    },
+    { key: "status", label: "Status", render: (v) => <StatusBadge status={v} /> },
+  ];
+
+  // Histórico de movimentações do estoque selecionado (ultimas 20)
+  const movHistory = useMemo(() => {
+    if (!movModal) return [];
+    return stockMovs
+      .filter((m) => m.stockId === movModal.id || m.produtoId === movModal.produtoId)
+      .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+      .slice(0, 20);
+  }, [movModal, stockMovs]);
 
   // ─── Detail View ───
   if (detailView) {
@@ -6459,27 +7187,51 @@ function CadastroModule({ user, addToast, reloadData }) {
           <p className="text-gray-400 text-sm mt-1">Gerencie clientes e funcionários</p>
         </div>
         <button
-          onClick={activeTab === "clientes" ? openCreateClient : openCreateEmployee}
+          onClick={() => {
+            if (activeTab === "clientes") openCreateClient();
+            else if (activeTab === "funcionarios") openCreateEmployee();
+            else if (activeTab === "fornecedores") openCreateSupplier();
+            else if (activeTab === "produtos") openCreateProduct();
+            else if (activeTab === "estoques") openCreateStock();
+            else if (activeTab === "servicos") openCreateService();
+          }}
           className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition flex items-center gap-2"
         >
-          + {activeTab === "clientes" ? "Novo Cliente" : "Novo Funcionário"}
+          + {{
+            clientes: "Novo Cliente",
+            funcionarios: "Novo Funcionário",
+            fornecedores: "Novo Fornecedor",
+            produtos: "Novo Produto",
+            estoques: "Novo Estoque",
+            servicos: "Novo Serviço",
+          }[activeTab]}
         </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-2">
-        <button
-          onClick={() => { setActiveTab("clientes"); setSearch(""); }}
-          className={`px-4 py-2 text-sm rounded-lg transition ${activeTab === "clientes" ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
-        >
-          👥 Clientes ({clients.length})
-        </button>
-        <button
-          onClick={() => { setActiveTab("funcionarios"); setSearch(""); }}
-          className={`px-4 py-2 text-sm rounded-lg transition ${activeTab === "funcionarios" ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
-        >
-          👷 Funcionários ({employees.length})
-        </button>
+      {/* Tabs — abas de cadastro */}
+      <div className="flex gap-2 flex-wrap">
+        {[
+          { id: "clientes", label: `👥 Clientes (${clients.length})` },
+          { id: "funcionarios", label: `👷 Funcionários (${employees.length})` },
+          { id: "fornecedores", label: `🏭 Fornecedores (${suppliers.length})` },
+          { id: "produtos", label: `📦 Produtos (${products.length})` },
+          { id: "estoques", label: `🗃️ Estoques (${stocks.length})` },
+          { id: "servicos", label: `🛠️ Serviços (${services.length})` },
+        ].map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => {
+              setActiveTab(tab.id);
+              setSearch("");
+              // Fecha modal pendente ao trocar de aba — evita modal de outra entidade reaparecer
+              setModalOpen(false);
+              setEditing(null);
+            }}
+            className={`px-4 py-2 text-sm rounded-lg transition ${activeTab === tab.id ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
       {/* Search */}
@@ -6487,7 +7239,14 @@ function CadastroModule({ user, addToast, reloadData }) {
         <SearchInput
           value={search}
           onChange={setSearch}
-          placeholder={activeTab === "clientes" ? "Buscar por nome, CPF ou telefone..." : "Buscar por nome, CPF ou cargo..."}
+          placeholder={{
+            clientes: "Buscar por nome, CPF ou telefone...",
+            funcionarios: "Buscar por nome, CPF ou cargo...",
+            fornecedores: "Buscar por nome, CNPJ, contato...",
+            produtos: "Buscar por código, nome ou categoria...",
+            estoques: "Buscar por produto, código ou local...",
+            servicos: "Buscar por código, nome ou categoria...",
+          }[activeTab] || "Buscar..."}
         />
       </div>
 
@@ -6519,6 +7278,59 @@ function CadastroModule({ user, addToast, reloadData }) {
           onEdit={openEditEmployee}
           onDelete={user.role === "admin" ? handleDeleteEmployee : undefined}
           emptyMessage="Nenhum funcionário encontrado."
+        />
+      )}
+
+      {/* Fornecedores Tab */}
+      {activeTab === "fornecedores" && (
+        <DataTable
+          columns={supplierColumns}
+          data={filteredSuppliers}
+          onEdit={openEditSupplier}
+          onDelete={canDelete ? (row) => setConfirmDelete(row) : undefined}
+          emptyMessage="Nenhum fornecedor cadastrado."
+        />
+      )}
+
+      {/* Produtos Tab */}
+      {activeTab === "produtos" && (
+        <DataTable
+          columns={productColumns}
+          data={filteredProducts}
+          onEdit={openEditProduct}
+          onDelete={canDelete ? (row) => setConfirmDelete(row) : undefined}
+          emptyMessage="Nenhum produto cadastrado."
+        />
+      )}
+
+      {/* Estoques Tab — botão extra "Movimentar" abre modal de entrada/saída */}
+      {activeTab === "estoques" && (
+        <DataTable
+          columns={stockColumns}
+          data={filteredStocks}
+          onEdit={openEditStock}
+          onDelete={canDelete ? (row) => setConfirmDelete(row) : undefined}
+          actions={(row) => (
+            <button
+              onClick={() => openMovModal(row)}
+              className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition"
+              title="Registrar entrada/saída"
+            >
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" /></svg>
+            </button>
+          )}
+          emptyMessage="Nenhum estoque registrado. Cadastre produtos para gerar registros de estoque."
+        />
+      )}
+
+      {/* Serviços Tab */}
+      {activeTab === "servicos" && (
+        <DataTable
+          columns={serviceColumns}
+          data={filteredServices}
+          onEdit={openEditService}
+          onDelete={canDelete ? (row) => setConfirmDelete(row) : undefined}
+          emptyMessage="Nenhum serviço cadastrado."
         />
       )}
 
@@ -6899,11 +7711,626 @@ function CadastroModule({ user, addToast, reloadData }) {
         </Modal>
       )}
 
-      {/* Confirm Delete */}
+      {/* ─── Modal: Fornecedor ─── */}
+      {activeTab === "fornecedores" && (
+        <Modal isOpen={modalOpen} title={editing ? "Editar Fornecedor" : "Novo Fornecedor"} onClose={() => setModalOpen(false)} size="lg">
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Nome / Razão Social *</label>
+                <input
+                  type="text"
+                  value={supplierForm.nome}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, nome: e.target.value })}
+                  placeholder="Nome do fornecedor"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo</label>
+                <select
+                  value={supplierForm.tipo}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, tipo: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                >
+                  <option value="pj">Pessoa Jurídica</option>
+                  <option value="pf">Pessoa Física</option>
+                </select>
+              </div>
+              <div>
+                {supplierForm.tipo === "pj" ? (
+                  <>
+                    <label className="block text-sm font-medium text-gray-300 mb-1.5">CNPJ</label>
+                    <input
+                      type="text"
+                      value={supplierForm.cnpj}
+                      onChange={(e) => setSupplierForm({ ...supplierForm, cnpj: formatCNPJ(e.target.value) })}
+                      placeholder="00.000.000/0000-00"
+                      maxLength={18}
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <label className="block text-sm font-medium text-gray-300 mb-1.5">CPF</label>
+                    <input
+                      type="text"
+                      value={supplierForm.cpf}
+                      onChange={(e) => setSupplierForm({ ...supplierForm, cpf: formatCPF(e.target.value) })}
+                      placeholder="000.000.000-00"
+                      maxLength={14}
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                    />
+                  </>
+                )}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Inscrição Estadual</label>
+                <input
+                  type="text"
+                  value={supplierForm.ie}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, ie: e.target.value })}
+                  placeholder="ISENTO ou nº IE"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Categoria</label>
+                <select
+                  value={supplierForm.categoria}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, categoria: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                >
+                  {FORNECEDOR_CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Contato</label>
+                <input
+                  type="text"
+                  value={supplierForm.contato}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, contato: e.target.value })}
+                  placeholder="Pessoa de contato"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Telefone *</label>
+                <input
+                  type="text"
+                  value={supplierForm.telefone}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, telefone: formatPhone(e.target.value) })}
+                  placeholder="(00) 00000-0000"
+                  maxLength={15}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Email</label>
+                <input
+                  type="email"
+                  value={supplierForm.email}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, email: e.target.value })}
+                  placeholder="email@fornecedor.com"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+
+            <div className="border-t border-gray-700 pt-4">
+              <h4 className="text-sm font-medium text-gray-300 mb-3">Endereço</h4>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2">
+                  <label className="block text-xs text-gray-400 mb-1">Rua</label>
+                  <input type="text" value={supplierForm.rua} onChange={(e) => setSupplierForm({ ...supplierForm, rua: e.target.value })} className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Número</label>
+                  <input type="text" value={supplierForm.numero} onChange={(e) => setSupplierForm({ ...supplierForm, numero: e.target.value })} className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500" />
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-4 mt-3">
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Bairro</label>
+                  <input type="text" value={supplierForm.bairro} onChange={(e) => setSupplierForm({ ...supplierForm, bairro: e.target.value })} className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">Cidade</label>
+                  <input type="text" value={supplierForm.cidade} onChange={(e) => setSupplierForm({ ...supplierForm, cidade: e.target.value })} className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">UF</label>
+                  <input type="text" value={supplierForm.estado} onChange={(e) => setSupplierForm({ ...supplierForm, estado: e.target.value.toUpperCase().slice(0, 2) })} maxLength={2} className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500" />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-400 mb-1">CEP</label>
+                  <input type="text" value={supplierForm.cep} onChange={(e) => setSupplierForm({ ...supplierForm, cep: formatCEP(e.target.value) })} maxLength={9} className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:border-blue-500" />
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Observações</label>
+                <textarea
+                  value={supplierForm.observacoes}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, observacoes: e.target.value })}
+                  rows={2}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Status</label>
+                <select
+                  value={supplierForm.status}
+                  onChange={(e) => setSupplierForm({ ...supplierForm, status: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                >
+                  <option value="ativo">Ativo</option>
+                  <option value="inativo">Inativo</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+              <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition">Cancelar</button>
+              <button onClick={handleSaveSupplier} className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
+                {editing ? "Salvar Alterações" : "Cadastrar"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── Modal: Produto ─── */}
+      {activeTab === "produtos" && (
+        <Modal isOpen={modalOpen} title={editing ? "Editar Produto" : "Novo Produto"} onClose={() => setModalOpen(false)} size="lg">
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Código (SKU) *</label>
+                <input
+                  type="text"
+                  value={productForm.codigo}
+                  onChange={(e) => setProductForm({ ...productForm, codigo: e.target.value.toUpperCase() })}
+                  placeholder="PRD-0001"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Nome do Produto *</label>
+                <input
+                  type="text"
+                  value={productForm.nome}
+                  onChange={(e) => setProductForm({ ...productForm, nome: e.target.value })}
+                  placeholder="Compressor 1HP"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Categoria</label>
+                <select
+                  value={productForm.categoria}
+                  onChange={(e) => setProductForm({ ...productForm, categoria: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                >
+                  {PRODUTO_CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Unidade</label>
+                <select
+                  value={productForm.unidade}
+                  onChange={(e) => setProductForm({ ...productForm, unidade: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                >
+                  {PRODUTO_UNIDADES.map((u) => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Preço Custo</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={productForm.precoCusto}
+                  onChange={(e) => setProductForm({ ...productForm, precoCusto: e.target.value })}
+                  placeholder="0,00"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Preço Venda</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={productForm.precoVenda}
+                  onChange={(e) => setProductForm({ ...productForm, precoVenda: e.target.value })}
+                  placeholder="0,00"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Código de Barras</label>
+                <input
+                  type="text"
+                  value={productForm.codigoBarras}
+                  onChange={(e) => setProductForm({ ...productForm, codigoBarras: e.target.value.replace(/\D/g, "") })}
+                  placeholder="EAN/GTIN"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">NCM</label>
+                <input
+                  type="text"
+                  value={productForm.ncm}
+                  onChange={(e) => setProductForm({ ...productForm, ncm: e.target.value })}
+                  placeholder="0000.00.00"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Fornecedor</label>
+                <select
+                  value={productForm.fornecedorId}
+                  onChange={(e) => setProductForm({ ...productForm, fornecedorId: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                >
+                  <option value="">— Sem fornecedor —</option>
+                  {suppliers.filter((s) => s.status !== "inativo").map((s) => (
+                    <option key={s.id} value={s.id}>{s.nome}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Descrição</label>
+              <textarea
+                value={productForm.descricao}
+                onChange={(e) => setProductForm({ ...productForm, descricao: e.target.value })}
+                rows={2}
+                placeholder="Detalhes técnicos, modelo, voltagem..."
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Status</label>
+                <select
+                  value={productForm.status}
+                  onChange={(e) => setProductForm({ ...productForm, status: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                >
+                  <option value="ativo">Ativo</option>
+                  <option value="inativo">Inativo</option>
+                </select>
+              </div>
+              {/* Margem calculada automaticamente — apenas leitura */}
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Margem Estimada</label>
+                <div className="w-full bg-gray-900 border border-gray-700 rounded-lg px-4 py-2.5 text-blue-300 text-sm">
+                  {(() => {
+                    const c = parseFloat(String(productForm.precoCusto).replace(",", ".")) || 0;
+                    const v = parseFloat(String(productForm.precoVenda).replace(",", ".")) || 0;
+                    if (c <= 0) return "—";
+                    const m = ((v - c) / c) * 100;
+                    return `${m.toFixed(1)}% (${formatCurrency(v - c)})`;
+                  })()}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+              <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition">Cancelar</button>
+              <button onClick={handleSaveProduct} className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
+                {editing ? "Salvar Alterações" : "Cadastrar"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── Modal: Estoque ─── */}
+      {activeTab === "estoques" && (
+        <Modal isOpen={modalOpen} title={editing ? "Editar Estoque" : "Novo Estoque"} onClose={() => setModalOpen(false)} size="md">
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Produto *</label>
+              <select
+                value={stockForm.produtoId}
+                onChange={(e) => setStockForm({ ...stockForm, produtoId: e.target.value })}
+                disabled={!!editing}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition disabled:opacity-60"
+              >
+                <option value="">Selecione um produto...</option>
+                {products
+                  .filter((p) => editing || !stocks.some((st) => st.produtoId === p.id))
+                  .map((p) => (
+                    <option key={p.id} value={p.id}>{p.codigo} — {p.nome}</option>
+                  ))}
+              </select>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Saldo Atual</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={stockForm.saldo}
+                  onChange={(e) => setStockForm({ ...stockForm, saldo: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Estoque Mínimo</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={stockForm.estoqueMinimo}
+                  onChange={(e) => setStockForm({ ...stockForm, estoqueMinimo: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Estoque Máximo</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={stockForm.estoqueMaximo}
+                  onChange={(e) => setStockForm({ ...stockForm, estoqueMaximo: e.target.value })}
+                  placeholder="Opcional"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Localização</label>
+              <input
+                type="text"
+                value={stockForm.localizacao}
+                onChange={(e) => setStockForm({ ...stockForm, localizacao: e.target.value })}
+                placeholder="Ex: Prateleira A3, Galpão 2..."
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Observações</label>
+              <textarea
+                value={stockForm.observacoes}
+                onChange={(e) => setStockForm({ ...stockForm, observacoes: e.target.value })}
+                rows={2}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
+              />
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+              <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition">Cancelar</button>
+              <button onClick={handleSaveStock} className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
+                {editing ? "Salvar Alterações" : "Cadastrar"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── Modal: Movimentação de Estoque ─── */}
+      {movModal && (
+        <Modal isOpen={!!movModal} title={`Movimentar Estoque — ${movModal.produtoNome}`} onClose={() => setMovModal(null)} size="md">
+          <div className="space-y-4">
+            <div className="bg-gray-700/50 rounded-lg px-4 py-3 text-sm">
+              <p className="text-gray-300">
+                Saldo atual: <strong className="text-white">{movModal.saldo} {movModal.unidade}</strong>
+                {Number(movModal.saldo) <= Number(movModal.estoqueMinimo) && Number(movModal.estoqueMinimo) > 0 && (
+                  <span className="ml-2 text-yellow-400 text-xs">⚠ abaixo do mínimo ({movModal.estoqueMinimo})</span>
+                )}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo</label>
+                <select
+                  value={movForm.tipo}
+                  onChange={(e) => setMovForm({ ...movForm, tipo: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                >
+                  <option value="entrada">{STOCK_MOV_TIPOS.entrada} (compra/recebimento)</option>
+                  <option value="saida">{STOCK_MOV_TIPOS.saida} (uso/venda/perda)</option>
+                  <option value="ajuste">{STOCK_MOV_TIPOS.ajuste} (define saldo)</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Quantidade *</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={movForm.quantidade}
+                  onChange={(e) => setMovForm({ ...movForm, quantidade: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Data</label>
+                <input
+                  type="date"
+                  value={movForm.data}
+                  onChange={(e) => setMovForm({ ...movForm, data: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Motivo</label>
+                <input
+                  type="text"
+                  value={movForm.motivo}
+                  onChange={(e) => setMovForm({ ...movForm, motivo: e.target.value })}
+                  placeholder="NF entrada, OS-123, perda..."
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+
+            {/* Histórico recente */}
+            {movHistory.length > 0 && (
+              <div className="border-t border-gray-700 pt-4">
+                <h4 className="text-sm font-medium text-gray-300 mb-2">Últimas movimentações</h4>
+                <div className="max-h-40 overflow-y-auto bg-gray-900/40 rounded-lg divide-y divide-gray-700">
+                  {movHistory.map((m) => (
+                    <div key={m.id} className="px-3 py-2 text-xs text-gray-300 flex justify-between">
+                      <span>
+                        <span className={`inline-block w-16 ${MOV_TIPO_COLOR[m.tipo] || "text-gray-400"}`}>
+                          {STOCK_MOV_TIPOS[m.tipo]}
+                        </span>
+                        {m.quantidade} · {m.motivo || "—"}
+                      </span>
+                      <span className="text-gray-500">{formatDate(m.data)} · saldo: {m.saldoNovo}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+              <button onClick={() => setMovModal(null)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition">Cancelar</button>
+              <button onClick={handleSaveMov} className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
+                Registrar Movimentação
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* ─── Modal: Serviço ─── */}
+      {activeTab === "servicos" && (
+        <Modal isOpen={modalOpen} title={editing ? "Editar Serviço" : "Novo Serviço"} onClose={() => setModalOpen(false)} size="md">
+          <div className="space-y-4">
+            <div className="grid grid-cols-3 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Código *</label>
+                <input
+                  type="text"
+                  value={serviceForm.codigo}
+                  onChange={(e) => setServiceForm({ ...serviceForm, codigo: e.target.value.toUpperCase() })}
+                  placeholder="SRV-001"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div className="col-span-2">
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Nome do Serviço *</label>
+                <input
+                  type="text"
+                  value={serviceForm.nome}
+                  onChange={(e) => setServiceForm({ ...serviceForm, nome: e.target.value })}
+                  placeholder="Manutenção preventiva de split"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-4 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Categoria</label>
+                <select
+                  value={serviceForm.categoria}
+                  onChange={(e) => setServiceForm({ ...serviceForm, categoria: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                >
+                  {SERVICO_CATEGORIAS.map((c) => <option key={c} value={c}>{c}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Unidade</label>
+                <select
+                  value={serviceForm.unidade}
+                  onChange={(e) => setServiceForm({ ...serviceForm, unidade: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                >
+                  {SERVICO_UNIDADES.map((u) => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Preço Base</label>
+                <input
+                  type="number" step="0.01" min="0"
+                  value={serviceForm.precoBase}
+                  onChange={(e) => setServiceForm({ ...serviceForm, precoBase: e.target.value })}
+                  placeholder="0,00"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Duração (min)</label>
+                <input
+                  type="number" min="0" step="5"
+                  value={serviceForm.duracaoMin}
+                  onChange={(e) => setServiceForm({ ...serviceForm, duracaoMin: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Descrição / Escopo</label>
+              <textarea
+                value={serviceForm.descricao}
+                onChange={(e) => setServiceForm({ ...serviceForm, descricao: e.target.value })}
+                rows={3}
+                placeholder="O que está incluso, ferramentas necessárias, garantias..."
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Status</label>
+              <select
+                value={serviceForm.status}
+                onChange={(e) => setServiceForm({ ...serviceForm, status: e.target.value })}
+                className="w-full max-w-xs bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+              >
+                <option value="ativo">Ativo</option>
+                <option value="inativo">Inativo</option>
+              </select>
+            </div>
+
+            <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+              <button onClick={() => setModalOpen(false)} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition">Cancelar</button>
+              <button onClick={handleSaveService} className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
+                {editing ? "Salvar Alterações" : "Cadastrar"}
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
+
+      {/* Confirm Delete — mensagem e ação dependem da aba ativa */}
       {confirmDelete && (
         <ConfirmDialog
-          message={activeTab === "clientes" ? `Excluir "${confirmDelete.nome || ""}" e todos os registros vinculados (OS, transações, tickets, agendamentos)? Esta ação não pode ser desfeita.` : `Excluir "${confirmDelete.nome || ""}"? Esta ação não pode ser desfeita.`}
-          onConfirm={activeTab === "clientes" ? confirmDeleteClientAction : confirmDeleteEmployeeAction}
+          message={(() => {
+            const nome = confirmDelete.nome || confirmDelete.produtoNome || "";
+            if (activeTab === "clientes") return `Excluir "${nome}" e todos os registros vinculados (OS, transações, tickets, agendamentos)? Esta ação não pode ser desfeita.`;
+            if (activeTab === "produtos") return `Excluir produto "${nome}"? Estoque e movimentações vinculadas também serão removidos.`;
+            if (activeTab === "estoques") return `Excluir registro de estoque de "${nome}" e todas as movimentações? O produto NÃO será excluído.`;
+            return `Excluir "${nome}"? Esta ação não pode ser desfeita.`;
+          })()}
+          onConfirm={() => {
+            if (activeTab === "clientes") return confirmDeleteClientAction();
+            if (activeTab === "funcionarios") return confirmDeleteEmployeeAction();
+            if (activeTab === "fornecedores") return confirmDeleteSupplierAction();
+            if (activeTab === "produtos") return confirmDeleteProductAction();
+            if (activeTab === "estoques") return confirmDeleteStockAction();
+            if (activeTab === "servicos") return confirmDeleteServiceAction();
+          }}
           onCancel={() => setConfirmDelete(null)}
         />
       )}
