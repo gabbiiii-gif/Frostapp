@@ -10504,6 +10504,21 @@ export default function App() {
   const searchRef = useRef(null);
   const lastActivityRef = useRef(Date.now());
 
+  // ─── Load All Data ───
+  // Precisa ser declarado ANTES dos useEffect que o referenciam no array
+  // de deps — caso contrário, o array `[user, loadAllData]` cai no TDZ
+  // durante o primeiro render (TDZ = Temporal Dead Zone, runtime).
+  const loadAllData = useCallback(() => {
+    setData({
+      clients: DB.list("erp:client:"),
+      employees: DB.list("erp:employee:"),
+      services: DB.list("erp:os:"),
+      schedule: DB.list("erp:schedule:"),
+      finance: DB.list("erp:finance:"),
+      config: DB.get("erp:config") || {},
+    });
+  }, []);
+
   // ─── Init com Splash de 3 segundos + restauração de sessão ───
   useEffect(() => {
     // Splash de 3s com fade-out
@@ -10601,18 +10616,6 @@ export default function App() {
       unsubscribe();
     };
   }, [user, loadAllData]);
-
-  // ─── Load All Data ───
-  const loadAllData = useCallback(() => {
-    setData({
-      clients: DB.list("erp:client:"),
-      employees: DB.list("erp:employee:"),
-      services: DB.list("erp:os:"),
-      schedule: DB.list("erp:schedule:"),
-      finance: DB.list("erp:finance:"),
-      config: DB.get("erp:config") || {},
-    });
-  }, []);
 
   // ─── Add Toast ───
   // Timer de remoção fica apenas no componente Toast (via useEffect com clearTimeout)
