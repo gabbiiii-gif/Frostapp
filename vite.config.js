@@ -72,4 +72,10 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 1500,
   },
+  // Configuração do Vitest — happy-dom é mais leve que jsdom e tem WebCrypto
+  test: {
+    environment: 'happy-dom',
+    globals: true,
+    include: ['src/**/*.test.{js,jsx}'],
+  },
 })

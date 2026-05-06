@@ -1,15 +1,31 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from "react";
 import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer
 } from "recharts";
 import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember } from "./supabase.js";
-import Aurora from "./Aurora.jsx";
+// Aurora carrega ogl (WebGL ~30KB). Usado só no login → lazy reduz o bundle inicial.
+const Aurora = lazy(() => import("./Aurora.jsx"));
 import BlurText from "./BlurText.jsx";
 import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
 import { FrostIcon } from "./FrostIcons.jsx";
 import AnimatedLogo from "./AnimatedLogo.jsx";
+import {
+  genId,
+  genSecureToken,
+  sha256Hex,
+  formatCurrency,
+  formatDate,
+  formatDateTime,
+  formatCPF,
+  formatCNPJ,
+  formatPhone,
+  filterByDate,
+  toISODate,
+  daysFromNow,
+  monthsAgo,
+} from "./utils.js";
 
 // Detecta se a URL aponta para um arquivo de vídeo (preview do tecnico)
 const VIDEO_EXT_RE = /\.(mp4|mov|webm|m4v|avi|mkv|ogv|3gp)(\?|$)/i;
@@ -532,108 +548,8 @@ function ensureCompanyMigration() {
 
 // ─── UTILITY FUNCTIONS ─────────────────────────────────────────────────────────
 
-function genId() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2);
-}
-
-// Token criptograficamente seguro (32 bytes em hex) — usado para sessão
-function genSecureToken() {
-  if (crypto?.getRandomValues) {
-    const arr = new Uint8Array(32);
-    crypto.getRandomValues(arr);
-    return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
-  }
-  // Fallback inseguro apenas para ambientes sem WebCrypto (não-HTTPS)
-  return genId() + genId();
-}
-
-// SHA-256 em hex — usado para validar token de sessão sem armazená-lo em claro
-async function sha256Hex(str) {
-  if (!crypto?.subtle) return str;
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-function formatCurrency(value) {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(value || 0);
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return "—";
-  try {
-    // Extrai apenas a parte da data (YYYY-MM-DD) para evitar conversão de fuso horário
-    const datePart = String(dateStr).slice(0, 10);
-    if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
-      const [y, m, d] = datePart.split("-");
-      return `${d}/${m}/${y}`;
-    }
-    return new Date(dateStr).toLocaleDateString("pt-BR");
-  } catch {
-    return dateStr;
-  }
-}
-
-function formatDateTime(dateStr) {
-  if (!dateStr) return "—";
-  try {
-    const d = new Date(dateStr);
-    return d.toLocaleDateString("pt-BR") + " " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  } catch {
-    return dateStr;
-  }
-}
-
-function formatCPF(v) {
-  const d = (v || "").replace(/\D/g, "").slice(0, 11);
-  if (d.length <= 3) return d;
-  if (d.length <= 6) return d.slice(0, 3) + "." + d.slice(3);
-  if (d.length <= 9) return d.slice(0, 3) + "." + d.slice(3, 6) + "." + d.slice(6);
-  return d.slice(0, 3) + "." + d.slice(3, 6) + "." + d.slice(6, 9) + "-" + d.slice(9);
-}
-
-function formatCNPJ(v) {
-  const d = (v || "").replace(/\D/g, "").slice(0, 14);
-  if (d.length <= 2) return d;
-  if (d.length <= 5) return d.slice(0, 2) + "." + d.slice(2);
-  if (d.length <= 8) return d.slice(0, 2) + "." + d.slice(2, 5) + "." + d.slice(5);
-  if (d.length <= 12) return d.slice(0, 2) + "." + d.slice(2, 5) + "." + d.slice(5, 8) + "/" + d.slice(8);
-  return d.slice(0, 2) + "." + d.slice(2, 5) + "." + d.slice(5, 8) + "/" + d.slice(8, 12) + "-" + d.slice(12);
-}
-
-function formatPhone(v) {
-  const d = (v || "").replace(/\D/g, "").slice(0, 11);
-  if (d.length <= 2) return "(" + d;
-  if (d.length <= 7) return "(" + d.slice(0, 2) + ") " + d.slice(2);
-  if (d.length <= 10) return "(" + d.slice(0, 2) + ") " + d.slice(2, 6) + "-" + d.slice(6);
-  return "(" + d.slice(0, 2) + ") " + d.slice(2, 7) + "-" + d.slice(7);
-}
-
-function filterByDate(items, dateField, dateFilter) {
-  if (!dateFilter || dateFilter.period === "all") return items;
-  const now = new Date();
-  let start, end;
-
-  if (dateFilter.period === "custom" && dateFilter.startDate && dateFilter.endDate) {
-    start = new Date(dateFilter.startDate + "T00:00:00");
-    end = new Date(dateFilter.endDate + "T23:59:59");
-  } else {
-    end = new Date(now);
-    end.setHours(23, 59, 59, 999);
-    start = new Date(now);
-    start.setHours(0, 0, 0, 0);
-    const days = { hoje: 0, "7dias": 7, "30dias": 30, "90dias": 90 };
-    const d = days[dateFilter.period] || 0;
-    start.setDate(start.getDate() - d);
-  }
-
-  return items.filter((item) => {
-    const itemDate = new Date(item[dateField]);
-    return itemDate >= start && itemDate <= end;
-  });
-}
+// genId, genSecureToken, sha256Hex, formatCurrency, formatDate, formatDateTime,
+// formatCPF, formatCNPJ, formatPhone, filterByDate — vide src/utils.js
 
 // ─── Hash legado (mantido apenas para migração de senhas antigas) ────────────
 function hashPasswordLegacy(pwd) {
@@ -811,22 +727,7 @@ function hasPermission(user, module) {
   return perms.includes("all") || perms.includes(module);
 }
 
-function toISODate(date) {
-  const d = date instanceof Date ? date : new Date(date);
-  return d.toISOString().split("T")[0];
-}
-
-function daysFromNow(n) {
-  const d = new Date();
-  d.setDate(d.getDate() + n);
-  return toISODate(d);
-}
-
-function monthsAgo(n) {
-  const d = new Date();
-  d.setMonth(d.getMonth() - n);
-  return toISODate(d);
-}
+// toISODate, daysFromNow, monthsAgo — vide src/utils.js
 
 // ─── SEED DATA ──────────────────────────────────────────────────────────────────
 
@@ -1818,13 +1719,15 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
         </button>
       )}
 
-      {/* Aurora animated background */}
+      {/* Aurora animated background — lazy + suspense (fallback transparente) */}
       <div style={{ position: 'absolute', inset: 0, zIndex: 0, opacity: isLight ? 0.55 : 1 }}>
-        <Aurora
-          colorStops={auroraColors}
-          amplitude={1}
-          blend={isLight ? 0.6 : 0.43}
-        />
+        <Suspense fallback={null}>
+          <Aurora
+            colorStops={auroraColors}
+            amplitude={1}
+            blend={isLight ? 0.6 : 0.43}
+          />
+        </Suspense>
       </div>
       <div className="w-full max-w-md animate-slideIn" style={{ position: 'relative', zIndex: 1 }}>
         <div
@@ -2115,7 +2018,9 @@ function FirstUserSetup({ onComplete }) {
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4" style={{ position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", inset: 0, zIndex: 0 }}>
-        <Aurora colorStops={["#4e487f", "#433a5f", "#5227FF"]} amplitude={1} blend={0.43} />
+        <Suspense fallback={null}>
+          <Aurora colorStops={["#4e487f", "#433a5f", "#5227FF"]} amplitude={1} blend={0.43} />
+        </Suspense>
       </div>
       <div className="w-full max-w-md animate-slideIn" style={{ position: "relative", zIndex: 1 }}>
         <div className="bg-gray-800/80 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-700 p-8">
