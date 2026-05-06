@@ -3820,6 +3820,19 @@ function _fmtBRL(n) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(n) || 0);
 }
 
+// Escape HTML — qualquer valor vindo de usuário (nome de cliente, descrição de OS,
+// modelo de equipamento, etc.) DEVE passar por aqui antes de ir para template literal
+// que será injetado via document.write. Sem isso, "<script>" no nome do cliente vira XSS.
+function _h(v) {
+  if (v == null) return "";
+  return String(v)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 // Estilos CSS compartilhados — design tokens, print-first (A4)
 function _docStyles(accentColor = "#1d4ed8") {
   return `
@@ -3943,23 +3956,25 @@ function _docStyles(accentColor = "#1d4ed8") {
 
 // Header reutilizável — identidade da empresa + badge do documento
 function _docHeader(config, docType, numero, dataStr) {
+  // Todos os campos de config vêm do banco e podem ter sido cadastrados com markup —
+  // por isso, escape sempre antes de injetar.
   const emp = config.nomeEmpresa || "FrostERP Refrigeração";
   const cnpj = config.cnpj ? `CNPJ ${config.cnpj}` : "";
   const tel = config.telefone ? `Tel ${config.telefone}` : "";
   const email = config.email || "";
   const end = config.endereco || "";
-  const contactLine = [cnpj, tel, email, end].filter(Boolean).join(" · ");
+  const contactLine = [cnpj, tel, email, end].filter(Boolean).map(_h).join(" · ");
   return `
     <div class="hdr">
       <div class="hdr-brand">
-        <div class="company">${emp}</div>
+        <div class="company">${_h(emp)}</div>
         <div class="tagline">Refrigeração e Climatização</div>
         ${contactLine ? `<div class="contact">${contactLine}</div>` : ""}
       </div>
       <div class="hdr-doc">
-        <div class="doc-type">${docType}</div>
-        <div class="doc-num">${numero}</div>
-        <div class="doc-date">${dataStr}</div>
+        <div class="doc-type">${_h(docType)}</div>
+        <div class="doc-num">${_h(numero)}</div>
+        <div class="doc-date">${_h(dataStr)}</div>
       </div>
     </div>
   `;
@@ -4016,7 +4031,7 @@ function generateOrcamentoHTML(os, clients) {
   const equip = _equipamentoDescricao(os);
   const equipText = [equip.tipoLabel, equip.modelo, equip.capLabel].filter(Boolean).join(" · ") || "—";
 
-  // Monta linhas da tabela: serviços + peças
+  // Monta linhas da tabela: serviços + peças (todos os campos de usuário escapados)
   const servicos = Array.isArray(os.servicos) && os.servicos.length > 0
     ? os.servicos
     : [{ tipo: os.tipo, descricao: os.equipamentoModelo || "Serviço de Refrigeração", valor: valorServico }];
@@ -4025,8 +4040,8 @@ function generateOrcamentoHTML(os, clients) {
   const rowsServicos = servicos.map((s) => {
     const v = Number(s.valor) || 0;
     const desc = s.descricao
-      ? `<strong style="color:var(--ink-900)">${s.tipo}</strong><div style="font-size:11px;color:var(--ink-500);margin-top:2px">${s.descricao}</div>`
-      : `<strong style="color:var(--ink-900)">${s.tipo}</strong>`;
+      ? `<strong style="color:var(--ink-900)">${_h(s.tipo)}</strong><div style="font-size:11px;color:var(--ink-500);margin-top:2px">${_h(s.descricao)}</div>`
+      : `<strong style="color:var(--ink-900)">${_h(s.tipo)}</strong>`;
     return `<tr><td>${desc}</td><td class="num">1</td><td class="num">${_fmtBRL(v)}</td><td class="num">${_fmtBRL(v)}</td></tr>`;
   }).join("");
 
@@ -4036,7 +4051,7 @@ function generateOrcamentoHTML(os, clients) {
     const sub = qtd * valU;
     const valStr = valU > 0 ? _fmtBRL(valU) : "—";
     const subStr = valU > 0 ? _fmtBRL(sub) : "<span class=\"muted\">Incluso</span>";
-    return `<tr><td>${p.nome || "Material"}</td><td class="num">${qtd}</td><td class="num">${valStr}</td><td class="num">${subStr}</td></tr>`;
+    return `<tr><td>${_h(p.nome || "Material")}</td><td class="num">${qtd}</td><td class="num">${valStr}</td><td class="num">${subStr}</td></tr>`;
   }).join("");
 
   const totServ = servicos.reduce((acc, s) => acc + (Number(s.valor) || 0), 0);
@@ -4062,19 +4077,19 @@ function generateOrcamentoHTML(os, clients) {
         <div class="info-card">
           <div class="section-title" style="margin-bottom:10px">Cliente</div>
           <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
-            <div class="info-item"><label>Nome / Razão Social</label><span>${cliente.nome || os.clienteNome || "—"}</span></div>
-            <div class="info-item mono"><label>Documento</label><span>${docCliente}</span></div>
-            <div class="info-item mono"><label>Telefone</label><span>${cliente.telefone || "—"}</span></div>
-            <div class="info-item"><label>Email</label><span>${cliente.email || "—"}</span></div>
+            <div class="info-item"><label>Nome / Razão Social</label><span>${_h(cliente.nome || os.clienteNome || "—")}</span></div>
+            <div class="info-item mono"><label>Documento</label><span>${_h(docCliente)}</span></div>
+            <div class="info-item mono"><label>Telefone</label><span>${_h(cliente.telefone || "—")}</span></div>
+            <div class="info-item"><label>Email</label><span>${_h(cliente.email || "—")}</span></div>
           </div>
         </div>
         <div class="info-card">
           <div class="section-title" style="margin-bottom:10px">Serviço</div>
           <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
-            <div class="info-item"><label>Tipo</label><span>${os.tipo || "—"}</span></div>
-            <div class="info-item"><label>Endereço de Execução</label><span>${endCliente}</span></div>
-            <div class="info-item"><label>Equipamento</label><span>${equipText}</span></div>
-            <div class="info-item"><label>Técnico Responsável</label><span>${os.tecnicoNome || "—"}</span></div>
+            <div class="info-item"><label>Tipo</label><span>${_h(os.tipo || "—")}</span></div>
+            <div class="info-item"><label>Endereço de Execução</label><span>${_h(endCliente)}</span></div>
+            <div class="info-item"><label>Equipamento</label><span>${_h(equipText)}</span></div>
+            <div class="info-item"><label>Técnico Responsável</label><span>${_h(os.tecnicoNome || "—")}</span></div>
           </div>
         </div>
       </div>
@@ -4110,21 +4125,21 @@ function generateOrcamentoHTML(os, clients) {
     ${os.observacoes ? `
     <div class="section">
       <div class="section-title">Observações</div>
-      <div class="obs-box">${os.observacoes}</div>
+      <div class="obs-box">${_h(os.observacoes)}</div>
     </div>` : ""}
 
     <div class="terms">
       <strong>Condições do Orçamento</strong>
-      Validade até <strong style="color:var(--ink-900)">${validade}</strong>. Garantia de serviço de 90 dias. Equipamentos com garantia do fabricante. Valores sujeitos a alteração após vistoria técnica no local.
+      Validade até <strong style="color:var(--ink-900)">${_h(validade)}</strong>. Garantia de serviço de 90 dias. Equipamentos com garantia do fabricante. Valores sujeitos a alteração após vistoria técnica no local.
     </div>
 
     <div class="signatures">
       <div class="sig">
-        <div class="name">${config.nomeEmpresa || "FrostERP Refrigeração"}</div>
+        <div class="name">${_h(config.nomeEmpresa || "FrostERP Refrigeração")}</div>
         <div class="role">Responsável Técnico</div>
       </div>
       <div class="sig">
-        <div class="name">${cliente.nome || os.clienteNome || "Cliente"}</div>
+        <div class="name">${_h(cliente.nome || os.clienteNome || "Cliente")}</div>
         <div class="role">Aceite do Orçamento</div>
       </div>
     </div>
@@ -4168,8 +4183,8 @@ function generateOSHTML(os, clients) {
   const rowsServicos = servicos ? servicos.map((s) => {
     const v = Number(s.valor) || 0;
     return `<tr>
-      <td><strong style="color:var(--ink-900)">${s.tipo || "—"}</strong></td>
-      <td class="muted">${s.descricao || "—"}</td>
+      <td><strong style="color:var(--ink-900)">${_h(s.tipo || "—")}</strong></td>
+      <td class="muted">${_h(s.descricao || "—")}</td>
       <td class="num">${_fmtBRL(v)}</td>
     </tr>`;
   }).join("") : "";
@@ -4179,7 +4194,7 @@ function generateOSHTML(os, clients) {
     const valU = Number(i.valorUnit) || 0;
     const sub = qtd * valU;
     return `<tr>
-      <td>${i.nome || "—"}</td>
+      <td>${_h(i.nome || "—")}</td>
       <td class="num">${qtd}</td>
       <td class="num">${valU > 0 ? _fmtBRL(valU) : "—"}</td>
       <td class="num">${valU > 0 ? _fmtBRL(sub) : "—"}</td>
@@ -4205,18 +4220,18 @@ function generateOSHTML(os, clients) {
         <div class="info-card">
           <div class="section-title" style="margin-bottom:10px">Cliente</div>
           <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
-            <div class="info-item"><label>Nome</label><span>${cliente.nome || os.clienteNome || "—"}</span></div>
-            <div class="info-item mono"><label>Telefone</label><span>${cliente.telefone || "—"}</span></div>
-            <div class="info-item"><label>Endereço de Atendimento</label><span>${enderecoFinal}</span></div>
+            <div class="info-item"><label>Nome</label><span>${_h(cliente.nome || os.clienteNome || "—")}</span></div>
+            <div class="info-item mono"><label>Telefone</label><span>${_h(cliente.telefone || "—")}</span></div>
+            <div class="info-item"><label>Endereço de Atendimento</label><span>${_h(enderecoFinal)}</span></div>
           </div>
         </div>
         <div class="info-card">
           <div class="section-title" style="margin-bottom:10px">Execução</div>
           <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
-            <div class="info-item"><label>Status</label><span><span class="badge ${statusClass}">${statusLabel}</span></span></div>
-            <div class="info-item"><label>Técnico</label><span>${os.tecnicoNome || "—"}</span></div>
-            <div class="info-item mono"><label>Data Agendada</label><span>${dataAgendada}</span></div>
-            <div class="info-item"><label>Tipo</label><span>${os.tipo || "—"}</span></div>
+            <div class="info-item"><label>Status</label><span><span class="badge ${statusClass}">${_h(statusLabel)}</span></span></div>
+            <div class="info-item"><label>Técnico</label><span>${_h(os.tecnicoNome || "—")}</span></div>
+            <div class="info-item mono"><label>Data Agendada</label><span>${_h(dataAgendada)}</span></div>
+            <div class="info-item"><label>Tipo</label><span>${_h(os.tipo || "—")}</span></div>
           </div>
         </div>
       </div>
@@ -4227,9 +4242,9 @@ function generateOSHTML(os, clients) {
       <div class="section-title">Equipamento</div>
       <div class="info-card">
         <div class="info-grid">
-          <div class="info-item"><label>Tipo</label><span>${equip.tipoLabel}</span></div>
-          <div class="info-item"><label>Modelo / Marca</label><span>${equip.modelo || "—"}</span></div>
-          ${equip.capLabel ? `<div class="info-item mono"><label>Capacidade</label><span>${equip.capLabel}</span></div>` : ""}
+          <div class="info-item"><label>Tipo</label><span>${_h(equip.tipoLabel)}</span></div>
+          <div class="info-item"><label>Modelo / Marca</label><span>${_h(equip.modelo || "—")}</span></div>
+          ${equip.capLabel ? `<div class="info-item mono"><label>Capacidade</label><span>${_h(equip.capLabel)}</span></div>` : ""}
         </div>
       </div>
     </div>` : ""}
@@ -4250,7 +4265,7 @@ function generateOSHTML(os, clients) {
     </div>` : `
     <div class="section">
       <div class="section-title">Descrição do Serviço</div>
-      <div class="obs-box">${os.descricao || os.observacoes || "Sem descrição informada."}</div>
+      <div class="obs-box">${_h(os.descricao || os.observacoes || "Sem descrição informada.")}</div>
     </div>`}
 
     ${pecas.length > 0 ? `
@@ -4287,16 +4302,16 @@ function generateOSHTML(os, clients) {
     ${os.observacoes ? `
     <div class="section">
       <div class="section-title">Observações</div>
-      <div class="obs-box">${os.observacoes}</div>
+      <div class="obs-box">${_h(os.observacoes)}</div>
     </div>` : ""}
 
     <div class="signatures">
       <div class="sig">
-        <div class="name">${os.tecnicoNome || "—"}</div>
+        <div class="name">${_h(os.tecnicoNome || "—")}</div>
         <div class="role">Técnico Responsável</div>
       </div>
       <div class="sig">
-        <div class="name">${cliente.nome || os.clienteNome || "Cliente"}</div>
+        <div class="name">${_h(cliente.nome || os.clienteNome || "Cliente")}</div>
         <div class="role">Ciente do Serviço</div>
       </div>
     </div>
@@ -4350,18 +4365,18 @@ function generateReciboHTML(os, clients) {
         <div class="info-card">
           <div class="section-title" style="margin-bottom:10px">Recebemos de</div>
           <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
-            <div class="info-item"><label>Nome / Razão Social</label><span>${cliente.nome || os.clienteNome || "—"}</span></div>
-            <div class="info-item mono"><label>Telefone</label><span>${cliente.telefone || "—"}</span></div>
-            <div class="info-item"><label>Endereço</label><span>${enderecoFinal}</span></div>
+            <div class="info-item"><label>Nome / Razão Social</label><span>${_h(cliente.nome || os.clienteNome || "—")}</span></div>
+            <div class="info-item mono"><label>Telefone</label><span>${_h(cliente.telefone || "—")}</span></div>
+            <div class="info-item"><label>Endereço</label><span>${_h(enderecoFinal)}</span></div>
           </div>
         </div>
         <div class="info-card">
           <div class="section-title" style="margin-bottom:10px">Referente a</div>
           <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
-            <div class="info-item"><label>Serviço</label><span>${os.tipo || "—"}</span></div>
-            ${equipText ? `<div class="info-item"><label>Equipamento</label><span>${equipText}</span></div>` : ""}
-            <div class="info-item"><label>Técnico Responsável</label><span>${os.tecnicoNome || "—"}</span></div>
-            <div class="info-item mono"><label>Data de Conclusão</label><span>${dataConclusao}</span></div>
+            <div class="info-item"><label>Serviço</label><span>${_h(os.tipo || "—")}</span></div>
+            ${equipText ? `<div class="info-item"><label>Equipamento</label><span>${_h(equipText)}</span></div>` : ""}
+            <div class="info-item"><label>Técnico Responsável</label><span>${_h(os.tecnicoNome || "—")}</span></div>
+            <div class="info-item mono"><label>Data de Conclusão</label><span>${_h(dataConclusao)}</span></div>
           </div>
         </div>
       </div>
@@ -4370,7 +4385,7 @@ function generateReciboHTML(os, clients) {
     ${os.observacoes || os.descricao ? `
     <div class="section">
       <div class="section-title">Descrição</div>
-      <div class="obs-box">${os.descricao || os.observacoes}</div>
+      <div class="obs-box">${_h(os.descricao || os.observacoes)}</div>
     </div>` : ""}
 
     <div class="terms">
@@ -4380,11 +4395,11 @@ function generateReciboHTML(os, clients) {
 
     <div class="signatures">
       <div class="sig">
-        <div class="name">${config.nomeEmpresa || "FrostERP Refrigeração"}</div>
+        <div class="name">${_h(config.nomeEmpresa || "FrostERP Refrigeração")}</div>
         <div class="role">Prestador do Serviço</div>
       </div>
       <div class="sig">
-        <div class="name">${cliente.nome || os.clienteNome || "Cliente"}</div>
+        <div class="name">${_h(cliente.nome || os.clienteNome || "Cliente")}</div>
         <div class="role">Recebimento e Aprovação</div>
       </div>
     </div>
