@@ -3871,6 +3871,16 @@ function _fmtBRL(n) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(n) || 0);
 }
 
+// Resolve URL para absoluto. Documentos abertos via Blob URL não conseguem
+// carregar caminhos relativos (`/qr.jpeg`) porque a base é blob:... — então
+// transformamos em http(s)://host/path antes de injetar no HTML.
+function _absUrl(url) {
+  if (!url) return "";
+  if (/^(https?:|data:|blob:)/i.test(url)) return url;
+  try { return new URL(url, window.location.origin).href; }
+  catch { return url; }
+}
+
 // Escape HTML — qualquer valor vindo de usuário (nome de cliente, descrição de OS,
 // modelo de equipamento, etc.) DEVE passar por aqui antes de ir para template literal
 // que será injetado via document.write. Sem isso, "<script>" no nome do cliente vira XSS.
@@ -3911,16 +3921,16 @@ function _docStyles(accentColor = "#1d4ed8") {
     .page{max-width:760px;margin:0 auto;background:var(--surface);border-radius:4px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.08);overflow:hidden}
     .page-inner{padding:36px 44px}
 
-    /* ─── Header: logo + identidade centralizada + badge do documento ──── */
-    .hdr{display:flex;flex-direction:column;align-items:center;gap:8px;padding-bottom:20px;border-bottom:2px solid var(--accent);text-align:center}
-    .hdr-logo{max-width:120px;max-height:90px;object-fit:contain;margin-bottom:4px}
-    .hdr-brand{width:100%}
-    .hdr-brand .company{font-size:20px;font-weight:800;color:var(--ink-900);letter-spacing:-0.01em;line-height:1.2}
-    .hdr-brand .tagline{font-size:11.5px;color:var(--ink-500);margin-top:2px;font-weight:500;letter-spacing:.02em}
-    .hdr-brand .contact{font-size:10.5px;color:var(--ink-500);margin-top:6px;line-height:1.6;max-width:600px;margin-left:auto;margin-right:auto}
-    .hdr-doc{margin-top:10px;padding-top:10px;border-top:1px dashed var(--ink-300);width:100%;display:flex;flex-direction:column;align-items:center;gap:2px}
-    .hdr-doc .doc-type{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--accent)}
-    .hdr-doc .doc-num{font-size:22px;font-weight:800;color:var(--ink-900);letter-spacing:-0.02em;tab-size:2;font-variant-numeric:tabular-nums}
+    /* ─── Header: logo + identidade centralizada; doc info no canto superior direito ──── */
+    .hdr{position:relative;display:flex;flex-direction:column;align-items:center;gap:10px;padding-bottom:20px;border-bottom:2px solid var(--accent);text-align:center}
+    .hdr-logo{max-width:200px;max-height:140px;object-fit:contain;margin-bottom:4px}
+    .hdr-brand{width:100%;padding:0 140px}
+    .hdr-brand .company{font-size:22px;font-weight:800;color:var(--ink-900);letter-spacing:-0.01em;line-height:1.2}
+    .hdr-brand .tagline{font-size:12px;color:var(--ink-500);margin-top:2px;font-weight:500;letter-spacing:.02em}
+    .hdr-brand .contact{font-size:10.5px;color:var(--ink-500);margin-top:6px;line-height:1.6;max-width:560px;margin-left:auto;margin-right:auto}
+    .hdr-doc{position:absolute;top:0;right:0;text-align:right;padding:10px 14px;background:var(--ink-50);border:1px solid var(--ink-300);border-radius:8px;display:flex;flex-direction:column;gap:2px;min-width:140px}
+    .hdr-doc .doc-type{font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--accent)}
+    .hdr-doc .doc-num{font-size:18px;font-weight:800;color:var(--ink-900);letter-spacing:-0.02em;tab-size:2;font-variant-numeric:tabular-nums;line-height:1.1}
     .hdr-doc .doc-date{font-size:10.5px;color:var(--ink-500);font-variant-numeric:tabular-nums}
 
     /* ─── Seção genérica ──────────────────────────────────────────────── */
@@ -4026,10 +4036,12 @@ function _docHeader(config, docType, numero, dataStr) {
       logoUrl = company?.logoUrl || "";
     }
   }
+  // Documento abre em Blob URL — caminhos relativos não resolvem
+  const logoAbs = _absUrl(logoUrl);
 
   return `
     <div class="hdr">
-      ${logoUrl ? `<img class="hdr-logo" src="${_h(logoUrl)}" alt="Logo ${_h(emp)}" />` : ""}
+      ${logoAbs ? `<img class="hdr-logo" src="${_h(logoAbs)}" alt="Logo ${_h(emp)}" />` : ""}
       <div class="hdr-brand">
         <div class="company">${_h(emp)}</div>
         <div class="tagline">Refrigeração e Climatização</div>
@@ -4064,14 +4076,14 @@ function _pixBlock(config) {
   const tipoChave = cfg.pixTipoChave || "CNPJ";
   const favorecido = cfg.pixFavorecido || "THIAGO GONÇALVES PRADO";
   const banco = cfg.pixBanco || "Sicredi";
-  const qrUrl = cfg.pixQrUrl || "/qr-pix-sicredi.jpeg";
+  const qrUrl = _absUrl(cfg.pixQrUrl || "/qr-pix-sicredi.jpeg");
 
   return `
     <div class="section">
       <div class="info-card" style="border-left:3px solid var(--accent)">
         <div class="section-title" style="margin-bottom:10px">Pagamento via PIX</div>
         <div style="display:flex;gap:18px;align-items:center">
-          ${qrUrl ? `<img src="${_h(qrUrl)}" alt="QR Code PIX" style="width:120px;height:120px;object-fit:contain;border:1px solid var(--ink-300);border-radius:6px;background:#fff;padding:4px;flex-shrink:0" />` : ""}
+          ${qrUrl ? `<img src="${_h(qrUrl)}" alt="QR Code PIX" style="width:140px;height:140px;object-fit:contain;border:1px solid var(--ink-300);border-radius:6px;background:#fff;padding:4px;flex-shrink:0" />` : ""}
           <div style="flex:1;min-width:0">
             <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
               <div class="info-item mono"><label>Chave PIX (${_h(tipoChave)})</label><span>${_h(chave)}</span></div>
@@ -4257,8 +4269,8 @@ ${_actionBar()}
 }
 
 // Gera HTML da Ordem de Serviço — versão compacta para apresentar ao cliente.
-// Mostra apenas: cliente, serviços executados, materiais com preços, total,
-// garantia e PIX. Sem assinaturas, sem status, sem cards de execução.
+// Mostra apenas: cliente, serviços executados, materiais com preços, total
+// e garantia. Sem PIX (PIX só aparece em Orçamento e Recibo). Sem assinaturas.
 function generateOSHTML(os, clients) {
   const config = DB.get("erp:config") || {};
   const cliente = (clients || []).find((c) => c.id === os.clienteId) || {};
@@ -4356,8 +4368,6 @@ function generateOSHTML(os, clients) {
       Serviço com garantia de 90 dias contados a partir da execução, cobrindo defeitos de execução. Equipamentos seguem garantia do fabricante conforme manual. Não cobre danos por mau uso, sobrecarga elétrica, sinistros ou falta de manutenção periódica.
     </div>
 
-    ${_pixBlock(config)}
-
     <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
 </main>
@@ -4366,7 +4376,8 @@ ${_actionBar()}
 }
 
 // Gera HTML do Recibo — versão compacta com valor em destaque.
-// Mostra apenas: cliente, serviços executados, materiais com preços, garantia e PIX.
+// Mostra: cliente, serviços executados, materiais com preços, garantia,
+// PIX (chave + QR Code) e mensagem de agradecimento.
 function generateReciboHTML(os, clients) {
   const config = DB.get("erp:config") || {};
   const cliente = (clients || []).find((c) => c.id === os.clienteId) || {};
@@ -4464,6 +4475,8 @@ function generateReciboHTML(os, clients) {
       <strong>Garantia</strong>
       Este serviço possui garantia de 90 dias contados a partir da data de conclusão, cobrindo defeitos de execução. Equipamentos seguem garantia do fabricante conforme manual do produto. Não cobre danos por mau uso, sobrecargas elétricas, sinistros ou falta de manutenção periódica.
     </div>
+
+    ${_pixBlock(config)}
 
     ${_agradecimentoBlock(config)}
 
@@ -9713,7 +9726,7 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
           {/* ─── PIX (Orçamento + OS) ────────────────────────────────────────── */}
           <div className="border-t border-gray-700 pt-4">
             <h4 className="text-base font-semibold text-white mb-1">Chave PIX e QR Code</h4>
-            <p className="text-xs text-gray-500 mb-3">Esses dados aparecem no Orçamento e na Ordem de Serviço (não aparecem no Recibo).</p>
+            <p className="text-xs text-gray-500 mb-3">Esses dados aparecem no Orçamento e no Recibo (não aparecem na Ordem de Serviço).</p>
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo da Chave</label>
