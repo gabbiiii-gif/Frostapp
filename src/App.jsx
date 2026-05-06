@@ -4398,8 +4398,32 @@ ${_actionBar()}
 
 // ─── PROCESS MODULE (OS) ────────────────────────────────────────────────────
 
-function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
+function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadData }) {
   const [orders, setOrders] = useState([]);
+  // ─── Cadastros integrados (produtos/estoque/serviços) ──────────────────
+  // Carregamos os catálogos do DB para alimentar os pickers da OS:
+  // serviço cadastrado vira opção pré-preenchida no card "Serviço";
+  // produto cadastrado idem para "Peça/Material" — e também valida saldo de estoque.
+  const [products, setProducts] = useState([]);
+  const [stocks, setStocks] = useState([]);
+  const [serviceCatalog, setServiceCatalog] = useState([]);
+  const reloadCatalogs = useCallback(() => {
+    setProducts(DB.list("erp:product:"));
+    setStocks(DB.list("erp:stock:"));
+    setServiceCatalog(DB.list("erp:service:"));
+  }, []);
+  useEffect(() => { reloadCatalogs(); }, [reloadCatalogs]);
+  // Index por id evita lookup O(N*M) nos pickers
+  const productById = useMemo(() => {
+    const m = new Map();
+    products.forEach((p) => m.set(p.id, p));
+    return m;
+  }, [products]);
+  const stockByProductId = useMemo(() => {
+    const m = new Map();
+    stocks.forEach((s) => m.set(s.produtoId, s));
+    return m;
+  }, [stocks]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -4455,6 +4479,8 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
   // Cada serviço tem seu próprio tipo de equipamento — uma OS pode ter
   // múltiplos serviços, cada um para um equipamento diferente.
   const emptyServico = {
+    // servicoId opcional: quando preenchido, vincula a um serviço cadastrado em erp:service:
+    servicoId: "",
     tipo: "Instalação",
     descricao: "",
     valor: "",
@@ -4462,8 +4488,9 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     equipamentoModelo: "",
     equipamentoCapacidade: "",
   };
-  // Peças/materiais: nome obrigatório, quantidade e valor unitário opcionais
-  const emptyPeca = { nome: "", quantidade: "1", valorUnit: "" };
+  // Peças/materiais: nome obrigatório, quantidade e valor unitário opcionais.
+  // produtoId/stockId opcionais: quando preenchidos, baixa automática no estoque ao salvar a OS.
+  const emptyPeca = { produtoId: "", stockId: "", nome: "", quantidade: "1", valorUnit: "" };
   const emptyForm = {
     clienteId: "", endereco: "",
     servicos: [{ ...emptyServico }],
@@ -4565,6 +4592,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     // Equipamento por serviço: se vier vazio, herda do top-level (compat com OS antigas).
     const servicos = Array.isArray(row.servicos) && row.servicos.length > 0
       ? row.servicos.map((s) => ({
+          servicoId: s.servicoId || "",
           tipo: s.tipo || "Instalação",
           descricao: s.descricao || "",
           valor: s.valor !== undefined && s.valor !== null ? String(s.valor) : "",
@@ -4573,6 +4601,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
           equipamentoCapacidade: s.equipamentoCapacidade || row.equipamentoCapacidade || row.equipamentoBTUs || "",
         }))
       : [{
+          servicoId: "",
           tipo: row.tipo || "Instalação",
           descricao: row.descricao || "",
           valor: row.valor !== undefined && row.valor !== null ? String(row.valor) : "",
@@ -4580,15 +4609,19 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
           equipamentoModelo: row.equipamentoModelo || "",
           equipamentoCapacidade: row.equipamentoCapacidade || row.equipamentoBTUs || "",
         }];
-    // Peças: estrutura { nome, quantidade, valorUnit } — migra itensUtilizados antigo
+    // Peças: estrutura { produtoId, stockId, nome, quantidade, valorUnit } — migra itensUtilizados antigo
     const pecas = Array.isArray(row.pecas) && row.pecas.length > 0
       ? row.pecas.map((p) => ({
+          produtoId: p.produtoId || "",
+          stockId: p.stockId || "",
           nome: p.nome || "",
           quantidade: p.quantidade !== undefined && p.quantidade !== null ? String(p.quantidade) : "1",
           valorUnit: p.valorUnit !== undefined && p.valorUnit !== null ? String(p.valorUnit) : "",
         }))
       : Array.isArray(row.itensUtilizados) && row.itensUtilizados.length > 0
         ? row.itensUtilizados.map((i) => ({
+            produtoId: "",
+            stockId: "",
             nome: i.nome || "",
             quantidade: i.quantidade !== undefined && i.quantidade !== null ? String(i.quantidade) : "1",
             valorUnit: i.valorUnit !== undefined && i.valorUnit !== null ? String(i.valorUnit) : "",
@@ -4611,6 +4644,8 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     // Normaliza os serviços removendo entradas totalmente vazias
     const servicosLimpos = (form.servicos || [])
       .map((s) => ({
+        // Mantém vínculo com serviço cadastrado quando informado
+        servicoId: s.servicoId || "",
         tipo: (s.tipo || "").trim(),
         descricao: (s.descricao || "").trim(),
         valor: parseFloat(String(s.valor || "0").replace(",", ".")) || 0,
@@ -4629,11 +4664,51 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     // Normaliza peças/materiais — só mantém linhas com nome preenchido
     const pecasLimpas = (form.pecas || [])
       .map((p) => ({
+        produtoId: p.produtoId || "",
+        stockId: p.stockId || "",
         nome: (p.nome || "").trim(),
         quantidade: parseFloat(String(p.quantidade || "1").replace(",", ".")) || 1,
         valorUnit: parseFloat(String(p.valorUnit || "0").replace(",", ".")) || 0,
       }))
       .filter((p) => p.nome);
+
+    // ─── Validação e cálculo do delta de estoque (peças com produtoId) ──────
+    // Para cada produto, comparamos quantidade nova vs quantidade atual da OS
+    // (apenas no modo edição). Saldo deve cobrir o consumo adicional.
+    const prevPecasByProd = new Map();
+    if (editing && Array.isArray(editing.pecas)) {
+      editing.pecas.forEach((p) => {
+        if (p.produtoId) {
+          prevPecasByProd.set(p.produtoId, (prevPecasByProd.get(p.produtoId) || 0) + (Number(p.quantidade) || 0));
+        }
+      });
+    }
+    const newPecasByProd = new Map();
+    pecasLimpas.forEach((p) => {
+      if (p.produtoId) {
+        newPecasByProd.set(p.produtoId, (newPecasByProd.get(p.produtoId) || 0) + p.quantidade);
+      }
+    });
+    const allProdIds = new Set([...prevPecasByProd.keys(), ...newPecasByProd.keys()]);
+    const stockOps = []; // {stk, delta, prod}
+    for (const pid of allProdIds) {
+      const prev = prevPecasByProd.get(pid) || 0;
+      const next = newPecasByProd.get(pid) || 0;
+      const delta = next - prev; // >0 = saída adicional; <0 = devolução
+      if (delta === 0) continue;
+      const stk = stocks.find((s) => s.produtoId === pid);
+      const prod = productById.get(pid);
+      if (!stk) {
+        addToast(`Produto ${prod?.nome || ''} não possui estoque cadastrado.`, "error");
+        return;
+      }
+      const saldoAtual = Number(stk.saldo) || 0;
+      if (delta > 0 && delta > saldoAtual) {
+        addToast(`Saldo insuficiente para ${prod?.nome || 'produto'}. Disponível: ${saldoAtual}`, "error");
+        return;
+      }
+      stockOps.push({ stk, delta, prod });
+    }
 
     const cliente = (allClients || []).find((c) => c.id === form.clienteId);
     const tecnico = tecnicos.find((t) => t.id === form.tecnicoId);
@@ -4658,6 +4733,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
     const equipCapacidade = primeiro.equipamentoCapacidade || "";
     const equipBTUs = formEquipTipo === "central" ? equipCapacidade : "";
 
+    let osNumeroNovo = "";
     if (editing) {
       const updated = {
         ...editing,
@@ -4686,6 +4762,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
       addToast("OS atualizada.", "success");
     } else {
       const numero = getNextNumber("OS", orders);
+      osNumeroNovo = numero; // captura para o log do estoque
       const newOS = {
         id: genId(),
         numero,
@@ -4716,9 +4793,39 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
       addToast(`Ordem de Serviço ${numero} criada com sucesso.`, "success");
     }
 
+    // ─── Aplica baixas/devoluções no estoque após salvar a OS ──────────────
+    // Cada operação registra também histórico em erp:stockMov para rastreio.
+    const osNumeroLog = editing ? editing.numero : (osNumeroNovo || "(nova)");
+    stockOps.forEach(({ stk, delta, prod }) => {
+      const saldoAtual = Number(stk.saldo) || 0;
+      const novoSaldo = saldoAtual - delta;
+      DB.set("erp:stock:" + stk.id, {
+        ...stk,
+        saldo: novoSaldo,
+        ultimaMovimentacao: new Date().toISOString(),
+      });
+      const mov = {
+        id: genId(),
+        produtoId: stk.produtoId,
+        stockId: stk.id,
+        tipo: delta > 0 ? "saida" : "entrada",
+        quantidade: Math.abs(delta),
+        saldoAnterior: saldoAtual,
+        saldoNovo: novoSaldo,
+        motivo: `OS ${osNumeroLog || '(nova)'} - ${delta > 0 ? 'Consumo em OS' : 'Devolução de OS'}${prod?.nome ? ' - ' + prod.nome : ''}`,
+        data: toISODate(new Date()),
+        usuarioId: user?.id || "",
+        usuarioNome: user?.nome || "",
+        createdAt: new Date().toISOString(),
+      };
+      DB.set("erp:stockMov:" + mov.id, mov);
+    });
+
     setModalOpen(false);
     loadOrders();
-  }, [form, editing, orders, allClients, tecnicos, loadOrders, addToast]);
+    reloadCatalogs();
+    if (reloadData) reloadData();
+  }, [form, editing, orders, allClients, tecnicos, loadOrders, addToast, stocks, productById, user, reloadCatalogs, reloadData]);
 
   const handleDelete = useCallback((row) => {
     setConfirmDelete(row);
@@ -4726,12 +4833,48 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
 
   const confirmDeleteAction = useCallback(() => {
     if (confirmDelete) {
+      // ─── Devolução de peças ao estoque ────────────────────────────────────
+      // Ao excluir uma OS, qualquer peça vinculada a um produto cadastrado
+      // tem sua quantidade devolvida ao saldo (entrada com motivo de cancelamento).
+      const pecasOS = Array.isArray(confirmDelete.pecas) ? confirmDelete.pecas : [];
+      const devolverPorProd = new Map();
+      pecasOS.forEach((p) => {
+        if (p.produtoId) {
+          const q = Number(p.quantidade) || 0;
+          if (q > 0) devolverPorProd.set(p.produtoId, (devolverPorProd.get(p.produtoId) || 0) + q);
+        }
+      });
+      devolverPorProd.forEach((qtd, pid) => {
+        const stk = stocks.find((s) => s.produtoId === pid);
+        if (!stk) return;
+        const saldoAtual = Number(stk.saldo) || 0;
+        const novoSaldo = saldoAtual + qtd;
+        DB.set("erp:stock:" + stk.id, { ...stk, saldo: novoSaldo, ultimaMovimentacao: new Date().toISOString() });
+        const prod = productById.get(pid);
+        const mov = {
+          id: genId(),
+          produtoId: pid,
+          stockId: stk.id,
+          tipo: "entrada",
+          quantidade: qtd,
+          saldoAnterior: saldoAtual,
+          saldoNovo: novoSaldo,
+          motivo: `OS ${confirmDelete.numero || ''} - Devolução por exclusão${prod?.nome ? ' - ' + prod.nome : ''}`,
+          data: toISODate(new Date()),
+          usuarioId: user?.id || "",
+          usuarioNome: user?.nome || "",
+          createdAt: new Date().toISOString(),
+        };
+        DB.set("erp:stockMov:" + mov.id, mov);
+      });
       DB.delete("erp:os:" + confirmDelete.id);
-      addToast("OS excluída.", "success");
+      addToast(`OS excluída${devolverPorProd.size > 0 ? ` (${devolverPorProd.size} item(s) devolvido(s) ao estoque)` : ""}.`, "success");
       setConfirmDelete(null);
       loadOrders();
+      reloadCatalogs();
+      if (reloadData) reloadData();
     }
-  }, [confirmDelete, loadOrders, addToast]);
+  }, [confirmDelete, loadOrders, addToast, stocks, productById, user, reloadCatalogs, reloadData]);
 
   const changeStatus = useCallback((os, newStatus) => {
     const updated = { ...os, status: newStatus, updatedAt: new Date().toISOString() };
@@ -5078,13 +5221,49 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                       </button>
                     </div>
 
+                    {/* Picker de serviço cadastrado — preenche tipo/descrição/valor automaticamente */}
+                    {serviceCatalog.length > 0 && (
+                      <div>
+                        <label className="block text-xs text-gray-400 mb-1">Serviço cadastrado (opcional)</label>
+                        <select
+                          value={s.servicoId || ""}
+                          onChange={(e) => {
+                            const id = e.target.value;
+                            if (!id) { updateServico(idx, { servicoId: "" }); return; }
+                            const sv = serviceCatalog.find((x) => x.id === id);
+                            if (sv) {
+                              // Casa o tipo do serviço cadastrado com a lista de tipos da OS quando bater
+                              const tipoMatched = SERVICE_TYPES.find((t) => t.toLowerCase() === (sv.categoria || "").toLowerCase()) || s.tipo;
+                              updateServico(idx, {
+                                servicoId: id,
+                                tipo: tipoMatched,
+                                descricao: sv.nome || s.descricao,
+                                valor: sv.precoBase != null ? String(sv.precoBase) : s.valor,
+                              });
+                            }
+                          }}
+                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
+                        >
+                          <option value="">— Personalizado —</option>
+                          {serviceCatalog
+                            .filter((sv) => (sv.status || "ativo") === "ativo")
+                            .sort((a, b) => (a.nome || "").localeCompare(b.nome || ""))
+                            .map((sv) => (
+                              <option key={sv.id} value={sv.id}>
+                                {sv.nome}{sv.precoBase ? ` — ${formatCurrency(Number(sv.precoBase) || 0)}` : ""}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                    )}
+
                     {/* Linha 1: Tipo serviço | Descrição | Valor */}
                     <div className="grid grid-cols-12 gap-2">
                       <div className="col-span-12 sm:col-span-3">
                         <label className="block text-xs text-gray-400 mb-1">Tipo</label>
                         <select name="tipo"
                           value={s.tipo}
-                          onChange={(e) => updateServico(idx, { tipo: e.target.value })}
+                          onChange={(e) => updateServico(idx, { tipo: e.target.value, servicoId: "" })}
                           className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
                         >
                           {SERVICE_TYPES.map((t) => (
@@ -5181,17 +5360,74 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees }) {
                   const qtd = parseFloat(String(p.quantidade || "0").replace(",", ".")) || 0;
                   const valU = parseFloat(String(p.valorUnit || "0").replace(",", ".")) || 0;
                   const subtotal = qtd * valU;
+                  // Saldo disponível considerando consumo já registrado nesta OS (modo edição)
+                  const stkLinha = p.produtoId ? stockByProductId.get(p.produtoId) : null;
+                  const saldoBase = Number(stkLinha?.saldo) || 0;
+                  let qtdAtualOSItem = 0;
+                  if (editing && Array.isArray(editing.pecas)) {
+                    editing.pecas.filter((ep) => ep.produtoId === p.produtoId).forEach((ep) => {
+                      qtdAtualOSItem += Number(ep.quantidade) || 0;
+                    });
+                  }
+                  const saldoDisponivel = saldoBase + qtdAtualOSItem; // o que esta OS já reservou volta ao limite
+                  const insuficiente = p.produtoId && qtd > saldoDisponivel;
                   return (
                     <div key={idx} className="grid grid-cols-12 gap-2 items-end bg-gray-700/40 border border-gray-700 rounded-lg p-2.5">
-                      <div className="col-span-12 sm:col-span-5">
+                      <div className="col-span-12 sm:col-span-5 space-y-1.5">
                         <label className="block text-xs text-gray-400 mb-1">Peça/Material</label>
+                        {/* Picker de produto cadastrado — quando selecionado, baixa de estoque é automática */}
+                        {products.length > 0 && (
+                          <select
+                            value={p.produtoId || ""}
+                            onChange={(e) => {
+                              const id = e.target.value;
+                              if (!id) {
+                                updatePeca(idx, { produtoId: "", stockId: "" });
+                                return;
+                              }
+                              const prod = productById.get(id);
+                              const stk = stockByProductId.get(id);
+                              if (prod) {
+                                updatePeca(idx, {
+                                  produtoId: id,
+                                  stockId: stk?.id || "",
+                                  nome: prod.nome,
+                                  valorUnit: prod.precoVenda != null ? String(prod.precoVenda) : (p.valorUnit || ""),
+                                });
+                              }
+                            }}
+                            className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
+                          >
+                            <option value="">— Avulso (digite manual) —</option>
+                            {products
+                              .filter((pr) => (pr.status || "ativo") === "ativo")
+                              .sort((a, b) => (a.nome || "").localeCompare(b.nome || ""))
+                              .map((pr) => {
+                                const stk = stockByProductId.get(pr.id);
+                                const saldo = Number(stk?.saldo) || 0;
+                                return (
+                                  <option key={pr.id} value={pr.id}>
+                                    {pr.nome} (Saldo: {saldo} {pr.unidade || "UN"})
+                                  </option>
+                                );
+                              })}
+                          </select>
+                        )}
                         <input name="nome"
                           type="text"
                           value={p.nome}
-                          onChange={(e) => updatePeca(idx, { nome: e.target.value })}
+                          onChange={(e) => updatePeca(idx, { nome: e.target.value, produtoId: "", stockId: "" })}
                           placeholder="Ex: Compressor, Gás R-410A, Filtro..."
-                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                          readOnly={!!p.produtoId}
+                          className={`w-full bg-gray-700 border rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition ${p.produtoId ? "border-gray-700 opacity-70" : "border-gray-600"}`}
                         />
+                        {p.produtoId && (
+                          <p className={`text-xs ${insuficiente ? "text-red-400" : "text-emerald-400"}`}>
+                            {insuficiente
+                              ? `⚠ Saldo insuficiente. Disponível: ${saldoDisponivel}`
+                              : `Saldo disponível: ${saldoDisponivel}`}
+                          </p>
+                        )}
                       </div>
                       <div className="col-span-4 sm:col-span-2">
                         <label className="block text-xs text-gray-400 mb-1">Qtd</label>
@@ -10966,7 +11202,7 @@ export default function App() {
             <Dashboard user={user} dateFilter={dateFilter} onNavigate={setActiveModule} />
           )}
           {activeModule === "processos" && (
-            <ProcessModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} />
+            <ProcessModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} reloadData={loadAllData} />
           )}
           {activeModule === "agenda" && (
             <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} onNavigate={setActiveModule} />
