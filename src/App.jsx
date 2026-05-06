@@ -1,45 +1,170 @@
-import { useState, useEffect, useCallback, useRef, useMemo, lazy, Suspense } from "react";
+
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer
 } from "recharts";
 import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember } from "./supabase.js";
-// Aurora carrega ogl (WebGL ~30KB). Usado só no login → lazy reduz o bundle inicial.
-const Aurora = lazy(() => import("./Aurora.jsx"));
+import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
 import { FrostIcon } from "./FrostIcons.jsx";
 import AnimatedLogo from "./AnimatedLogo.jsx";
-import {
-  genId,
-  genSecureToken,
-  sha256Hex,
-  formatCurrency,
-  formatDate,
-  formatDateTime,
-  formatCPF,
-  formatCNPJ,
-  formatPhone,
-  filterByDate,
-  toISODate,
-  daysFromNow,
-  monthsAgo,
-} from "./utils.js";
-import {
-  VIDEO_EXT_RE,
-  isVideoUrl,
-  COLORS,
-  STATUS_MAP,
-  ROLE_PERMISSIONS,
-  CATEGORIES_RECEITA,
-  CATEGORIES_DESPESA,
-  PAYMENT_METHODS,
-  EQUIPMENT_TYPES,
-  SERVICE_TYPES_OS,
-} from "./constants.js";
 
-// Constantes globais — vide src/constants.js
+// Detecta se a URL aponta para um arquivo de vídeo (preview do tecnico)
+const VIDEO_EXT_RE = /\.(mp4|mov|webm|m4v|avi|mkv|ogv|3gp)(\?|$)/i;
+const isVideoUrl = (url) => typeof url === "string" && VIDEO_EXT_RE.test(url);
+
+// ─── CONSTANTS ──────────────────────────────────────────────────────────────────
+
+// Paleta compartilhada por gráficos e badges
+const COLORS = ["#3b82f6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"];
+
+// Mapeamento global de status — usado pelo StatusBadge em OS, Agenda, Cadastros e Financeiro
+const STATUS_MAP = {
+  ativo: { label: "Ativo", color: "bg-green-500" },
+  inativo: { label: "Inativo", color: "bg-gray-500" },
+  concluido: { label: "Concluído", color: "bg-green-500" },
+  pendente: { label: "Pendente", color: "bg-yellow-500" },
+  em_andamento: { label: "Em Andamento", color: "bg-blue-500" },
+  cancelado: { label: "Cancelado", color: "bg-red-500" },
+  agendado: { label: "Agendado", color: "bg-cyan-500" },
+  confirmado: { label: "Confirmado", color: "bg-blue-500" },
+  // ─── Status do fluxo da OS (alinhados ao STATUS_FLOW de ProcessModule) ──
+  aguardando: { label: "Aguardando", color: "bg-yellow-500" },
+  em_deslocamento: { label: "Em Deslocamento", color: "bg-cyan-500" },
+  em_execucao: { label: "Em Execução", color: "bg-blue-500" },
+  finalizado: { label: "Finalizado", color: "bg-green-500" },
+  // ─── Novos status do fluxo Tech App → ERP ───────────────────────────────
+  // Técnico chegou no local e iniciou o serviço
+  em_servico: { label: "Em Serviço", color: "bg-blue-600" },
+  // Técnico terminou e enviou relatório — aguarda revisão admin/gerente para fechar OS
+  aguardando_finalizacao: { label: "Aguardando Finalização", color: "bg-orange-500" },
+  pago: { label: "Pago", color: "bg-green-500" },
+  atrasado: { label: "Atrasado", color: "bg-red-500" },
+};
+
+// Matriz de permissões por role — inclui módulo financeiro
+const ROLE_PERMISSIONS = {
+  admin: ["all"],
+  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config"],
+  tecnico: ["dashboard", "os", "agenda"],
+  atendente: ["dashboard", "clientes", "os", "agenda"],
+};
+
+// ─── CATEGORIAS E FORMAS DE PAGAMENTO DO FINANCEIRO ─────────────────────────
+// Categorias separadas em receita (entradas) e despesa (saídas) para
+// evitar confusão no relatório — o usuário só vê as categorias relevantes
+// ao tipo selecionado.
+const CATEGORIES_RECEITA = [
+  "Instalação",
+  "Manutenção",
+  "Troca de Peças",
+  "Solda",
+  "Venda de Equipamento",
+  "Venda de Peça",
+  "Contrato de Manutenção",
+  "Outros",
+];
+
+const CATEGORIES_DESPESA = [
+  "Peça/Material",
+  "Combustível",
+  "Aluguel",
+  "Salário",
+  "Imposto",
+  "Ferramentas",
+  "Veículo",
+  "Marketing",
+  "Outros",
+];
+
+const PAYMENT_METHODS = [
+  "PIX",
+  "Cartão de Crédito",
+  "Cartão de Débito",
+  "Boleto",
+  "Dinheiro",
+  "Transferência",
+];
+
+// ─── TIPOS DE EQUIPAMENTO — OS ──────────────────────────────────────────────
+// Cada tipo define quais campos técnicos aparecem no formulário de OS.
+// Usado para refrigeração comercial, climatização e linha branca.
+const EQUIPMENT_TYPES = {
+  central: {
+    label: "Central de Ar (Split/Janela)",
+    capacityLabel: "Capacidade (BTUs)",
+    capacityPlaceholder: "Ex: 12000",
+    capacityKey: "equipamentoBTUs",
+  },
+  geladeira: {
+    label: "Geladeira / Freezer",
+    capacityLabel: "Capacidade (Litros)",
+    capacityPlaceholder: "Ex: 450",
+    capacityKey: "equipamentoLitros",
+  },
+  lavadora: {
+    label: "Máquina de Lavar",
+    capacityLabel: "Capacidade (Kg)",
+    capacityPlaceholder: "Ex: 12",
+    capacityKey: "equipamentoKg",
+  },
+  centrifuga: {
+    label: "Centrífuga",
+    capacityLabel: "Capacidade (Kg)",
+    capacityPlaceholder: "Ex: 8",
+    capacityKey: "equipamentoKg",
+  },
+  expositor: {
+    label: "Expositor / Vitrine Refrigerada",
+    capacityLabel: "Capacidade (Litros)",
+    capacityPlaceholder: "Ex: 800",
+    capacityKey: "equipamentoLitros",
+  },
+  bebedouro_industrial: {
+    label: "Bebedouro Industrial",
+    capacityLabel: "Capacidade (Litros/h)",
+    capacityPlaceholder: "Ex: 100",
+    capacityKey: "equipamentoLitros",
+  },
+  bebedouro_mesa: {
+    label: "Bebedouro / Gelágua Mesa",
+    capacityLabel: "Modelo",
+    capacityPlaceholder: "Ex: Mesa 20L",
+    capacityKey: "equipamentoModeloExtra",
+  },
+  bebedouro_coluna: {
+    label: "Bebedouro / Gelágua Coluna",
+    capacityLabel: "Modelo",
+    capacityPlaceholder: "Ex: Coluna 20L",
+    capacityKey: "equipamentoModeloExtra",
+  },
+  camara_fria: {
+    label: "Câmara Fria",
+    capacityLabel: "Volume (m³)",
+    capacityPlaceholder: "Ex: 20",
+    capacityKey: "equipamentoVolumeM3",
+  },
+  outro: {
+    label: "Outro",
+    capacityLabel: "Especificação",
+    capacityPlaceholder: "Descreva",
+    capacityKey: "equipamentoEspecificacao",
+  },
+};
+
+// ─── TIPOS DE SERVIÇO — OS ───────────────────────────────────────────────────
+// Lista usada no dropdown de serviços da OS e da Agenda.
+// Removidos: Higienização, Reparo. Adicionados: Troca de Peças, Solda.
+const SERVICE_TYPES_OS = [
+  "Instalação",
+  "Manutenção",
+  "Troca de Peças",
+  "Solda",
+  "Desinstalação",
+];
 
 // ─── DB LAYER ───────────────────────────────────────────────────────────────────
 
@@ -408,8 +533,108 @@ function ensureCompanyMigration() {
 
 // ─── UTILITY FUNCTIONS ─────────────────────────────────────────────────────────
 
-// genId, genSecureToken, sha256Hex, formatCurrency, formatDate, formatDateTime,
-// formatCPF, formatCNPJ, formatPhone, filterByDate — vide src/utils.js
+function genId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2);
+}
+
+// Token criptograficamente seguro (32 bytes em hex) — usado para sessão
+function genSecureToken() {
+  if (crypto?.getRandomValues) {
+    const arr = new Uint8Array(32);
+    crypto.getRandomValues(arr);
+    return Array.from(arr, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  // Fallback inseguro apenas para ambientes sem WebCrypto (não-HTTPS)
+  return genId() + genId();
+}
+
+// SHA-256 em hex — usado para validar token de sessão sem armazená-lo em claro
+async function sha256Hex(str) {
+  if (!crypto?.subtle) return str;
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+function formatCurrency(value) {
+  return new Intl.NumberFormat("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  }).format(value || 0);
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return "—";
+  try {
+    // Extrai apenas a parte da data (YYYY-MM-DD) para evitar conversão de fuso horário
+    const datePart = String(dateStr).slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(datePart)) {
+      const [y, m, d] = datePart.split("-");
+      return `${d}/${m}/${y}`;
+    }
+    return new Date(dateStr).toLocaleDateString("pt-BR");
+  } catch {
+    return dateStr;
+  }
+}
+
+function formatDateTime(dateStr) {
+  if (!dateStr) return "—";
+  try {
+    const d = new Date(dateStr);
+    return d.toLocaleDateString("pt-BR") + " " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return dateStr;
+  }
+}
+
+function formatCPF(v) {
+  const d = (v || "").replace(/\D/g, "").slice(0, 11);
+  if (d.length <= 3) return d;
+  if (d.length <= 6) return d.slice(0, 3) + "." + d.slice(3);
+  if (d.length <= 9) return d.slice(0, 3) + "." + d.slice(3, 6) + "." + d.slice(6);
+  return d.slice(0, 3) + "." + d.slice(3, 6) + "." + d.slice(6, 9) + "-" + d.slice(9);
+}
+
+function formatCNPJ(v) {
+  const d = (v || "").replace(/\D/g, "").slice(0, 14);
+  if (d.length <= 2) return d;
+  if (d.length <= 5) return d.slice(0, 2) + "." + d.slice(2);
+  if (d.length <= 8) return d.slice(0, 2) + "." + d.slice(2, 5) + "." + d.slice(5);
+  if (d.length <= 12) return d.slice(0, 2) + "." + d.slice(2, 5) + "." + d.slice(5, 8) + "/" + d.slice(8);
+  return d.slice(0, 2) + "." + d.slice(2, 5) + "." + d.slice(5, 8) + "/" + d.slice(8, 12) + "-" + d.slice(12);
+}
+
+function formatPhone(v) {
+  const d = (v || "").replace(/\D/g, "").slice(0, 11);
+  if (d.length <= 2) return "(" + d;
+  if (d.length <= 7) return "(" + d.slice(0, 2) + ") " + d.slice(2);
+  if (d.length <= 10) return "(" + d.slice(0, 2) + ") " + d.slice(2, 6) + "-" + d.slice(6);
+  return "(" + d.slice(0, 2) + ") " + d.slice(2, 7) + "-" + d.slice(7);
+}
+
+function filterByDate(items, dateField, dateFilter) {
+  if (!dateFilter || dateFilter.period === "all") return items;
+  const now = new Date();
+  let start, end;
+
+  if (dateFilter.period === "custom" && dateFilter.startDate && dateFilter.endDate) {
+    start = new Date(dateFilter.startDate + "T00:00:00");
+    end = new Date(dateFilter.endDate + "T23:59:59");
+  } else {
+    end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    start = new Date(now);
+    start.setHours(0, 0, 0, 0);
+    const days = { hoje: 0, "7dias": 7, "30dias": 30, "90dias": 90 };
+    const d = days[dateFilter.period] || 0;
+    start.setDate(start.getDate() - d);
+  }
+
+  return items.filter((item) => {
+    const itemDate = new Date(item[dateField]);
+    return itemDate >= start && itemDate <= end;
+  });
+}
 
 // ─── Hash legado (mantido apenas para migração de senhas antigas) ────────────
 function hashPasswordLegacy(pwd) {
@@ -587,7 +812,22 @@ function hasPermission(user, module) {
   return perms.includes("all") || perms.includes(module);
 }
 
-// toISODate, daysFromNow, monthsAgo — vide src/utils.js
+function toISODate(date) {
+  const d = date instanceof Date ? date : new Date(date);
+  return d.toISOString().split("T")[0];
+}
+
+function daysFromNow(n) {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  return toISODate(d);
+}
+
+function monthsAgo(n) {
+  const d = new Date();
+  d.setMonth(d.getMonth() - n);
+  return toISODate(d);
+}
 
 // ─── SEED DATA ──────────────────────────────────────────────────────────────────
 
@@ -1579,15 +1819,13 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
         </button>
       )}
 
-      {/* Aurora animated background — lazy + suspense (fallback transparente) */}
+      {/* Aurora animated background */}
       <div style={{ position: 'absolute', inset: 0, zIndex: 0, opacity: isLight ? 0.55 : 1 }}>
-        <Suspense fallback={null}>
-          <Aurora
-            colorStops={auroraColors}
-            amplitude={1}
-            blend={isLight ? 0.6 : 0.43}
-          />
-        </Suspense>
+        <Aurora
+          colorStops={auroraColors}
+          amplitude={1}
+          blend={isLight ? 0.6 : 0.43}
+        />
       </div>
       <div className="w-full max-w-md animate-slideIn" style={{ position: 'relative', zIndex: 1 }}>
         <div
@@ -1878,9 +2116,7 @@ function FirstUserSetup({ onComplete }) {
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4" style={{ position: "relative", overflow: "hidden" }}>
       <div style={{ position: "absolute", inset: 0, zIndex: 0 }}>
-        <Suspense fallback={null}>
-          <Aurora colorStops={["#4e487f", "#433a5f", "#5227FF"]} amplitude={1} blend={0.43} />
-        </Suspense>
+        <Aurora colorStops={["#4e487f", "#433a5f", "#5227FF"]} amplitude={1} blend={0.43} />
       </div>
       <div className="w-full max-w-md animate-slideIn" style={{ position: "relative", zIndex: 1 }}>
         <div className="bg-gray-800/80 backdrop-blur-xl rounded-2xl shadow-2xl border border-gray-700 p-8">
@@ -3797,6 +4033,24 @@ function _actionBar() {
   `;
 }
 
+// ─── Bloco PIX (dados de recebimento) ────────────────────────────────────────
+// Reutilizado em Orçamento, OS e Recibo. CNPJ formatado como chave PIX,
+// favorecido e banco visíveis para que o cliente possa pagar diretamente.
+function _pixBlock() {
+  return `
+    <div class="section">
+      <div class="info-card" style="border-left:3px solid var(--accent)">
+        <div class="section-title" style="margin-bottom:10px">Pagamento via PIX</div>
+        <div class="info-grid" style="grid-template-columns:1fr 1fr;gap:8px 24px">
+          <div class="info-item mono"><label>Chave PIX (CNPJ)</label><span>41.080.020/0001-05</span></div>
+          <div class="info-item"><label>Favorecido</label><span>THIAGO GONÇALVES PRADO</span></div>
+          <div class="info-item"><label>Banco</label><span>Sicredi</span></div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 // ─── Helper compartilhado: descrição do equipamento ────────────────────────
 // Monta "Modelo — Capacidade Unidade" conforme o tipo salvo na OS.
 function _equipamentoDescricao(os) {
@@ -3819,7 +4073,9 @@ function _equipamentoDescricao(os) {
   return { tipoLabel, capLabel, modelo: os.equipamentoModelo || "" };
 }
 
-// Gera HTML do Orçamento — documento para envio ao cliente (PDF)
+// Gera HTML do Orçamento — versão compacta para envio ao cliente.
+// Mostra apenas o essencial: cliente, serviços, materiais com preços, total,
+// garantia e dados de PIX. Sem cards de cliente extensos, sem assinaturas.
 function generateOrcamentoHTML(os, clients) {
   const config = DB.get("erp:config") || {};
   const cliente = (clients || []).find((c) => c.id === os.clienteId) || {};
@@ -3827,18 +4083,7 @@ function generateOrcamentoHTML(os, clients) {
   const validade = new Date(Date.now() + 15 * 86400000).toLocaleDateString("pt-BR");
   const valorServico = os.valor || 0;
 
-  const endCliente = cliente.endereco && (cliente.endereco.rua || cliente.endereco.cidade)
-    ? `${cliente.endereco.rua || ""}${cliente.endereco.numero ? ", " + cliente.endereco.numero : ""} · ${cliente.endereco.bairro || ""} — ${cliente.endereco.cidade || ""}${cliente.endereco.estado ? "/" + cliente.endereco.estado : ""}`
-    : (os.endereco || "—");
-
-  const docCliente = cliente.tipo === "pj"
-    ? (cliente.cnpj ? `CNPJ ${cliente.cnpj}` : "—")
-    : (cliente.cpf ? `CPF ${cliente.cpf}` : "—");
-
-  const equip = _equipamentoDescricao(os);
-  const equipText = [equip.tipoLabel, equip.modelo, equip.capLabel].filter(Boolean).join(" · ") || "—";
-
-  // Monta linhas da tabela: serviços + peças (todos os campos de usuário escapados)
+  // Serviços e peças (campos de usuário escapados nos rows abaixo)
   const servicos = Array.isArray(os.servicos) && os.servicos.length > 0
     ? os.servicos
     : [{ tipo: os.tipo, descricao: os.equipamentoModelo || "Serviço de Refrigeração", valor: valorServico }];
@@ -3849,7 +4094,7 @@ function generateOrcamentoHTML(os, clients) {
     const desc = s.descricao
       ? `<strong style="color:var(--ink-900)">${_h(s.tipo)}</strong><div style="font-size:11px;color:var(--ink-500);margin-top:2px">${_h(s.descricao)}</div>`
       : `<strong style="color:var(--ink-900)">${_h(s.tipo)}</strong>`;
-    return `<tr><td>${desc}</td><td class="num">1</td><td class="num">${_fmtBRL(v)}</td><td class="num">${_fmtBRL(v)}</td></tr>`;
+    return `<tr><td>${desc}</td><td class="num">${_fmtBRL(v)}</td></tr>`;
   }).join("");
 
   const rowsPecas = pecas.map((p) => {
@@ -3878,78 +4123,60 @@ function generateOrcamentoHTML(os, clients) {
   <div class="page-inner">
     ${_docHeader(config, "Orçamento", os.numero, `Emitido em ${dataHoje}`)}
 
-    <!-- Info cards lado a lado: cliente + detalhes do serviço -->
+    <!-- Cliente: apenas nome -->
     <div class="section">
-      <div class="info-grid">
-        <div class="info-card">
-          <div class="section-title" style="margin-bottom:10px">Cliente</div>
-          <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
-            <div class="info-item"><label>Nome / Razão Social</label><span>${_h(cliente.nome || os.clienteNome || "—")}</span></div>
-            <div class="info-item mono"><label>Documento</label><span>${_h(docCliente)}</span></div>
-            <div class="info-item mono"><label>Telefone</label><span>${_h(cliente.telefone || "—")}</span></div>
-            <div class="info-item"><label>Email</label><span>${_h(cliente.email || "—")}</span></div>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="section-title" style="margin-bottom:10px">Serviço</div>
-          <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
-            <div class="info-item"><label>Tipo</label><span>${_h(os.tipo || "—")}</span></div>
-            <div class="info-item"><label>Endereço de Execução</label><span>${_h(endCliente)}</span></div>
-            <div class="info-item"><label>Equipamento</label><span>${_h(equipText)}</span></div>
-            <div class="info-item"><label>Técnico Responsável</label><span>${_h(os.tecnicoNome || "—")}</span></div>
-          </div>
-        </div>
+      <div class="info-card">
+        <div class="info-item"><label>Cliente</label><span>${_h(cliente.nome || os.clienteNome || "—")}</span></div>
       </div>
     </div>
 
-    <!-- Itens do orçamento: serviços + peças em uma tabela -->
+    <!-- Serviços -->
     <div class="section">
-      <div class="section-title">Itens do Orçamento</div>
+      <div class="section-title">Serviços</div>
       <table>
         <thead>
           <tr>
             <th>Descrição</th>
+            <th class="num" style="width:140px">Valor</th>
+          </tr>
+        </thead>
+        <tbody>${rowsServicos}</tbody>
+      </table>
+    </div>
+
+    ${pecas.length > 0 ? `
+    <!-- Materiais -->
+    <div class="section">
+      <div class="section-title">Materiais</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
             <th class="num" style="width:60px">Qtd</th>
             <th class="num" style="width:110px">Valor Unit.</th>
             <th class="num" style="width:120px">Subtotal</th>
           </tr>
         </thead>
-        <tbody>
-          ${rowsServicos}
-          ${rowsPecas}
-        </tbody>
+        <tbody>${rowsPecas}</tbody>
       </table>
-
-      <div class="totals">
-        <div class="totals-inner">
-          <div class="total-row"><span>Mão de obra</span><span>${_fmtBRL(totServ)}</span></div>
-          <div class="total-row"><span>Peças e Materiais</span><span>${totPecas > 0 ? _fmtBRL(totPecas) : "Incluso"}</span></div>
-          <div class="total-row grand"><span class="label">Total</span><span class="value">${_fmtBRL(total)}</span></div>
-        </div>
-      </div>
-    </div>
-
-    ${os.observacoes ? `
-    <div class="section">
-      <div class="section-title">Observações</div>
-      <div class="obs-box">${_h(os.observacoes)}</div>
     </div>` : ""}
 
-    <div class="terms">
-      <strong>Condições do Orçamento</strong>
-      Validade até <strong style="color:var(--ink-900)">${_h(validade)}</strong>. Garantia de serviço de 90 dias. Equipamentos com garantia do fabricante. Valores sujeitos a alteração após vistoria técnica no local.
+    <!-- Totais -->
+    <div class="totals">
+      <div class="totals-inner">
+        <div class="total-row"><span>Mão de obra</span><span>${_fmtBRL(totServ)}</span></div>
+        <div class="total-row"><span>Peças e Materiais</span><span>${totPecas > 0 ? _fmtBRL(totPecas) : "Incluso"}</span></div>
+        <div class="total-row grand"><span class="label">Total</span><span class="value">${_fmtBRL(total)}</span></div>
+      </div>
     </div>
 
-    <div class="signatures">
-      <div class="sig">
-        <div class="name">${_h(config.nomeEmpresa || "FrostERP Refrigeração")}</div>
-        <div class="role">Responsável Técnico</div>
-      </div>
-      <div class="sig">
-        <div class="name">${_h(cliente.nome || os.clienteNome || "Cliente")}</div>
-        <div class="role">Aceite do Orçamento</div>
-      </div>
+    <!-- Garantia -->
+    <div class="terms">
+      <strong>Garantia</strong>
+      Validade do orçamento até <strong style="color:var(--ink-900)">${_h(validade)}</strong>. Serviço com garantia de 90 dias contados a partir da execução, cobrindo defeitos de execução. Equipamentos seguem garantia do fabricante. Não cobre mau uso, sobrecarga elétrica ou falta de manutenção.
     </div>
+
+    ${_pixBlock()}
 
     <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
@@ -3958,31 +4185,13 @@ ${_actionBar()}
 </body></html>`;
 }
 
-// Gera HTML da Ordem de Serviço — documento de execução + ciência do cliente
+// Gera HTML da Ordem de Serviço — versão compacta para apresentar ao cliente.
+// Mostra apenas: cliente, serviços executados, materiais com preços, total,
+// garantia e PIX. Sem assinaturas, sem status, sem cards de execução.
 function generateOSHTML(os, clients) {
   const config = DB.get("erp:config") || {};
   const cliente = (clients || []).find((c) => c.id === os.clienteId) || {};
   const dataAbertura = os.dataAbertura ? new Date(os.dataAbertura).toLocaleDateString("pt-BR") : "—";
-  const dataAgendada = os.dataAgendada
-    ? new Date(os.dataAgendada.replace("T00:00:00.000Z", "T12:00:00")).toLocaleDateString("pt-BR")
-    : "—";
-
-  const STATUS_LABELS = {
-    aguardando: "Aguardando", em_deslocamento: "Em Deslocamento",
-    em_execucao: "Em Execução", finalizado: "Finalizado",
-    concluido: "Concluído", pendente: "Pendente", em_andamento: "Em Andamento",
-    cancelado: "Cancelado",
-  };
-  const statusLabel = STATUS_LABELS[os.status] || os.status || "—";
-  const statusClass = ["finalizado", "concluido"].includes(os.status) ? "badge-green"
-    : ["aguardando", "pendente"].includes(os.status) ? "badge-yellow"
-    : os.status === "cancelado" ? "badge-red" : "badge-blue";
-
-  const enderecoFinal = os.endereco
-    || (cliente.endereco ? `${cliente.endereco.rua || ""}${cliente.endereco.numero ? ", " + cliente.endereco.numero : ""}${cliente.endereco.bairro ? " · " + cliente.endereco.bairro : ""}${cliente.endereco.cidade ? " — " + cliente.endereco.cidade : ""}${cliente.endereco.estado ? "/" + cliente.endereco.estado : ""}` : "—");
-
-  const equip = _equipamentoDescricao(os);
-  const hasEquipamento = equip.modelo || equip.capLabel;
 
   const servicos = Array.isArray(os.servicos) && os.servicos.length > 0 ? os.servicos : null;
   const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
@@ -4021,42 +4230,15 @@ function generateOSHTML(os, clients) {
   <div class="page-inner">
     ${_docHeader(config, "Ordem de Serviço", os.numero, `Abertura: ${dataAbertura}`)}
 
-    <!-- Cliente + Execução em cards lado a lado -->
+    <!-- Cliente: apenas nome -->
     <div class="section">
-      <div class="info-grid">
-        <div class="info-card">
-          <div class="section-title" style="margin-bottom:10px">Cliente</div>
-          <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
-            <div class="info-item"><label>Nome</label><span>${_h(cliente.nome || os.clienteNome || "—")}</span></div>
-            <div class="info-item mono"><label>Telefone</label><span>${_h(cliente.telefone || "—")}</span></div>
-            <div class="info-item"><label>Endereço de Atendimento</label><span>${_h(enderecoFinal)}</span></div>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="section-title" style="margin-bottom:10px">Execução</div>
-          <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
-            <div class="info-item"><label>Status</label><span><span class="badge ${statusClass}">${_h(statusLabel)}</span></span></div>
-            <div class="info-item"><label>Técnico</label><span>${_h(os.tecnicoNome || "—")}</span></div>
-            <div class="info-item mono"><label>Data Agendada</label><span>${_h(dataAgendada)}</span></div>
-            <div class="info-item"><label>Tipo</label><span>${_h(os.tipo || "—")}</span></div>
-          </div>
-        </div>
+      <div class="info-card">
+        <div class="info-item"><label>Cliente</label><span>${_h(cliente.nome || os.clienteNome || "—")}</span></div>
       </div>
     </div>
 
-    ${hasEquipamento ? `
-    <div class="section">
-      <div class="section-title">Equipamento</div>
-      <div class="info-card">
-        <div class="info-grid">
-          <div class="info-item"><label>Tipo</label><span>${_h(equip.tipoLabel)}</span></div>
-          <div class="info-item"><label>Modelo / Marca</label><span>${_h(equip.modelo || "—")}</span></div>
-          ${equip.capLabel ? `<div class="info-item mono"><label>Capacidade</label><span>${_h(equip.capLabel)}</span></div>` : ""}
-        </div>
-      </div>
-    </div>` : ""}
-
     ${servicos ? `
+    <!-- Serviços executados -->
     <div class="section">
       <div class="section-title">Serviços Executados</div>
       <table>
@@ -4071,13 +4253,14 @@ function generateOSHTML(os, clients) {
       </table>
     </div>` : `
     <div class="section">
-      <div class="section-title">Descrição do Serviço</div>
+      <div class="section-title">Serviços Executados</div>
       <div class="obs-box">${_h(os.descricao || os.observacoes || "Sem descrição informada.")}</div>
     </div>`}
 
     ${pecas.length > 0 ? `
+    <!-- Materiais -->
     <div class="section">
-      <div class="section-title">Peças e Materiais</div>
+      <div class="section-title">Materiais</div>
       <table>
         <thead>
           <tr>
@@ -4101,27 +4284,13 @@ function generateOSHTML(os, clients) {
       </div>
     </div>
 
-    <div class="section">
-      <div class="section-title">Relato do Técnico</div>
-      <div class="obs-box placeholder">Descreva aqui os procedimentos realizados, peças substituídas, medições e orientações ao cliente.</div>
+    <!-- Garantia -->
+    <div class="terms">
+      <strong>Garantia</strong>
+      Serviço com garantia de 90 dias contados a partir da execução, cobrindo defeitos de execução. Equipamentos seguem garantia do fabricante conforme manual. Não cobre danos por mau uso, sobrecarga elétrica, sinistros ou falta de manutenção periódica.
     </div>
 
-    ${os.observacoes ? `
-    <div class="section">
-      <div class="section-title">Observações</div>
-      <div class="obs-box">${_h(os.observacoes)}</div>
-    </div>` : ""}
-
-    <div class="signatures">
-      <div class="sig">
-        <div class="name">${_h(os.tecnicoNome || "—")}</div>
-        <div class="role">Técnico Responsável</div>
-      </div>
-      <div class="sig">
-        <div class="name">${_h(cliente.nome || os.clienteNome || "Cliente")}</div>
-        <div class="role">Ciente do Serviço</div>
-      </div>
-    </div>
+    ${_pixBlock()}
 
     <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
@@ -4130,7 +4299,8 @@ ${_actionBar()}
 </body></html>`;
 }
 
-// Gera HTML do Recibo — documento final com valor em destaque
+// Gera HTML do Recibo — versão compacta com valor em destaque.
+// Mostra apenas: cliente, serviços executados, materiais com preços, garantia e PIX.
 function generateReciboHTML(os, clients) {
   const config = DB.get("erp:config") || {};
   const cliente = (clients || []).find((c) => c.id === os.clienteId) || {};
@@ -4140,11 +4310,29 @@ function generateReciboHTML(os, clients) {
   const valor = os.valor || 0;
   const valorExtenso = valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 });
 
-  const enderecoFinal = os.endereco
-    || (cliente.endereco ? `${cliente.endereco.rua || ""}${cliente.endereco.numero ? ", " + cliente.endereco.numero : ""}${cliente.endereco.bairro ? " · " + cliente.endereco.bairro : ""}${cliente.endereco.cidade ? " — " + cliente.endereco.cidade : ""}${cliente.endereco.estado ? "/" + cliente.endereco.estado : ""}` : "—");
+  const servicos = Array.isArray(os.servicos) && os.servicos.length > 0 ? os.servicos : null;
+  const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
 
-  const equip = _equipamentoDescricao(os);
-  const equipText = [equip.modelo, equip.capLabel].filter(Boolean).join(" · ");
+  const rowsServicos = servicos ? servicos.map((s) => {
+    const v = Number(s.valor) || 0;
+    return `<tr>
+      <td><strong style="color:var(--ink-900)">${_h(s.tipo || "—")}</strong></td>
+      <td class="muted">${_h(s.descricao || "—")}</td>
+      <td class="num">${_fmtBRL(v)}</td>
+    </tr>`;
+  }).join("") : "";
+
+  const rowsPecas = pecas.map((i) => {
+    const qtd = Number(i.quantidade) || 1;
+    const valU = Number(i.valorUnit) || 0;
+    const sub = qtd * valU;
+    return `<tr>
+      <td>${_h(i.nome || "—")}</td>
+      <td class="num">${qtd}</td>
+      <td class="num">${valU > 0 ? _fmtBRL(valU) : "—"}</td>
+      <td class="num">${valU > 0 ? _fmtBRL(sub) : "—"}</td>
+    </tr>`;
+  }).join("");
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -4166,50 +4354,57 @@ function generateReciboHTML(os, clients) {
       <div class="hero-hint">R$ ${valorExtenso}</div>
     </div>
 
-    <!-- Partes + referência -->
+    <!-- Cliente: apenas nome -->
     <div class="section">
-      <div class="info-grid">
-        <div class="info-card">
-          <div class="section-title" style="margin-bottom:10px">Recebemos de</div>
-          <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
-            <div class="info-item"><label>Nome / Razão Social</label><span>${_h(cliente.nome || os.clienteNome || "—")}</span></div>
-            <div class="info-item mono"><label>Telefone</label><span>${_h(cliente.telefone || "—")}</span></div>
-            <div class="info-item"><label>Endereço</label><span>${_h(enderecoFinal)}</span></div>
-          </div>
-        </div>
-        <div class="info-card">
-          <div class="section-title" style="margin-bottom:10px">Referente a</div>
-          <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
-            <div class="info-item"><label>Serviço</label><span>${_h(os.tipo || "—")}</span></div>
-            ${equipText ? `<div class="info-item"><label>Equipamento</label><span>${_h(equipText)}</span></div>` : ""}
-            <div class="info-item"><label>Técnico Responsável</label><span>${_h(os.tecnicoNome || "—")}</span></div>
-            <div class="info-item mono"><label>Data de Conclusão</label><span>${_h(dataConclusao)}</span></div>
-          </div>
-        </div>
+      <div class="info-card">
+        <div class="info-item"><label>Recebemos de</label><span>${_h(cliente.nome || os.clienteNome || "—")}</span></div>
       </div>
     </div>
 
-    ${os.observacoes || os.descricao ? `
+    ${servicos ? `
+    <!-- Serviços executados -->
     <div class="section">
-      <div class="section-title">Descrição</div>
+      <div class="section-title">Serviços Executados</div>
+      <table>
+        <thead>
+          <tr>
+            <th style="width:28%">Tipo</th>
+            <th>Descrição</th>
+            <th class="num" style="width:130px">Valor</th>
+          </tr>
+        </thead>
+        <tbody>${rowsServicos}</tbody>
+      </table>
+    </div>` : (os.descricao || os.observacoes ? `
+    <div class="section">
+      <div class="section-title">Serviços Executados</div>
       <div class="obs-box">${_h(os.descricao || os.observacoes)}</div>
+    </div>` : "")}
+
+    ${pecas.length > 0 ? `
+    <!-- Materiais -->
+    <div class="section">
+      <div class="section-title">Materiais</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th class="num" style="width:70px">Qtd</th>
+            <th class="num" style="width:120px">Valor Unit.</th>
+            <th class="num" style="width:130px">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>${rowsPecas}</tbody>
+      </table>
     </div>` : ""}
 
+    <!-- Garantia -->
     <div class="terms">
       <strong>Garantia</strong>
-      Este serviço possui garantia de 90 dias contados a partir da data de conclusão, cobrindo defeitos de execução. Equipamentos seguem a garantia do fabricante conforme manual do produto. A garantia não cobre danos causados por mau uso, sobrecargas elétricas, sinistros ou falta de manutenção periódica.
+      Este serviço possui garantia de 90 dias contados a partir da data de conclusão, cobrindo defeitos de execução. Equipamentos seguem garantia do fabricante conforme manual do produto. Não cobre danos por mau uso, sobrecargas elétricas, sinistros ou falta de manutenção periódica.
     </div>
 
-    <div class="signatures">
-      <div class="sig">
-        <div class="name">${_h(config.nomeEmpresa || "FrostERP Refrigeração")}</div>
-        <div class="role">Prestador do Serviço</div>
-      </div>
-      <div class="sig">
-        <div class="name">${_h(cliente.nome || os.clienteNome || "Cliente")}</div>
-        <div class="role">Recebimento e Aprovação</div>
-      </div>
-    </div>
+    ${_pixBlock()}
 
     <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
@@ -10368,50 +10563,13 @@ export default function App() {
     return () => { clearTimeout(t1); };
   }, []);
 
-  // Realtime: re-assina quando o usuário muda (login estabelece scope de company).
-  // Sync incremental — em vez de loadAllData() (que re-lista TODOS os prefixos),
-  // re-lê apenas as fatias afetadas pelos eventos coalescidos no debounce de 300ms.
-  // Em empresa com 10k registros isso evita varrer 8 prefixos a cada mudança.
+  // Realtime: re-assina quando o usuário muda (login estabelece scope de company)
   useEffect(() => {
     if (!user) return; // sem login → sem canal
     let realtimeTimer = null;
-    const dirtyPrefixes = new Set();
-    const unsubscribe = subscribeToChanges((change) => {
-      if (change && change.key) {
-        // Mapeia a chave alterada para a fatia de state correspondente
-        const k = change.key;
-        if (k.startsWith("erp:client:")) dirtyPrefixes.add("clients");
-        else if (k.startsWith("erp:employee:")) dirtyPrefixes.add("employees");
-        else if (k.startsWith("erp:os:")) dirtyPrefixes.add("services");
-        else if (k.startsWith("erp:schedule:")) dirtyPrefixes.add("schedule");
-        else if (k.startsWith("erp:finance:") || k.startsWith("erp:transaction:")) dirtyPrefixes.add("finance");
-        else if (k === "erp:config" || k.startsWith("erp:config:")) dirtyPrefixes.add("config");
-        else dirtyPrefixes.add("__other"); // chaves fora do mapa: triggera reload completo
-      }
+    const unsubscribe = subscribeToChanges(() => {
       if (realtimeTimer) clearTimeout(realtimeTimer);
-      realtimeTimer = setTimeout(() => {
-        // __other → mantém o comportamento antigo de reload completo (raro)
-        if (dirtyPrefixes.has("__other")) {
-          dirtyPrefixes.clear();
-          loadAllData();
-          return;
-        }
-        const slices = Array.from(dirtyPrefixes);
-        dirtyPrefixes.clear();
-        if (slices.length === 0) return;
-        setData((prev) => {
-          const next = { ...prev };
-          for (const slice of slices) {
-            if (slice === "clients") next.clients = DB.list("erp:client:");
-            else if (slice === "employees") next.employees = DB.list("erp:employee:");
-            else if (slice === "services") next.services = DB.list("erp:os:");
-            else if (slice === "schedule") next.schedule = DB.list("erp:schedule:");
-            else if (slice === "finance") next.finance = DB.list("erp:finance:");
-            else if (slice === "config") next.config = DB.get("erp:config") || {};
-          }
-          return next;
-        });
-      }, 300);
+      realtimeTimer = setTimeout(() => { loadAllData(); }, 300);
     });
     return () => {
       if (realtimeTimer) clearTimeout(realtimeTimer);
