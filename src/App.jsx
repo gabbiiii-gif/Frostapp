@@ -3850,12 +3850,20 @@ function FinanceModule({ user, dateFilter, addToast }) {
 // tabular-numerals em todos os valores monetários, contraste AA. Alinhado
 // ao skill UI/UX Pro Max: rhythm 4/8pt, semantic color tokens, print-first.
 
-// Abre documento HTML em nova aba do navegador
+// Abre documento HTML em nova aba do navegador.
+// Usamos Blob URL para que <script>, onclick e window.print() funcionem
+// (browsers podem desabilitar scripts em documentos abertos via about:blank).
 function openHTMLDoc(html) {
-  const w = window.open("", "_blank");
-  if (!w) { alert("Permita popups para gerar documentos."); return; }
-  w.document.write(html);
-  w.document.close();
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const w = window.open(url, "_blank");
+  if (!w) {
+    URL.revokeObjectURL(url);
+    alert("Permita popups para gerar documentos.");
+    return;
+  }
+  // Libera o blob depois que a aba carregou (1 min é suficiente)
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
 // Formatação compacta de moeda (BRL) com tabular-nums implícito
@@ -3903,16 +3911,17 @@ function _docStyles(accentColor = "#1d4ed8") {
     .page{max-width:760px;margin:0 auto;background:var(--surface);border-radius:4px;box-shadow:0 1px 2px rgba(15,23,42,.04),0 8px 24px rgba(15,23,42,.08);overflow:hidden}
     .page-inner{padding:36px 44px}
 
-    /* ─── Header: identidade + badge ──────────────────────────────────── */
-    .hdr{display:flex;justify-content:space-between;align-items:flex-start;gap:24px;padding-bottom:20px;border-bottom:2px solid var(--accent)}
-    .hdr-brand{flex:1;min-width:0}
-    .hdr-brand .company{font-size:18px;font-weight:700;color:var(--ink-900);letter-spacing:-0.01em;line-height:1.2}
-    .hdr-brand .tagline{font-size:11px;color:var(--ink-500);margin-top:2px;font-weight:500}
-    .hdr-brand .contact{font-size:10.5px;color:var(--ink-500);margin-top:8px;line-height:1.6}
-    .hdr-doc{text-align:right;flex-shrink:0}
-    .hdr-doc .doc-type{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--accent)}
-    .hdr-doc .doc-num{font-size:22px;font-weight:800;color:var(--ink-900);letter-spacing:-0.02em;margin-top:2px;tab-size:2;font-variant-numeric:tabular-nums}
-    .hdr-doc .doc-date{font-size:10.5px;color:var(--ink-500);margin-top:4px;font-variant-numeric:tabular-nums}
+    /* ─── Header: logo + identidade centralizada + badge do documento ──── */
+    .hdr{display:flex;flex-direction:column;align-items:center;gap:8px;padding-bottom:20px;border-bottom:2px solid var(--accent);text-align:center}
+    .hdr-logo{max-width:120px;max-height:90px;object-fit:contain;margin-bottom:4px}
+    .hdr-brand{width:100%}
+    .hdr-brand .company{font-size:20px;font-weight:800;color:var(--ink-900);letter-spacing:-0.01em;line-height:1.2}
+    .hdr-brand .tagline{font-size:11.5px;color:var(--ink-500);margin-top:2px;font-weight:500;letter-spacing:.02em}
+    .hdr-brand .contact{font-size:10.5px;color:var(--ink-500);margin-top:6px;line-height:1.6;max-width:600px;margin-left:auto;margin-right:auto}
+    .hdr-doc{margin-top:10px;padding-top:10px;border-top:1px dashed var(--ink-300);width:100%;display:flex;flex-direction:column;align-items:center;gap:2px}
+    .hdr-doc .doc-type{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.14em;color:var(--accent)}
+    .hdr-doc .doc-num{font-size:22px;font-weight:800;color:var(--ink-900);letter-spacing:-0.02em;tab-size:2;font-variant-numeric:tabular-nums}
+    .hdr-doc .doc-date{font-size:10.5px;color:var(--ink-500);font-variant-numeric:tabular-nums}
 
     /* ─── Seção genérica ──────────────────────────────────────────────── */
     .section{margin-top:20px}
@@ -3997,18 +4006,30 @@ function _docStyles(accentColor = "#1d4ed8") {
   `;
 }
 
-// Header reutilizável — identidade da empresa + badge do documento
+// Header reutilizável — logo + identidade centralizada + badge do documento.
+// A logo é resolvida nesta ordem: config.logoUrl → activeCompany.logoUrl → nenhuma.
+// Todos os campos vêm do banco; aplique _h() antes de injetar (anti-XSS).
 function _docHeader(config, docType, numero, dataStr) {
-  // Todos os campos de config vêm do banco e podem ter sido cadastrados com markup —
-  // por isso, escape sempre antes de injetar.
-  const emp = config.nomeEmpresa || "FrostERP Refrigeração";
+  const emp = config.nomeEmpresa || config.razaoSocial || "FrostERP Refrigeração";
   const cnpj = config.cnpj ? `CNPJ ${config.cnpj}` : "";
   const tel = config.telefone ? `Tel ${config.telefone}` : "";
   const email = config.email || "";
   const end = config.endereco || "";
   const contactLine = [cnpj, tel, email, end].filter(Boolean).map(_h).join(" · ");
+
+  // Resolve logo: config explícito tem prioridade; senão tenta a empresa ativa.
+  let logoUrl = config.logoUrl || "";
+  if (!logoUrl) {
+    const activeId = (typeof getActiveCompanyId === "function") ? getActiveCompanyId() : null;
+    if (activeId) {
+      const company = DB.get("erp:company:" + activeId);
+      logoUrl = company?.logoUrl || "";
+    }
+  }
+
   return `
     <div class="hdr">
+      ${logoUrl ? `<img class="hdr-logo" src="${_h(logoUrl)}" alt="Logo ${_h(emp)}" />` : ""}
       <div class="hdr-brand">
         <div class="company">${_h(emp)}</div>
         <div class="tagline">Refrigeração e Climatização</div>
@@ -4034,18 +4055,73 @@ function _actionBar() {
 }
 
 // ─── Bloco PIX (dados de recebimento) ────────────────────────────────────────
-// Reutilizado em Orçamento, OS e Recibo. CNPJ formatado como chave PIX,
-// favorecido e banco visíveis para que o cliente possa pagar diretamente.
-function _pixBlock() {
+// Lê config.pixChave / pixFavorecido / pixBanco / pixQrUrl. Se nenhum desses
+// estiver setado, cai em valores padrão (THIAGO GONÇALVES PRADO — Sicredi)
+// para preservar comportamento prévio. QR Code default em /qr-pix-sicredi.jpeg.
+function _pixBlock(config) {
+  const cfg = config || {};
+  const chave = cfg.pixChave || "41.080.020/0001-05";
+  const tipoChave = cfg.pixTipoChave || "CNPJ";
+  const favorecido = cfg.pixFavorecido || "THIAGO GONÇALVES PRADO";
+  const banco = cfg.pixBanco || "Sicredi";
+  const qrUrl = cfg.pixQrUrl || "/qr-pix-sicredi.jpeg";
+
   return `
     <div class="section">
       <div class="info-card" style="border-left:3px solid var(--accent)">
         <div class="section-title" style="margin-bottom:10px">Pagamento via PIX</div>
-        <div class="info-grid" style="grid-template-columns:1fr 1fr;gap:8px 24px">
-          <div class="info-item mono"><label>Chave PIX (CNPJ)</label><span>41.080.020/0001-05</span></div>
-          <div class="info-item"><label>Favorecido</label><span>THIAGO GONÇALVES PRADO</span></div>
-          <div class="info-item"><label>Banco</label><span>Sicredi</span></div>
+        <div style="display:flex;gap:18px;align-items:center">
+          ${qrUrl ? `<img src="${_h(qrUrl)}" alt="QR Code PIX" style="width:120px;height:120px;object-fit:contain;border:1px solid var(--ink-300);border-radius:6px;background:#fff;padding:4px;flex-shrink:0" />` : ""}
+          <div style="flex:1;min-width:0">
+            <div class="info-grid" style="grid-template-columns:1fr;gap:8px">
+              <div class="info-item mono"><label>Chave PIX (${_h(tipoChave)})</label><span>${_h(chave)}</span></div>
+              <div class="info-item"><label>Favorecido</label><span>${_h(favorecido)}</span></div>
+              <div class="info-item"><label>Banco</label><span>${_h(banco)}</span></div>
+            </div>
+          </div>
         </div>
+      </div>
+    </div>
+  `;
+}
+
+// ─── Bloco do Cliente ────────────────────────────────────────────────────────
+// Mostra nome, endereço, telefone e CNPJ/CPF (conforme tipo do cadastro).
+// Formato compacto em info-card; campos faltantes ficam ocultos.
+function _clienteBlock(cliente, os) {
+  const nome = cliente.nome || os.clienteNome || "—";
+  const tel = cliente.telefone || "";
+  const docTipo = cliente.tipo === "pj" ? "CNPJ" : "CPF";
+  const docVal = cliente.tipo === "pj" ? cliente.cnpj : cliente.cpf;
+  const endereco = (cliente.endereco && (cliente.endereco.rua || cliente.endereco.cidade))
+    ? `${cliente.endereco.rua || ""}${cliente.endereco.numero ? ", " + cliente.endereco.numero : ""}${cliente.endereco.bairro ? " · " + cliente.endereco.bairro : ""}${cliente.endereco.cidade ? " — " + cliente.endereco.cidade : ""}${cliente.endereco.estado ? "/" + cliente.endereco.estado : ""}`
+    : (os.endereco || "");
+
+  return `
+    <div class="section">
+      <div class="info-card">
+        <div class="section-title" style="margin-bottom:10px">Cliente</div>
+        <div class="info-grid" style="grid-template-columns:1fr 1fr;gap:8px 24px">
+          <div class="info-item"><label>Nome / Razão Social</label><span>${_h(nome)}</span></div>
+          ${docVal ? `<div class="info-item mono"><label>${docTipo}</label><span>${_h(docVal)}</span></div>` : ""}
+          ${tel ? `<div class="info-item mono"><label>Telefone</label><span>${_h(tel)}</span></div>` : ""}
+          ${endereco ? `<div class="info-item" style="grid-column:1 / -1"><label>Endereço</label><span>${_h(endereco)}</span></div>` : ""}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+// ─── Bloco de Agradecimento (Recibo) ─────────────────────────────────────────
+// Mensagem cordial exibida no Recibo no lugar do bloco PIX. Texto custom
+// pode ser passado via config.mensagemAgradecimento; fallback é genérico.
+function _agradecimentoBlock(config) {
+  const msg = (config && config.mensagemAgradecimento) ||
+    "Agradecemos a preferência! Foi um prazer atender você. Conte com a Minas Refrigeração sempre que precisar.";
+  return `
+    <div class="section">
+      <div class="info-card" style="text-align:center;border:1px solid var(--accent-border);background:var(--accent-soft)">
+        <div style="font-size:14px;font-weight:600;color:var(--ink-900);line-height:1.5">${_h(msg)}</div>
       </div>
     </div>
   `;
@@ -4123,12 +4199,7 @@ function generateOrcamentoHTML(os, clients) {
   <div class="page-inner">
     ${_docHeader(config, "Orçamento", os.numero, `Emitido em ${dataHoje}`)}
 
-    <!-- Cliente: apenas nome -->
-    <div class="section">
-      <div class="info-card">
-        <div class="info-item"><label>Cliente</label><span>${_h(cliente.nome || os.clienteNome || "—")}</span></div>
-      </div>
-    </div>
+    ${_clienteBlock(cliente, os)}
 
     <!-- Serviços -->
     <div class="section">
@@ -4176,7 +4247,7 @@ function generateOrcamentoHTML(os, clients) {
       Validade do orçamento até <strong style="color:var(--ink-900)">${_h(validade)}</strong>. Serviço com garantia de 90 dias contados a partir da execução, cobrindo defeitos de execução. Equipamentos seguem garantia do fabricante. Não cobre mau uso, sobrecarga elétrica ou falta de manutenção.
     </div>
 
-    ${_pixBlock()}
+    ${_pixBlock(config)}
 
     <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
@@ -4230,12 +4301,7 @@ function generateOSHTML(os, clients) {
   <div class="page-inner">
     ${_docHeader(config, "Ordem de Serviço", os.numero, `Abertura: ${dataAbertura}`)}
 
-    <!-- Cliente: apenas nome -->
-    <div class="section">
-      <div class="info-card">
-        <div class="info-item"><label>Cliente</label><span>${_h(cliente.nome || os.clienteNome || "—")}</span></div>
-      </div>
-    </div>
+    ${_clienteBlock(cliente, os)}
 
     ${servicos ? `
     <!-- Serviços executados -->
@@ -4290,7 +4356,7 @@ function generateOSHTML(os, clients) {
       Serviço com garantia de 90 dias contados a partir da execução, cobrindo defeitos de execução. Equipamentos seguem garantia do fabricante conforme manual. Não cobre danos por mau uso, sobrecarga elétrica, sinistros ou falta de manutenção periódica.
     </div>
 
-    ${_pixBlock()}
+    ${_pixBlock(config)}
 
     <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
@@ -4354,12 +4420,7 @@ function generateReciboHTML(os, clients) {
       <div class="hero-hint">R$ ${valorExtenso}</div>
     </div>
 
-    <!-- Cliente: apenas nome -->
-    <div class="section">
-      <div class="info-card">
-        <div class="info-item"><label>Recebemos de</label><span>${_h(cliente.nome || os.clienteNome || "—")}</span></div>
-      </div>
-    </div>
+    ${_clienteBlock(cliente, os)}
 
     ${servicos ? `
     <!-- Serviços executados -->
@@ -4404,7 +4465,7 @@ function generateReciboHTML(os, clients) {
       Este serviço possui garantia de 90 dias contados a partir da data de conclusão, cobrindo defeitos de execução. Equipamentos seguem garantia do fabricante conforme manual do produto. Não cobre danos por mau uso, sobrecargas elétricas, sinistros ou falta de manutenção periódica.
     </div>
 
-    ${_pixBlock()}
+    ${_agradecimentoBlock(config)}
 
     <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
@@ -9261,6 +9322,9 @@ function AutoBackupPanel({ addToast }) {
 function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
   const [config, setConfig] = useState({
     razaoSocial: "", cnpj: "", telefone: "", email: "", endereco: "",
+    logoUrl: "",
+    pixChave: "", pixTipoChave: "CNPJ", pixFavorecido: "", pixBanco: "", pixQrUrl: "",
+    mensagemAgradecimento: "",
   });
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmResetFinal, setConfirmResetFinal] = useState(false);
@@ -9279,6 +9343,16 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
       telefone: cfg.telefone || "",
       email: cfg.email || "",
       endereco: cfg.endereco || "",
+      // ─── Logo da empresa (aparece centralizada nos documentos) ───────────
+      logoUrl: cfg.logoUrl || "",
+      // ─── Dados de PIX (Orçamento + OS) ───────────────────────────────────
+      pixChave: cfg.pixChave || "",
+      pixTipoChave: cfg.pixTipoChave || "CNPJ",
+      pixFavorecido: cfg.pixFavorecido || "",
+      pixBanco: cfg.pixBanco || "",
+      pixQrUrl: cfg.pixQrUrl || "",
+      // ─── Mensagem de agradecimento (Recibo) ──────────────────────────────
+      mensagemAgradecimento: cfg.mensagemAgradecimento || "",
     });
 
     // Prefixos ativos após remoção dos módulos financeiro/fiscal/estoque/mensageria
@@ -9345,6 +9419,13 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
       telefone: config.telefone,
       email: config.email,
       endereco: config.endereco,
+      logoUrl: config.logoUrl,
+      pixChave: config.pixChave,
+      pixTipoChave: config.pixTipoChave,
+      pixFavorecido: config.pixFavorecido,
+      pixBanco: config.pixBanco,
+      pixQrUrl: config.pixQrUrl,
+      mensagemAgradecimento: config.mensagemAgradecimento,
     };
     DB.set("erp:config", updated);
     addToast("Configurações salvas com sucesso.", "success");
@@ -9610,6 +9691,108 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
               className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
             />
           </div>
+
+          {/* ─── Logo da Empresa (centralizada nos documentos PDF) ───────────── */}
+          <div className="border-t border-gray-700 pt-4">
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">Logo da Empresa (URL ou data URL)</label>
+            <input name="logoUrl"
+              type="text"
+              value={config.logoUrl}
+              onChange={(e) => setConfig({ ...config, logoUrl: e.target.value })}
+              placeholder="https://...  ou  /logo.svg  ou  data:image/png;base64,..."
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+            />
+            <p className="text-xs text-gray-500 mt-1">Aparece centralizada no topo do Orçamento, OS e Recibo.</p>
+            {config.logoUrl ? (
+              <div className="mt-2 inline-block bg-white p-2 rounded-lg">
+                <img src={config.logoUrl} alt="Preview da logo" className="max-h-16 max-w-[160px] object-contain" />
+              </div>
+            ) : null}
+          </div>
+
+          {/* ─── PIX (Orçamento + OS) ────────────────────────────────────────── */}
+          <div className="border-t border-gray-700 pt-4">
+            <h4 className="text-base font-semibold text-white mb-1">Chave PIX e QR Code</h4>
+            <p className="text-xs text-gray-500 mb-3">Esses dados aparecem no Orçamento e na Ordem de Serviço (não aparecem no Recibo).</p>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo da Chave</label>
+                <select
+                  value={config.pixTipoChave}
+                  onChange={(e) => setConfig({ ...config, pixTipoChave: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                >
+                  <option value="CNPJ">CNPJ</option>
+                  <option value="CPF">CPF</option>
+                  <option value="E-mail">E-mail</option>
+                  <option value="Telefone">Telefone</option>
+                  <option value="Aleatória">Aleatória</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Chave PIX</label>
+                <input name="pixChave"
+                  type="text"
+                  value={config.pixChave}
+                  onChange={(e) => setConfig({ ...config, pixChave: e.target.value })}
+                  placeholder="00.000.000/0000-00"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-4 mt-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Favorecido</label>
+                <input name="pixFavorecido"
+                  type="text"
+                  value={config.pixFavorecido}
+                  onChange={(e) => setConfig({ ...config, pixFavorecido: e.target.value })}
+                  placeholder="Nome do titular da conta"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Banco</label>
+                <input name="pixBanco"
+                  type="text"
+                  value={config.pixBanco}
+                  onChange={(e) => setConfig({ ...config, pixBanco: e.target.value })}
+                  placeholder="Sicredi, Caixa, Nubank..."
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                />
+              </div>
+            </div>
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">QR Code do PIX (URL ou data URL)</label>
+              <input name="pixQrUrl"
+                type="text"
+                value={config.pixQrUrl}
+                onChange={(e) => setConfig({ ...config, pixQrUrl: e.target.value })}
+                placeholder="/qr-pix-sicredi.jpeg  ou  https://..."
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+              />
+              <p className="text-xs text-gray-500 mt-1">Imagem do QR Code que será impressa ao lado dos dados do PIX. Padrão: <code>/qr-pix-sicredi.jpeg</code>.</p>
+              {config.pixQrUrl ? (
+                <div className="mt-2 inline-block bg-white p-2 rounded-lg">
+                  <img src={config.pixQrUrl} alt="Preview do QR Code" className="max-h-32 max-w-[140px] object-contain" />
+                </div>
+              ) : null}
+            </div>
+          </div>
+
+          {/* ─── Mensagem de agradecimento (Recibo) ──────────────────────────── */}
+          <div className="border-t border-gray-700 pt-4">
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">Mensagem de Agradecimento (Recibo)</label>
+            <textarea
+              value={config.mensagemAgradecimento}
+              onChange={(e) => setConfig({ ...config, mensagemAgradecimento: e.target.value })}
+              placeholder="Agradecemos a preferência! Foi um prazer atender você..."
+              rows={3}
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition resize-none"
+            />
+            <p className="text-xs text-gray-500 mt-1">Aparece no Recibo no lugar dos dados de PIX. Deixe em branco para usar a mensagem padrão.</p>
+          </div>
+
           <div className="flex justify-end">
             <button onClick={handleSaveConfig} className="px-6 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
               Salvar Configurações
