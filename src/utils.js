@@ -109,7 +109,13 @@ export function filterByDate(items, dateField, dateFilter) {
   }
 
   return items.filter((item) => {
-    const itemDate = new Date(item[dateField]);
+    // Strings "YYYY-MM-DD" sem hora seriam parseadas como UTC, deslocando 3h
+    // em PT-BR e excluindo registros do início do range. Forçamos T00:00:00
+    // local antes do parse para alinhar com os bounds (que ja são locais).
+    const raw = item[dateField];
+    const rawStr = raw == null ? '' : String(raw);
+    const isDateOnly = /^\d{4}-\d{2}-\d{2}$/.test(rawStr);
+    const itemDate = isDateOnly ? new Date(rawStr + 'T00:00:00') : new Date(raw);
     return itemDate >= start && itemDate <= end;
   });
 }

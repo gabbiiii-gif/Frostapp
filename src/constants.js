@@ -1,0 +1,149 @@
+// ─── Constantes globais do FrostERP ─────────────────────────────────────────
+// Extraídas de App.jsx para reduzir o tamanho do arquivo principal e permitir
+// reuso por módulos extraídos no futuro. Tudo aqui é declarativo (sem JSX).
+
+// Detecta se a URL aponta para um arquivo de vídeo (preview do tecnico)
+export const VIDEO_EXT_RE = /\.(mp4|mov|webm|m4v|avi|mkv|ogv|3gp)(\?|$)/i;
+export const isVideoUrl = (url) => typeof url === "string" && VIDEO_EXT_RE.test(url);
+
+// Paleta compartilhada por gráficos e badges
+export const COLORS = ["#3b82f6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"];
+
+// Mapeamento global de status — usado pelo StatusBadge em OS, Agenda, Cadastros e Financeiro
+export const STATUS_MAP = {
+  ativo: { label: "Ativo", color: "bg-green-500" },
+  inativo: { label: "Inativo", color: "bg-gray-500" },
+  concluido: { label: "Concluído", color: "bg-green-500" },
+  pendente: { label: "Pendente", color: "bg-yellow-500" },
+  em_andamento: { label: "Em Andamento", color: "bg-blue-500" },
+  cancelado: { label: "Cancelado", color: "bg-red-500" },
+  agendado: { label: "Agendado", color: "bg-cyan-500" },
+  confirmado: { label: "Confirmado", color: "bg-blue-500" },
+  // Status do fluxo da OS (alinhados ao STATUS_FLOW de ProcessModule)
+  aguardando: { label: "Aguardando", color: "bg-yellow-500" },
+  em_deslocamento: { label: "Em Deslocamento", color: "bg-cyan-500" },
+  em_execucao: { label: "Em Execução", color: "bg-blue-500" },
+  finalizado: { label: "Finalizado", color: "bg-green-500" },
+  // Novos status do fluxo Tech App → ERP
+  em_servico: { label: "Em Serviço", color: "bg-blue-600" },
+  aguardando_finalizacao: { label: "Aguardando Finalização", color: "bg-orange-500" },
+  pago: { label: "Pago", color: "bg-green-500" },
+  atrasado: { label: "Atrasado", color: "bg-red-500" },
+};
+
+// Matriz de permissões por role — inclui módulo financeiro
+export const ROLE_PERMISSIONS = {
+  admin: ["all"],
+  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config"],
+  tecnico: ["dashboard", "os", "agenda"],
+  atendente: ["dashboard", "clientes", "os", "agenda"],
+};
+
+// Categorias separadas em receita (entradas) e despesa (saídas) para evitar
+// confusão no relatório — o usuário só vê as categorias relevantes ao tipo
+// selecionado no formulário de transação.
+export const CATEGORIES_RECEITA = [
+  "Instalação",
+  "Manutenção",
+  "Troca de Peças",
+  "Solda",
+  "Venda de Equipamento",
+  "Venda de Peça",
+  "Contrato de Manutenção",
+  "Outros",
+];
+
+export const CATEGORIES_DESPESA = [
+  "Peça/Material",
+  "Combustível",
+  "Aluguel",
+  "Salário",
+  "Imposto",
+  "Ferramentas",
+  "Veículo",
+  "Marketing",
+  "Outros",
+];
+
+export const PAYMENT_METHODS = [
+  "PIX",
+  "Cartão de Crédito",
+  "Cartão de Débito",
+  "Boleto",
+  "Dinheiro",
+  "Transferência",
+];
+
+// Tipos de equipamento usados no formulário de OS — define quais campos
+// técnicos aparecem (refrigeração, climatização e linha branca).
+export const EQUIPMENT_TYPES = {
+  central: {
+    label: "Central de Ar (Split/Janela)",
+    capacityLabel: "Capacidade (BTUs)",
+    capacityPlaceholder: "Ex: 12000",
+    capacityKey: "equipamentoBTUs",
+  },
+  geladeira: {
+    label: "Geladeira / Freezer",
+    capacityLabel: "Capacidade (Litros)",
+    capacityPlaceholder: "Ex: 450",
+    capacityKey: "equipamentoLitros",
+  },
+  lavadora: {
+    label: "Máquina de Lavar",
+    capacityLabel: "Capacidade (Kg)",
+    capacityPlaceholder: "Ex: 12",
+    capacityKey: "equipamentoKg",
+  },
+  centrifuga: {
+    label: "Centrífuga",
+    capacityLabel: "Capacidade (Kg)",
+    capacityPlaceholder: "Ex: 8",
+    capacityKey: "equipamentoKg",
+  },
+  expositor: {
+    label: "Expositor / Vitrine Refrigerada",
+    capacityLabel: "Capacidade (Litros)",
+    capacityPlaceholder: "Ex: 800",
+    capacityKey: "equipamentoLitros",
+  },
+  bebedouro_industrial: {
+    label: "Bebedouro Industrial",
+    capacityLabel: "Capacidade (Litros/h)",
+    capacityPlaceholder: "Ex: 100",
+    capacityKey: "equipamentoLitros",
+  },
+  bebedouro_mesa: {
+    label: "Bebedouro / Gelágua Mesa",
+    capacityLabel: "Modelo",
+    capacityPlaceholder: "Ex: Mesa 20L",
+    capacityKey: "equipamentoModeloExtra",
+  },
+  bebedouro_coluna: {
+    label: "Bebedouro / Gelágua Coluna",
+    capacityLabel: "Modelo",
+    capacityPlaceholder: "Ex: Coluna 20L",
+    capacityKey: "equipamentoModeloExtra",
+  },
+  camara_fria: {
+    label: "Câmara Fria",
+    capacityLabel: "Volume (m³)",
+    capacityPlaceholder: "Ex: 20",
+    capacityKey: "equipamentoVolumeM3",
+  },
+  outro: {
+    label: "Outro",
+    capacityLabel: "Especificação",
+    capacityPlaceholder: "Descreva",
+    capacityKey: "equipamentoEspecificacao",
+  },
+};
+
+// Lista usada no dropdown de serviços da OS e da Agenda
+export const SERVICE_TYPES_OS = [
+  "Instalação",
+  "Manutenção",
+  "Troca de Peças",
+  "Solda",
+  "Desinstalação",
+];

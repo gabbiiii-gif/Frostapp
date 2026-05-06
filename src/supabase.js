@@ -271,6 +271,8 @@ export async function deleteFotoOS(publicUrl) {
 }
 
 // ─── Realtime: escuta mudanças no Supabase e atualiza o local ────────────────
+// O callback recebe { eventType, key } para que o consumidor possa fazer sync
+// incremental (re-ler só a fatia afetada) em vez de recarregar tudo.
 export function subscribeToChanges(onDataChanged) {
   if (!supabase) return () => {};
   const companyId = getCompanyId();
@@ -285,12 +287,12 @@ export function subscribeToChanges(onDataChanged) {
         if (eventType === 'INSERT' || eventType === 'UPDATE') {
           if (newRow && newRow.key) {
             window.storage.setItem(newRow.key, JSON.stringify(newRow.value));
-            if (onDataChanged) onDataChanged();
+            if (onDataChanged) onDataChanged({ eventType, key: newRow.key });
           }
         } else if (eventType === 'DELETE') {
           if (oldRow && oldRow.key) {
             window.storage.removeItem(oldRow.key);
-            if (onDataChanged) onDataChanged();
+            if (onDataChanged) onDataChanged({ eventType, key: oldRow.key });
           }
         }
       }

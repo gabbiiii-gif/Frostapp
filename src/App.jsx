@@ -26,160 +26,20 @@ import {
   daysFromNow,
   monthsAgo,
 } from "./utils.js";
+import {
+  VIDEO_EXT_RE,
+  isVideoUrl,
+  COLORS,
+  STATUS_MAP,
+  ROLE_PERMISSIONS,
+  CATEGORIES_RECEITA,
+  CATEGORIES_DESPESA,
+  PAYMENT_METHODS,
+  EQUIPMENT_TYPES,
+  SERVICE_TYPES_OS,
+} from "./constants.js";
 
-// Detecta se a URL aponta para um arquivo de vídeo (preview do tecnico)
-const VIDEO_EXT_RE = /\.(mp4|mov|webm|m4v|avi|mkv|ogv|3gp)(\?|$)/i;
-const isVideoUrl = (url) => typeof url === "string" && VIDEO_EXT_RE.test(url);
-
-// ─── CONSTANTS ──────────────────────────────────────────────────────────────────
-
-// Paleta compartilhada por gráficos e badges
-const COLORS = ["#3b82f6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"];
-
-// Mapeamento global de status — usado pelo StatusBadge em OS, Agenda, Cadastros e Financeiro
-const STATUS_MAP = {
-  ativo: { label: "Ativo", color: "bg-green-500" },
-  inativo: { label: "Inativo", color: "bg-gray-500" },
-  concluido: { label: "Concluído", color: "bg-green-500" },
-  pendente: { label: "Pendente", color: "bg-yellow-500" },
-  em_andamento: { label: "Em Andamento", color: "bg-blue-500" },
-  cancelado: { label: "Cancelado", color: "bg-red-500" },
-  agendado: { label: "Agendado", color: "bg-cyan-500" },
-  confirmado: { label: "Confirmado", color: "bg-blue-500" },
-  // ─── Status do fluxo da OS (alinhados ao STATUS_FLOW de ProcessModule) ──
-  aguardando: { label: "Aguardando", color: "bg-yellow-500" },
-  em_deslocamento: { label: "Em Deslocamento", color: "bg-cyan-500" },
-  em_execucao: { label: "Em Execução", color: "bg-blue-500" },
-  finalizado: { label: "Finalizado", color: "bg-green-500" },
-  // ─── Novos status do fluxo Tech App → ERP ───────────────────────────────
-  // Técnico chegou no local e iniciou o serviço
-  em_servico: { label: "Em Serviço", color: "bg-blue-600" },
-  // Técnico terminou e enviou relatório — aguarda revisão admin/gerente para fechar OS
-  aguardando_finalizacao: { label: "Aguardando Finalização", color: "bg-orange-500" },
-  pago: { label: "Pago", color: "bg-green-500" },
-  atrasado: { label: "Atrasado", color: "bg-red-500" },
-};
-
-// Matriz de permissões por role — inclui módulo financeiro
-const ROLE_PERMISSIONS = {
-  admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config"],
-  tecnico: ["dashboard", "os", "agenda"],
-  atendente: ["dashboard", "clientes", "os", "agenda"],
-};
-
-// ─── CATEGORIAS E FORMAS DE PAGAMENTO DO FINANCEIRO ─────────────────────────
-// Categorias separadas em receita (entradas) e despesa (saídas) para
-// evitar confusão no relatório — o usuário só vê as categorias relevantes
-// ao tipo selecionado.
-const CATEGORIES_RECEITA = [
-  "Instalação",
-  "Manutenção",
-  "Troca de Peças",
-  "Solda",
-  "Venda de Equipamento",
-  "Venda de Peça",
-  "Contrato de Manutenção",
-  "Outros",
-];
-
-const CATEGORIES_DESPESA = [
-  "Peça/Material",
-  "Combustível",
-  "Aluguel",
-  "Salário",
-  "Imposto",
-  "Ferramentas",
-  "Veículo",
-  "Marketing",
-  "Outros",
-];
-
-const PAYMENT_METHODS = [
-  "PIX",
-  "Cartão de Crédito",
-  "Cartão de Débito",
-  "Boleto",
-  "Dinheiro",
-  "Transferência",
-];
-
-// ─── TIPOS DE EQUIPAMENTO — OS ──────────────────────────────────────────────
-// Cada tipo define quais campos técnicos aparecem no formulário de OS.
-// Usado para refrigeração comercial, climatização e linha branca.
-const EQUIPMENT_TYPES = {
-  central: {
-    label: "Central de Ar (Split/Janela)",
-    capacityLabel: "Capacidade (BTUs)",
-    capacityPlaceholder: "Ex: 12000",
-    capacityKey: "equipamentoBTUs",
-  },
-  geladeira: {
-    label: "Geladeira / Freezer",
-    capacityLabel: "Capacidade (Litros)",
-    capacityPlaceholder: "Ex: 450",
-    capacityKey: "equipamentoLitros",
-  },
-  lavadora: {
-    label: "Máquina de Lavar",
-    capacityLabel: "Capacidade (Kg)",
-    capacityPlaceholder: "Ex: 12",
-    capacityKey: "equipamentoKg",
-  },
-  centrifuga: {
-    label: "Centrífuga",
-    capacityLabel: "Capacidade (Kg)",
-    capacityPlaceholder: "Ex: 8",
-    capacityKey: "equipamentoKg",
-  },
-  expositor: {
-    label: "Expositor / Vitrine Refrigerada",
-    capacityLabel: "Capacidade (Litros)",
-    capacityPlaceholder: "Ex: 800",
-    capacityKey: "equipamentoLitros",
-  },
-  bebedouro_industrial: {
-    label: "Bebedouro Industrial",
-    capacityLabel: "Capacidade (Litros/h)",
-    capacityPlaceholder: "Ex: 100",
-    capacityKey: "equipamentoLitros",
-  },
-  bebedouro_mesa: {
-    label: "Bebedouro / Gelágua Mesa",
-    capacityLabel: "Modelo",
-    capacityPlaceholder: "Ex: Mesa 20L",
-    capacityKey: "equipamentoModeloExtra",
-  },
-  bebedouro_coluna: {
-    label: "Bebedouro / Gelágua Coluna",
-    capacityLabel: "Modelo",
-    capacityPlaceholder: "Ex: Coluna 20L",
-    capacityKey: "equipamentoModeloExtra",
-  },
-  camara_fria: {
-    label: "Câmara Fria",
-    capacityLabel: "Volume (m³)",
-    capacityPlaceholder: "Ex: 20",
-    capacityKey: "equipamentoVolumeM3",
-  },
-  outro: {
-    label: "Outro",
-    capacityLabel: "Especificação",
-    capacityPlaceholder: "Descreva",
-    capacityKey: "equipamentoEspecificacao",
-  },
-};
-
-// ─── TIPOS DE SERVIÇO — OS ───────────────────────────────────────────────────
-// Lista usada no dropdown de serviços da OS e da Agenda.
-// Removidos: Higienização, Reparo. Adicionados: Troca de Peças, Solda.
-const SERVICE_TYPES_OS = [
-  "Instalação",
-  "Manutenção",
-  "Troca de Peças",
-  "Solda",
-  "Desinstalação",
-];
+// Constantes globais — vide src/constants.js
 
 // ─── DB LAYER ───────────────────────────────────────────────────────────────────
 
@@ -10508,13 +10368,50 @@ export default function App() {
     return () => { clearTimeout(t1); };
   }, []);
 
-  // Realtime: re-assina quando o usuário muda (login estabelece scope de company)
+  // Realtime: re-assina quando o usuário muda (login estabelece scope de company).
+  // Sync incremental — em vez de loadAllData() (que re-lista TODOS os prefixos),
+  // re-lê apenas as fatias afetadas pelos eventos coalescidos no debounce de 300ms.
+  // Em empresa com 10k registros isso evita varrer 8 prefixos a cada mudança.
   useEffect(() => {
     if (!user) return; // sem login → sem canal
     let realtimeTimer = null;
-    const unsubscribe = subscribeToChanges(() => {
+    const dirtyPrefixes = new Set();
+    const unsubscribe = subscribeToChanges((change) => {
+      if (change && change.key) {
+        // Mapeia a chave alterada para a fatia de state correspondente
+        const k = change.key;
+        if (k.startsWith("erp:client:")) dirtyPrefixes.add("clients");
+        else if (k.startsWith("erp:employee:")) dirtyPrefixes.add("employees");
+        else if (k.startsWith("erp:os:")) dirtyPrefixes.add("services");
+        else if (k.startsWith("erp:schedule:")) dirtyPrefixes.add("schedule");
+        else if (k.startsWith("erp:finance:") || k.startsWith("erp:transaction:")) dirtyPrefixes.add("finance");
+        else if (k === "erp:config" || k.startsWith("erp:config:")) dirtyPrefixes.add("config");
+        else dirtyPrefixes.add("__other"); // chaves fora do mapa: triggera reload completo
+      }
       if (realtimeTimer) clearTimeout(realtimeTimer);
-      realtimeTimer = setTimeout(() => { loadAllData(); }, 300);
+      realtimeTimer = setTimeout(() => {
+        // __other → mantém o comportamento antigo de reload completo (raro)
+        if (dirtyPrefixes.has("__other")) {
+          dirtyPrefixes.clear();
+          loadAllData();
+          return;
+        }
+        const slices = Array.from(dirtyPrefixes);
+        dirtyPrefixes.clear();
+        if (slices.length === 0) return;
+        setData((prev) => {
+          const next = { ...prev };
+          for (const slice of slices) {
+            if (slice === "clients") next.clients = DB.list("erp:client:");
+            else if (slice === "employees") next.employees = DB.list("erp:employee:");
+            else if (slice === "services") next.services = DB.list("erp:os:");
+            else if (slice === "schedule") next.schedule = DB.list("erp:schedule:");
+            else if (slice === "finance") next.finance = DB.list("erp:finance:");
+            else if (slice === "config") next.config = DB.get("erp:config") || {};
+          }
+          return next;
+        });
+      }, 300);
     });
     return () => {
       if (realtimeTimer) clearTimeout(realtimeTimer);

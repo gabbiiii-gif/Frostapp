@@ -144,11 +144,11 @@ describe('formatPhone', () => {
 });
 
 describe('filterByDate', () => {
-  // Datas em meio de mês evitam zonas-cinzas de fuso horário no parser ISO
+  // Strings "YYYY-MM-DD" sem hora — caso real usado pelos formulários do app
   const items = [
-    { id: 1, data: '2026-05-15T12:00:00' },
-    { id: 2, data: '2026-04-15T12:00:00' },
-    { id: 3, data: '2026-01-15T12:00:00' },
+    { id: 1, data: '2026-05-06' },
+    { id: 2, data: '2026-04-01' },
+    { id: 3, data: '2026-01-15' },
   ];
 
   it('period="all" devolve a lista intacta', () => {
@@ -159,11 +159,11 @@ describe('filterByDate', () => {
     expect(filterByDate(items, 'data', null)).toHaveLength(3);
   });
 
-  it('period="custom" respeita startDate e endDate', () => {
+  it('period="custom" inclui datas-limite (sem deslocamento de fuso)', () => {
     const out = filterByDate(items, 'data', {
       period: 'custom',
       startDate: '2026-04-01',
-      endDate: '2026-05-31',
+      endDate: '2026-05-06',
     });
     expect(out.map(i => i.id).sort()).toEqual([1, 2]);
   });
