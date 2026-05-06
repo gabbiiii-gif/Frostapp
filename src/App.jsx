@@ -10582,20 +10582,25 @@ export default function App() {
       // Upload inicial só roda quando NÃO existe nada no Supabase (evita escrita massiva a cada load)
     });
 
-    // Realtime: escuta mudanças de outros aparelhos e atualiza dados automaticamente
-    // Debounce 300ms — evita reload em rajada quando muitas chaves mudam de uma vez
+    // (Realtime foi movido para useEffect próprio que depende de `user`,
+    //  porque o canal precisa do company_id que só existe pós-login.)
+
+    return () => { clearTimeout(t1); };
+  }, []);
+
+  // Realtime: re-assina quando o usuário muda (login estabelece scope de company)
+  useEffect(() => {
+    if (!user) return; // sem login → sem canal
     let realtimeTimer = null;
     const unsubscribe = subscribeToChanges(() => {
       if (realtimeTimer) clearTimeout(realtimeTimer);
       realtimeTimer = setTimeout(() => { loadAllData(); }, 300);
     });
-
     return () => {
-      clearTimeout(t1);
       if (realtimeTimer) clearTimeout(realtimeTimer);
       unsubscribe();
     };
-  }, []);
+  }, [user, loadAllData]);
 
   // ─── Load All Data ───
   const loadAllData = useCallback(() => {
