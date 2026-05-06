@@ -4,7 +4,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer
 } from "recharts";
-import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS } from "./supabase.js";
+import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
@@ -1647,6 +1647,30 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
 
     setLoading(true);
     try {
+      // ─── PORTÃO Supabase Auth (item 1 da auditoria) ────────────────────
+      // Antes de validar local, autentica no Supabase. Isso:
+      //  - estabelece JWT server-validated (item 3),
+      //  - libera RLS por company para hydrate (item 2),
+      //  - migra usuários PBKDF2 legados via Edge Function migrate-login.
+      const authResp = await signInWithFallback(normalizedEmail, password);
+      if (!authResp.ok) {
+        // Mantém contagem de tentativas legada para lockout
+        const persistedNow = readLoginAttempts();
+        const attemptsNow = (persistedNow.count || failedAttempts) + 1;
+        let lockNow = 0;
+        if (attemptsNow >= 15) lockNow = Date.now() + 300000;
+        else if (attemptsNow >= 10) lockNow = Date.now() + 60000;
+        else if (attemptsNow >= 5) lockNow = Date.now() + 30000;
+        setFailedAttempts(attemptsNow);
+        setLockoutUntil(lockNow || null);
+        writeLoginAttempts({ count: attemptsNow, lockoutUntil: lockNow });
+        setError(authResp.error || "Email ou senha incorretos.");
+        setLoading(false);
+        return;
+      }
+      // Após auth, sincroniza dados da empresa (RLS agora deixa)
+      await hydrateFromSupabase();
+
       const users = DB.list("erp:user:");
       let found = null;
 
@@ -1667,6 +1691,24 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
             found = u;
             break;
           }
+        }
+      }
+      // Se Supabase Auth passou mas o user legado não foi achado (ex: cadastro novo
+      // sem PBKDF2 ainda), gera um user a partir do company_member.
+      if (!found) {
+        const member = getCurrentMember();
+        if (member) {
+          found = {
+            id: member.legacy_user_id || member.user_id,
+            nome: member.nome || normalizedEmail,
+            email: normalizedEmail,
+            avatar: member.avatar || (member.nome || "?").slice(0, 2).toUpperCase(),
+            role: member.role || "tecnico",
+            status: member.status || "ativo",
+            companyId: member.company_id,
+            customPermissions: member.custom_permissions || null,
+            isSuperAdmin: !!member.is_super_admin,
+          };
         }
       }
 
@@ -10471,8 +10513,9 @@ export default function App() {
       return () => clearTimeout(t2);
     }, 3000);
 
-    // Real init — hydrate from Supabase, then load
-    hydrateFromSupabase().then(async () => {
+    // Real init — restaura sessão Supabase (se houver), só então hidrata.
+    // RLS bloqueia leitura sem auth, então sem session hydrate é no-op (e isso é OK).
+    ensureMemberLoaded().then(() => hydrateFromSupabase()).then(async () => {
       // Inicialização: popula dados demo se for o primeiro acesso (sem usuários)
       await seedDatabase();
       // Multi-tenant: garante company padrão e tagga registros legados
@@ -10803,6 +10846,8 @@ export default function App() {
     setGlobalSearch("");
     setGlobalSearchResults([]);
     sessionStorage.removeItem("frost_session");
+    // Encerra a sessão do Supabase Auth (limpa JWT do localStorage do supabase-js)
+    signOutSupabase();
   }, [user]);
 
   // ─── Render ───

@@ -3,76 +3,165 @@ import { createClient } from '@supabase/supabase-js';
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Cria o cliente Supabase apenas se as variáveis de ambiente estiverem disponíveis
+// Cria o cliente Supabase apenas se as variáveis de ambiente estiverem disponíveis.
+// O cliente persiste sessão automaticamente (localStorage) — após signIn, todas as
+// chamadas levam o JWT do usuário e RLS no Postgres aplica isolamento por empresa.
 export const supabase = (supabaseUrl && supabaseKey)
-  ? createClient(supabaseUrl, supabaseKey)
+  ? createClient(supabaseUrl, supabaseKey, {
+      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+    })
   : null;
 
-// Diagnóstico: mostra no console se o Supabase está ativo ou não
 if (supabase) {
   console.log('%c[FrostERP] Supabase CONECTADO ✅', 'color: #22c55e; font-weight: bold');
 } else {
   console.warn('[FrostERP] Supabase DESCONECTADO ❌ — variáveis de ambiente não encontradas. Rodando apenas local.');
-  console.warn('VITE_SUPABASE_URL:', supabaseUrl ? '✅ presente' : '❌ ausente');
-  console.warn('VITE_SUPABASE_ANON_KEY:', supabaseKey ? '✅ presente' : '❌ ausente');
 }
 
-// Chaves que contêm dados sensíveis e não devem ser sincronizadas ao Supabase
-// Nota: erp:user: foi removido — usuários precisam sincronizar para login funcionar em outros PCs
-// As senhas são armazenadas com hash, portanto é seguro sincronizar
+// Chaves nunca sincronizadas (dados sensíveis estritamente locais)
 const SENSITIVE_PREFIXES = [];
-
 function isSensitive(key) {
   return SENSITIVE_PREFIXES.some(prefix => key.startsWith(prefix));
 }
 
-// ─── Hydrate: Supabase é a fonte de verdade ───────────────────────────────────
-// Substitui TODOS os dados locais erp: pelos dados do Supabase (exceto sensíveis).
-// Isso garante que exclusões feitas em outro aparelho sejam refletidas aqui.
+// ─── Estado de sessão (em memória + localStorage cache) ──────────────────────
+// O company_id e o legacy_user_id vêm de public.company_members após o login.
+// Toda mutação no kv_store precisa carregar o company_id (RLS exige).
+let _currentMember = null;
+const MEMBER_CACHE_KEY = 'frost_session_member';
+
+export function getCurrentMember() {
+  if (_currentMember) return _currentMember;
+  try {
+    const raw = localStorage.getItem(MEMBER_CACHE_KEY);
+    if (raw) _currentMember = JSON.parse(raw);
+  } catch { /* noop */ }
+  return _currentMember;
+}
+
+export function setCurrentMember(member) {
+  _currentMember = member || null;
+  try {
+    if (member) localStorage.setItem(MEMBER_CACHE_KEY, JSON.stringify(member));
+    else localStorage.removeItem(MEMBER_CACHE_KEY);
+  } catch { /* noop */ }
+}
+
+function getCompanyId() {
+  return getCurrentMember()?.company_id || null;
+}
+
+// ─── Auth: login com fallback para migração de PBKDF2 legado ────────────────
+// Fluxo: tenta signInWithPassword. Se 401, chama Edge Function migrate-login
+// que valida contra o hash PBKDF2 antigo e cria o user em auth.users. Depois retenta.
+export async function signInWithFallback(email, password) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  email = (email || '').trim().toLowerCase();
+  // Tentativa direta primeiro (usuários já migrados)
+  let { data, error } = await supabase.auth.signInWithPassword({ email, password });
+  if (!error && data?.session) {
+    return await _afterAuth(data.session);
+  }
+  // Tenta migração de usuário legado
+  try {
+    const resp = await fetch(`${supabaseUrl}/functions/v1/migrate-login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: supabaseKey },
+      body: JSON.stringify({ email, password }),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      // Erro mais semântico
+      if (body.error === 'user_not_found') return { ok: false, error: 'Usuário não encontrado.' };
+      if (body.error === 'invalid_password') return { ok: false, error: 'Senha incorreta.' };
+      return { ok: false, error: body.error || 'Falha ao autenticar.' };
+    }
+    // Migração OK — retenta signIn
+    const retry = await supabase.auth.signInWithPassword({ email, password });
+    if (retry.error || !retry.data?.session) {
+      return { ok: false, error: retry.error?.message || 'Sessão não estabelecida após migração.' };
+    }
+    return await _afterAuth(retry.data.session);
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+async function _afterAuth(session) {
+  // Carrega vínculo company_members do usuário autenticado
+  const { data: member, error } = await supabase
+    .from('company_members')
+    .select('user_id, company_id, role, is_super_admin, legacy_user_id, custom_permissions, status, nome, avatar')
+    .eq('user_id', session.user.id)
+    .maybeSingle();
+  if (error || !member) {
+    return { ok: false, error: 'Usuário sem vínculo com empresa. Contate o administrador.' };
+  }
+  if (member.status && member.status !== 'ativo') {
+    await supabase.auth.signOut();
+    return { ok: false, error: 'Usuário inativo.' };
+  }
+  setCurrentMember(member);
+  return { ok: true, session, member };
+}
+
+export async function signOutSupabase() {
+  setCurrentMember(null);
+  if (supabase) await supabase.auth.signOut().catch(() => {});
+}
+
+// Restaura member após reload (a sessão persiste, mas o member state cai com a aba)
+export async function ensureMemberLoaded() {
+  if (!supabase) return null;
+  if (getCurrentMember()) return getCurrentMember();
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return null;
+  const result = await _afterAuth(session);
+  return result.ok ? result.member : null;
+}
+
+// ─── Hydrate: Supabase é a fonte de verdade ──────────────────────────────────
+// Só é eficaz após login (RLS bloqueia anon).
 export async function hydrateFromSupabase() {
   if (!supabase) return;
+  const companyId = getCompanyId();
+  if (!companyId) return; // sem auth → nada a sincronizar
   try {
     const { data, error } = await supabase
       .from('kv_store')
-      .select('key, value');
-
+      .select('key, value')
+      .eq('company_id', companyId);
     if (error) {
       console.warn('Supabase hydrate error:', error.message);
       return;
     }
-
-    // Conjunto de chaves que existem no Supabase
     const remoteKeys = new Set((data || []).map(row => row.key));
-
-    // 1) Remover chaves locais que não existem mais no Supabase (foram deletadas em outro aparelho)
     const keysToRemove = [];
     for (let i = 0; i < window.storage.length; i++) {
       const key = window.storage.key(i);
       if (!key || !key.startsWith('erp:')) continue;
-      if (isSensitive(key)) continue; // Não mexer em dados locais de usuário
-      if (key === 'erp:seeded' || key === 'erp:config' || key === 'erp:lastBackup') continue;
-      if (!remoteKeys.has(key)) {
-        keysToRemove.push(key);
-      }
+      if (isSensitive(key)) continue;
+      if (key === 'erp:seeded' || key === 'erp:lastBackup') continue;
+      if (!remoteKeys.has(key)) keysToRemove.push(key);
     }
     keysToRemove.forEach(key => window.storage.removeItem(key));
-
-    // 2) Adicionar/atualizar chaves do Supabase no local
     if (data && data.length > 0) {
-      data.forEach((row) => {
-        window.storage.setItem(row.key, JSON.stringify(row.value));
-      });
+      data.forEach((row) => window.storage.setItem(row.key, JSON.stringify(row.value)));
     }
-
     console.log(`Sync completo: ${(data || []).length} chaves do Supabase, ${keysToRemove.length} removidas localmente`);
   } catch (err) {
     console.warn('Supabase connection failed, using local data:', err.message);
   }
 }
 
-// ─── Upload: envia tudo do local para o Supabase ─────────────────────────────
+// ─── Upload em massa (usado em backup/restore) ───────────────────────────────
 export async function uploadAllToSupabase() {
   if (!supabase) return;
+  const companyId = getCompanyId();
+  if (!companyId) {
+    console.warn('uploadAllToSupabase: sem company_id (usuário não autenticado).');
+    return;
+  }
   try {
     const rows = [];
     for (let i = 0; i < window.storage.length; i++) {
@@ -82,17 +171,13 @@ export async function uploadAllToSupabase() {
       const raw = window.storage.getItem(key);
       if (raw === null) continue;
       try {
-        rows.push({ key, value: JSON.parse(raw), updated_at: new Date().toISOString() });
-      } catch { /* skip non-JSON */ }
+        rows.push({ key, value: JSON.parse(raw), company_id: companyId, updated_at: new Date().toISOString() });
+      } catch { /* skip */ }
     }
     if (rows.length === 0) return;
-
-    // Upsert em lotes de 500
     for (let i = 0; i < rows.length; i += 500) {
       const batch = rows.slice(i, i + 500);
-      const { error } = await supabase
-        .from('kv_store')
-        .upsert(batch, { onConflict: 'key' });
+      const { error } = await supabase.from('kv_store').upsert(batch, { onConflict: 'key' });
       if (error) console.warn('Upload batch error:', error.message);
     }
     console.log(`Uploaded ${rows.length} keys to Supabase`);
@@ -101,55 +186,69 @@ export async function uploadAllToSupabase() {
   }
 }
 
-// ─── Sync unitário: salva uma chave no Supabase ──────────────────────────────
+// ─── Sync unitário (chamado por DB.set) ──────────────────────────────────────
 export function syncToSupabase(key, value) {
   if (!supabase) return;
   if (isSensitive(key)) return;
+  const companyId = getCompanyId();
+  if (!companyId) return; // sem auth → fica só local; será uploaded no próximo login
   supabase
     .from('kv_store')
-    .upsert({ key, value, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+    .upsert({ key, value, company_id: companyId, updated_at: new Date().toISOString() }, { onConflict: 'key' })
     .then(({ error }) => {
       if (error) console.warn('Sync error:', key, error.message);
     });
 }
 
-// ─── Delete: remove uma chave do Supabase ─────────────────────────────────────
+// ─── Delete unitário (chamado por DB.delete) ─────────────────────────────────
 export function deleteFromSupabase(key) {
   if (!supabase) return;
+  const companyId = getCompanyId();
+  if (!companyId) return;
   supabase
     .from('kv_store')
     .delete()
     .eq('key', key)
+    .eq('company_id', companyId)
     .then(({ error }) => {
       if (error) console.warn('Delete sync error:', key, error.message);
     });
 }
 
-// ─── Upload de fotos ao Supabase Storage ──────────────────────────────────────
-// Usado pelo app do técnico para enviar fotos do serviço.
-// Retorna URL pública da foto enviada (ou null se falhar).
-// Bucket esperado: 'os-fotos' (precisa estar criado no Supabase com acesso público).
+// ─── Admin: criar usuário (chama Edge Function admin-create-user) ────────────
+// Usado quando admin cadastra um membro novo no app.
+export async function adminCreateUser({ email, password, role, nome, avatar, legacy_user_id, custom_permissions, status }) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return { ok: false, error: 'Não autenticado.' };
+  const resp = await fetch(`${supabaseUrl}/functions/v1/admin-create-user`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      apikey: supabaseKey,
+      Authorization: `Bearer ${session.access_token}`,
+    },
+    body: JSON.stringify({ email, password, role, nome, avatar, legacy_user_id, custom_permissions, status }),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) return { ok: false, error: body.error || 'Falha ao criar usuário.' };
+  return { ok: true, ...body };
+}
+
+// ─── Storage: upload/delete de fotos da OS ───────────────────────────────────
 export async function uploadFotoOS(file, osId) {
-  if (!supabase) {
-    console.warn('Supabase desconectado — upload de foto ignorado');
-    return null;
-  }
+  if (!supabase) return null;
   try {
-    // Gera nome único: osId/timestamp_nomeoriginal
     const ext = (file.name || 'foto.jpg').split('.').pop();
     const ts = Date.now();
     const path = `${osId}/${ts}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
-
     const { error: upErr } = await supabase.storage
       .from('os-fotos')
       .upload(path, file, { cacheControl: '3600', upsert: false, contentType: file.type });
-
     if (upErr) {
       console.warn('Upload foto erro:', upErr.message);
       return null;
     }
-
-    // Pega URL pública do bucket
     const { data } = supabase.storage.from('os-fotos').getPublicUrl(path);
     return data?.publicUrl || null;
   } catch (err) {
@@ -158,11 +257,9 @@ export async function uploadFotoOS(file, osId) {
   }
 }
 
-// ─── Remove foto do Storage (caso técnico exclua antes de finalizar) ─────────
 export async function deleteFotoOS(publicUrl) {
   if (!supabase || !publicUrl) return;
   try {
-    // Extrai path do URL público (depois de /os-fotos/)
     const marker = '/os-fotos/';
     const idx = publicUrl.indexOf(marker);
     if (idx === -1) return;
@@ -173,27 +270,24 @@ export async function deleteFotoOS(publicUrl) {
   }
 }
 
-// ─── Realtime: escuta mudanças no Supabase e atualiza o local ─────────────────
-// Retorna função de cleanup para desinscrever
+// ─── Realtime: escuta mudanças no Supabase e atualiza o local ────────────────
 export function subscribeToChanges(onDataChanged) {
   if (!supabase) return () => {};
-
+  const companyId = getCompanyId();
+  if (!companyId) return () => {};
   const channel = supabase
-    .channel('kv_store_changes')
+    .channel(`kv_store_${companyId}`)
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'kv_store' },
+      { event: '*', schema: 'public', table: 'kv_store', filter: `company_id=eq.${companyId}` },
       (payload) => {
         const { eventType, new: newRow, old: oldRow } = payload;
-
         if (eventType === 'INSERT' || eventType === 'UPDATE') {
-          // Outra aba/aparelho criou ou atualizou um registro
           if (newRow && newRow.key) {
             window.storage.setItem(newRow.key, JSON.stringify(newRow.value));
             if (onDataChanged) onDataChanged();
           }
         } else if (eventType === 'DELETE') {
-          // Outra aba/aparelho deletou um registro
           if (oldRow && oldRow.key) {
             window.storage.removeItem(oldRow.key);
             if (onDataChanged) onDataChanged();
@@ -203,12 +297,8 @@ export function subscribeToChanges(onDataChanged) {
     )
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') {
-        console.log('Realtime sync ativo — mudanças de outros aparelhos serão refletidas automaticamente');
+        console.log('Realtime sync ativo (escopo: empresa)');
       }
     });
-
-  // Retorna cleanup
-  return () => {
-    supabase.removeChannel(channel);
-  };
+  return () => { supabase.removeChannel(channel); };
 }
