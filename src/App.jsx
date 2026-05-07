@@ -4748,6 +4748,56 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
 
   useEffect(() => { loadOrders(); }, [loadOrders]);
 
+  // ─── Cadastro rápido de cliente direto da OS ───────────────────────────────
+  // Mantém o usuário no fluxo: ao perceber que o cliente não está cadastrado,
+  // abre um mini-formulário, salva em erp:client: e auto-seleciona na OS.
+  const EMPTY_QUICK_CLIENT = {
+    nome: "", tipo: "pf", cpf: "", cnpj: "",
+    telefone: "", email: "",
+    rua: "", numero: "", bairro: "", cidade: "", estado: "",
+  };
+  const [quickClientOpen, setQuickClientOpen] = useState(false);
+  const [quickClient, setQuickClient] = useState(EMPTY_QUICK_CLIENT);
+
+  const handleSaveQuickClient = useCallback(() => {
+    if (!quickClient.nome.trim()) { addToast("Informe o nome do cliente.", "error"); return; }
+    if (!quickClient.telefone.trim()) { addToast("Informe o telefone.", "error"); return; }
+
+    const newClient = {
+      id: genId(),
+      nome: quickClient.nome.trim(),
+      tipo: quickClient.tipo,
+      cpf: quickClient.tipo === "pf" ? quickClient.cpf : "",
+      cnpj: quickClient.tipo === "pj" ? quickClient.cnpj : "",
+      telefone: quickClient.telefone,
+      email: quickClient.email.trim(),
+      endereco: {
+        rua: quickClient.rua.trim(),
+        numero: quickClient.numero.trim(),
+        bairro: quickClient.bairro.trim(),
+        cidade: quickClient.cidade.trim(),
+        estado: quickClient.estado.trim(),
+        cep: "",
+      },
+      observacoes: "",
+      status: "ativo",
+      createdAt: new Date().toISOString(),
+    };
+    DB.set("erp:client:" + newClient.id, newClient);
+
+    // Atualiza lista local + auto-seleciona o novo cliente na OS atual
+    setAllClients((prev) => [...prev, newClient]);
+    const enderecoStr = newClient.endereco.rua
+      ? `${newClient.endereco.rua}${newClient.endereco.numero ? ", " + newClient.endereco.numero : ""}${newClient.endereco.bairro ? " - " + newClient.endereco.bairro : ""}${newClient.endereco.cidade ? " - " + newClient.endereco.cidade : ""}${newClient.endereco.estado ? "/" + newClient.endereco.estado : ""}`
+      : "";
+    setForm((f) => ({ ...f, clienteId: newClient.id, endereco: enderecoStr || f.endereco }));
+
+    addToast(`Cliente ${newClient.nome} cadastrado.`, "success");
+    setQuickClient(EMPTY_QUICK_CLIENT);
+    setQuickClientOpen(false);
+    if (reloadData) reloadData();
+  }, [quickClient, addToast, reloadData]);
+
   // Cada OS pode conter múltiplos serviços e peças/materiais — cada linha tem valor próprio.
   // valorTotal = soma de todos os serviços + soma de todas as peças (qtd × valor unit).
   // Cada serviço tem seu próprio tipo de equipamento — uma OS pode ter
@@ -5442,24 +5492,34 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">Cliente *</label>
-            <select
-              value={form.clienteId}
-              onChange={(e) => {
-                const cid = e.target.value;
-                const c = (allClients || []).find((cl) => cl.id === cid);
-                setForm({
-                  ...form,
-                  clienteId: cid,
-                  endereco: c?.endereco ? `${c.endereco.rua}, ${c.endereco.bairro} - ${c.endereco.cidade}/${c.endereco.estado}` : form.endereco,
-                });
-              }}
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-            >
-              <option value="">Selecione...</option>
-              {(allClients || []).map((c) => (
-                <option key={c.id} value={c.id}>{c.nome}</option>
-              ))}
-            </select>
+            <div className="flex gap-2">
+              <select
+                value={form.clienteId}
+                onChange={(e) => {
+                  const cid = e.target.value;
+                  const c = (allClients || []).find((cl) => cl.id === cid);
+                  setForm({
+                    ...form,
+                    clienteId: cid,
+                    endereco: c?.endereco ? `${c.endereco.rua}, ${c.endereco.bairro} - ${c.endereco.cidade}/${c.endereco.estado}` : form.endereco,
+                  });
+                }}
+                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+              >
+                <option value="">Selecione...</option>
+                {(allClients || []).map((c) => (
+                  <option key={c.id} value={c.id}>{c.nome}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => { setQuickClient(EMPTY_QUICK_CLIENT); setQuickClientOpen(true); }}
+                className="px-3 py-2.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition flex items-center gap-1 shrink-0"
+                title="Cadastrar novo cliente"
+              >
+                + Novo
+              </button>
+            </div>
           </div>
 
           <div>
@@ -5833,6 +5893,141 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
           onConfirm={confirmDeleteAction}
           onCancel={() => setConfirmDelete(null)}
         />
+      )}
+
+      {/* ─── Modal Cadastro Rápido de Cliente ─── */}
+      {quickClientOpen && (
+        <Modal isOpen={true} title="Novo Cliente" onClose={() => setQuickClientOpen(false)} size="md">
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1">Tipo</label>
+                <select
+                  value={quickClient.tipo}
+                  onChange={(e) => setQuickClient({ ...quickClient, tipo: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                >
+                  <option value="pf">Pessoa Física</option>
+                  <option value="pj">Pessoa Jurídica</option>
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1">{quickClient.tipo === "pj" ? "CNPJ" : "CPF"}</label>
+                <input
+                  type="text"
+                  value={quickClient.tipo === "pj" ? quickClient.cnpj : quickClient.cpf}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setQuickClient(quickClient.tipo === "pj"
+                      ? { ...quickClient, cnpj: formatCNPJ(v) }
+                      : { ...quickClient, cpf: formatCPF(v) });
+                  }}
+                  placeholder={quickClient.tipo === "pj" ? "00.000.000/0000-00" : "000.000.000-00"}
+                  maxLength={quickClient.tipo === "pj" ? 18 : 14}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-300 mb-1">Nome / Razão Social *</label>
+              <input
+                type="text"
+                value={quickClient.nome}
+                onChange={(e) => setQuickClient({ ...quickClient, nome: e.target.value })}
+                placeholder="Nome completo"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1">Telefone *</label>
+                <input
+                  type="text"
+                  value={quickClient.telefone}
+                  onChange={(e) => setQuickClient({ ...quickClient, telefone: formatPhone(e.target.value) })}
+                  placeholder="(00) 00000-0000"
+                  maxLength={15}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1">Email</label>
+                <input
+                  type="email"
+                  value={quickClient.email}
+                  onChange={(e) => setQuickClient({ ...quickClient, email: e.target.value })}
+                  placeholder="email@exemplo.com"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div className="col-span-2">
+                <label className="block text-xs font-medium text-gray-300 mb-1">Rua</label>
+                <input
+                  type="text"
+                  value={quickClient.rua}
+                  onChange={(e) => setQuickClient({ ...quickClient, rua: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1">Número</label>
+                <input
+                  type="text"
+                  value={quickClient.numero}
+                  onChange={(e) => setQuickClient({ ...quickClient, numero: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1">Bairro</label>
+                <input
+                  type="text"
+                  value={quickClient.bairro}
+                  onChange={(e) => setQuickClient({ ...quickClient, bairro: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1">Cidade</label>
+                <input
+                  type="text"
+                  value={quickClient.cidade}
+                  onChange={(e) => setQuickClient({ ...quickClient, cidade: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-300 mb-1">UF</label>
+                <input
+                  type="text"
+                  value={quickClient.estado}
+                  onChange={(e) => setQuickClient({ ...quickClient, estado: e.target.value.toUpperCase().slice(0, 2) })}
+                  maxLength={2}
+                  placeholder="SP"
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                onClick={() => setQuickClientOpen(false)}
+                className="px-4 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-white transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSaveQuickClient}
+                className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium transition"
+              >
+                Cadastrar e Selecionar
+              </button>
+            </div>
+          </div>
+        </Modal>
       )}
 
       {/* ─── Modal Produtividade Mensal ─── */}
