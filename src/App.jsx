@@ -791,6 +791,64 @@ function getNextNumber(prefix, items) {
   return prefix + "-" + String(max + 1).padStart(3, "0");
 }
 
+// ─── Sincroniza OS finalizada com o Financeiro ──────────────────────────────
+// Toda OS que entra em status "finalizado" (revisada e aprovada) precisa
+// virar uma transação de receita pendente em erp:finance: para que apareça
+// no módulo Financeiro automaticamente.
+//
+// Idempotente: se já existe uma transação com o mesmo osId, atualizamos
+// valor/categoria/data (sem mexer no status — admin pode já ter marcado
+// como "pago"). Se a transação não existe, criamos uma nova com prefixo
+// "REC" e status "pendente".
+//
+// Chamado em: changeStatus('finalizado'), aprovação do admin no review,
+// e na edição de OS já finalizada (para refletir mudança de valor).
+function syncOSToFinance(os) {
+  if (!os || !os.id) return;
+  const valor = Number(os.valor) || 0;
+  if (valor <= 0) return; // sem valor, nada a registrar no Financeiro
+
+  const all = DB.list("erp:finance:");
+  const existing = all.find((t) => t.osId === os.id);
+
+  // Categoria: tipo da OS se bater com a lista de receita; senão "Outros"
+  const categoria = CATEGORIES_RECEITA.includes(os.tipo) ? os.tipo : "Outros";
+  const dataIso = os.dataConclusao || new Date().toISOString();
+  const descricao = `OS ${os.numero || os.id} — ${os.clienteNome || "Cliente"}${os.tipo ? " — " + os.tipo : ""}`;
+
+  if (existing) {
+    // Mantém status — admin pode ter marcado como "pago" manualmente.
+    // Atualiza apenas dados informativos para refletir a OS atual.
+    const updated = {
+      ...existing,
+      descricao,
+      valor,
+      categoria,
+      data: existing.status === "pago" ? existing.data : dataIso,
+      updatedAt: new Date().toISOString(),
+    };
+    DB.set("erp:finance:" + updated.id, updated);
+    return;
+  }
+
+  const numero = getNextNumber("REC", all);
+  const newTx = {
+    id: genId(),
+    numero,
+    descricao,
+    valor,
+    tipo: "receita",
+    categoria,
+    data: dataIso,
+    status: "pendente",
+    formaPagamento: "PIX",
+    observacoes: "Gerada automaticamente ao finalizar OS",
+    osId: os.id,
+    createdAt: new Date().toISOString(),
+  };
+  DB.set("erp:finance:" + newTx.id, newTx);
+}
+
 // Lista de módulos disponíveis para autorização manual no gerenciamento de usuários
 // Mantida em sincronia com navItems do App (remoções de sessões devem ocorrer aqui também)
 const ALL_MODULES = [
@@ -3330,6 +3388,13 @@ function FinanceModule({ user, dateFilter, addToast }) {
   const [filterCategory, setFilterCategory] = useState("all");
 
   const loadTransactions = useCallback(() => {
+    // Backfill: garante que toda OS já finalizada tenha sua transação no Financeiro.
+    // Caso o app tenha sido aberto antes da integração estar viva, preenchemos
+    // retroativamente. syncOSToFinance é idempotente, então rodar é seguro.
+    const finalizedOS = DB.list("erp:os:").filter(
+      (o) => ["finalizado", "concluido"].includes(o.status)
+    );
+    finalizedOS.forEach(syncOSToFinance);
     setTransactions(DB.list("erp:finance:"));
   }, []);
 
@@ -4850,6 +4915,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
         updatedAt: new Date().toISOString(),
       };
       DB.set("erp:os:" + updated.id, updated);
+      // Se a OS já estava finalizada, propaga mudança de valor/dados para o Financeiro
+      if (["finalizado", "concluido"].includes(updated.status)) {
+        syncOSToFinance(updated);
+      }
       addToast("OS atualizada.", "success");
     } else {
       const numero = getNextNumber("OS", orders);
@@ -4973,6 +5042,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
       updated.dataConclusao = new Date().toISOString();
     }
     DB.set("erp:os:" + updated.id, updated);
+    // OS finalizada gera receita no Financeiro automaticamente
+    if (newStatus === "finalizado") {
+      syncOSToFinance(updated);
+    }
     addToast(`OS ${os.numero} → ${STATUS_LABELS_OS[newStatus]}`, "success");
     loadOrders();
   }, [loadOrders, addToast]);
@@ -5758,6 +5831,8 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                     dataConclusao: new Date().toISOString(),
                   };
                   DB.set("erp:os:" + updated.id, updated);
+                  // Cria transação de receita pendente no Financeiro
+                  syncOSToFinance(updated);
                   loadOrders();
                   setReviewing(null);
                   addToast(`OS ${reviewing.numero} finalizada`, "success");
