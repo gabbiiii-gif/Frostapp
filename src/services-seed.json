@@ -1,0 +1,1562 @@
+[
+  {
+    "codigo": "FRZ-MAN-001",
+    "nome_servico": "Manutenção Preventiva Freezer",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 60,
+    "equipamento": "Freezer",
+    "ativo": true
+  },
+  {
+    "codigo": "FRZ-MAN-002",
+    "nome_servico": "Manutenção Corretiva Freezer",
+    "categoria": "Manutenção",
+    "unidade": "Hora",
+    "preco_base": 120.0,
+    "duracao_min": 120,
+    "equipamento": "Freezer",
+    "ativo": true
+  },
+  {
+    "codigo": "FRZ-INS-001",
+    "nome_servico": "Instalação Freezer Horizontal",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 220.0,
+    "duracao_min": 90,
+    "equipamento": "Freezer",
+    "ativo": true
+  },
+  {
+    "codigo": "FRZ-INS-002",
+    "nome_servico": "Instalação Freezer Vertical",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 250.0,
+    "duracao_min": 90,
+    "equipamento": "Freezer",
+    "ativo": true
+  },
+  {
+    "codigo": "FRZ-LIM-001",
+    "nome_servico": "Limpeza Técnica Freezer",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 150.0,
+    "duracao_min": 45,
+    "equipamento": "Freezer",
+    "ativo": true
+  },
+  {
+    "codigo": "FRZ-LIM-002",
+    "nome_servico": "Limpeza Serpentina Freezer",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 60,
+    "equipamento": "Freezer",
+    "ativo": true
+  },
+  {
+    "codigo": "FRZ-SOL-001",
+    "nome_servico": "Solda Tubulação Freezer",
+    "categoria": "Solda",
+    "unidade": "Hora",
+    "preco_base": 150.0,
+    "duracao_min": 90,
+    "equipamento": "Freezer",
+    "ativo": true
+  },
+  {
+    "codigo": "FRZ-RGS-001",
+    "nome_servico": "Recarga de Gás Freezer (R134a)",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 280.0,
+    "duracao_min": 60,
+    "equipamento": "Freezer",
+    "ativo": true
+  },
+  {
+    "codigo": "FRZ-RGS-002",
+    "nome_servico": "Recarga de Gás Freezer (R600a)",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 320.0,
+    "duracao_min": 60,
+    "equipamento": "Freezer",
+    "ativo": true
+  },
+  {
+    "codigo": "FRZ-INP-001",
+    "nome_servico": "Inspeção Técnica Freezer",
+    "categoria": "Inspeção",
+    "unidade": "Visita",
+    "preco_base": 120.0,
+    "duracao_min": 30,
+    "equipamento": "Freezer",
+    "ativo": true
+  },
+  {
+    "codigo": "GEL-MAN-001",
+    "nome_servico": "Manutenção Preventiva Geladeira",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 160.0,
+    "duracao_min": 60,
+    "equipamento": "Geladeira",
+    "ativo": true
+  },
+  {
+    "codigo": "GEL-MAN-002",
+    "nome_servico": "Manutenção Corretiva Geladeira",
+    "categoria": "Manutenção",
+    "unidade": "Hora",
+    "preco_base": 110.0,
+    "duracao_min": 120,
+    "equipamento": "Geladeira",
+    "ativo": true
+  },
+  {
+    "codigo": "GEL-MAN-003",
+    "nome_servico": "Troca de Termostato",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 45,
+    "equipamento": "Geladeira",
+    "ativo": true
+  },
+  {
+    "codigo": "GEL-MAN-004",
+    "nome_servico": "Troca de Compressor",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 750.0,
+    "duracao_min": 180,
+    "equipamento": "Geladeira",
+    "ativo": true
+  },
+  {
+    "codigo": "GEL-INS-001",
+    "nome_servico": "Instalação Geladeira Doméstica",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 60,
+    "equipamento": "Geladeira",
+    "ativo": true
+  },
+  {
+    "codigo": "GEL-INS-002",
+    "nome_servico": "Instalação Geladeira Comercial",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 350.0,
+    "duracao_min": 120,
+    "equipamento": "Geladeira",
+    "ativo": true
+  },
+  {
+    "codigo": "GEL-LIM-001",
+    "nome_servico": "Limpeza Técnica Geladeira",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 140.0,
+    "duracao_min": 45,
+    "equipamento": "Geladeira",
+    "ativo": true
+  },
+  {
+    "codigo": "GEL-LIM-002",
+    "nome_servico": "Limpeza Condensador",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 100.0,
+    "duracao_min": 30,
+    "equipamento": "Geladeira",
+    "ativo": true
+  },
+  {
+    "codigo": "GEL-SOL-001",
+    "nome_servico": "Solda Tubulação Geladeira",
+    "categoria": "Solda",
+    "unidade": "Hora",
+    "preco_base": 150.0,
+    "duracao_min": 90,
+    "equipamento": "Geladeira",
+    "ativo": true
+  },
+  {
+    "codigo": "GEL-RGS-001",
+    "nome_servico": "Recarga de Gás Geladeira",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 280.0,
+    "duracao_min": 60,
+    "equipamento": "Geladeira",
+    "ativo": true
+  },
+  {
+    "codigo": "GEL-INP-001",
+    "nome_servico": "Inspeção Técnica Geladeira",
+    "categoria": "Inspeção",
+    "unidade": "Visita",
+    "preco_base": 120.0,
+    "duracao_min": 30,
+    "equipamento": "Geladeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-MAN-001",
+    "nome_servico": "Manutenção Preventiva Split (até 12.000 BTUs)",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 220.0,
+    "duracao_min": 60,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-MAN-002",
+    "nome_servico": "Manutenção Preventiva Split (18.000 a 24.000 BTUs)",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 320.0,
+    "duracao_min": 90,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-MAN-003",
+    "nome_servico": "Manutenção Preventiva Split (acima 30.000 BTUs)",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 450.0,
+    "duracao_min": 120,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-MAN-004",
+    "nome_servico": "Manutenção Corretiva Ar Condicionado",
+    "categoria": "Manutenção",
+    "unidade": "Hora",
+    "preco_base": 130.0,
+    "duracao_min": 120,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-MAN-005",
+    "nome_servico": "Troca de Capacitor",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 45,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-MAN-006",
+    "nome_servico": "Troca de Placa Eletrônica",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 350.0,
+    "duracao_min": 90,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-INS-001",
+    "nome_servico": "Instalação Split (até 12.000 BTUs)",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 750.0,
+    "duracao_min": 180,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-INS-002",
+    "nome_servico": "Instalação Split (18.000 a 24.000 BTUs)",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 1100.0,
+    "duracao_min": 240,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-INS-003",
+    "nome_servico": "Instalação Split (acima 30.000 BTUs)",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 1700.0,
+    "duracao_min": 300,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-INS-004",
+    "nome_servico": "Instalação Ar Condicionado de Janela",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 350.0,
+    "duracao_min": 90,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-INS-005",
+    "nome_servico": "Instalação Ar Cassete",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 2200.0,
+    "duracao_min": 360,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-INS-006",
+    "nome_servico": "Instalação Sistema VRF/Multi-Split",
+    "categoria": "Instalação",
+    "unidade": "Diária",
+    "preco_base": 1500.0,
+    "duracao_min": 480,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-INS-007",
+    "nome_servico": "Desinstalação de Ar Condicionado",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 250.0,
+    "duracao_min": 60,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-LIM-001",
+    "nome_servico": "Higienização Completa Split",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 280.0,
+    "duracao_min": 90,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-LIM-002",
+    "nome_servico": "Limpeza de Filtros",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 90.0,
+    "duracao_min": 30,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-LIM-003",
+    "nome_servico": "Lavagem Química Evaporadora",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 350.0,
+    "duracao_min": 90,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-LIM-004",
+    "nome_servico": "Lavagem Química Condensadora",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 250.0,
+    "duracao_min": 60,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-SOL-001",
+    "nome_servico": "Solda Tubulação de Cobre",
+    "categoria": "Solda",
+    "unidade": "Hora",
+    "preco_base": 180.0,
+    "duracao_min": 60,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-RGS-001",
+    "nome_servico": "Recarga de Gás R-410A",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 380.0,
+    "duracao_min": 60,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-RGS-002",
+    "nome_servico": "Recarga de Gás R-22",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 450.0,
+    "duracao_min": 60,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-RGS-003",
+    "nome_servico": "Recarga de Gás R-32",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 420.0,
+    "duracao_min": 60,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-INP-001",
+    "nome_servico": "Inspeção Técnica PMOC",
+    "categoria": "Inspeção",
+    "unidade": "Visita",
+    "preco_base": 180.0,
+    "duracao_min": 45,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-INP-002",
+    "nome_servico": "Laudo Técnico Ar Condicionado",
+    "categoria": "Inspeção",
+    "unidade": "Serviço",
+    "preco_base": 450.0,
+    "duracao_min": 90,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-PRJ-001",
+    "nome_servico": "Projeto de Climatização",
+    "categoria": "Projeto",
+    "unidade": "M²",
+    "preco_base": 35.0,
+    "duracao_min": 480,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "CAR-PRJ-002",
+    "nome_servico": "Projeto PMOC",
+    "categoria": "Projeto",
+    "unidade": "Serviço",
+    "preco_base": 1500.0,
+    "duracao_min": 360,
+    "equipamento": "Central de Ar",
+    "ativo": true
+  },
+  {
+    "codigo": "BEB-MAN-001",
+    "nome_servico": "Manutenção Preventiva Bebedouro",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 140.0,
+    "duracao_min": 45,
+    "equipamento": "Bebedouro",
+    "ativo": true
+  },
+  {
+    "codigo": "BEB-MAN-002",
+    "nome_servico": "Manutenção Corretiva Bebedouro",
+    "categoria": "Manutenção",
+    "unidade": "Hora",
+    "preco_base": 100.0,
+    "duracao_min": 90,
+    "equipamento": "Bebedouro",
+    "ativo": true
+  },
+  {
+    "codigo": "BEB-MAN-003",
+    "nome_servico": "Troca de Filtro de Água",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 90.0,
+    "duracao_min": 30,
+    "equipamento": "Bebedouro",
+    "ativo": true
+  },
+  {
+    "codigo": "BEB-MAN-004",
+    "nome_servico": "Troca de Torneira/Bica",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 80.0,
+    "duracao_min": 30,
+    "equipamento": "Bebedouro",
+    "ativo": true
+  },
+  {
+    "codigo": "BEB-INS-001",
+    "nome_servico": "Instalação Bebedouro de Coluna",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 60,
+    "equipamento": "Bebedouro",
+    "ativo": true
+  },
+  {
+    "codigo": "BEB-INS-002",
+    "nome_servico": "Instalação Bebedouro de Pressão",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 250.0,
+    "duracao_min": 90,
+    "equipamento": "Bebedouro",
+    "ativo": true
+  },
+  {
+    "codigo": "BEB-INS-003",
+    "nome_servico": "Instalação Purificador",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 150.0,
+    "duracao_min": 60,
+    "equipamento": "Bebedouro",
+    "ativo": true
+  },
+  {
+    "codigo": "BEB-LIM-001",
+    "nome_servico": "Higienização Completa Bebedouro",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 60,
+    "equipamento": "Bebedouro",
+    "ativo": true
+  },
+  {
+    "codigo": "BEB-LIM-002",
+    "nome_servico": "Sanitização Reservatório",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 140.0,
+    "duracao_min": 45,
+    "equipamento": "Bebedouro",
+    "ativo": true
+  },
+  {
+    "codigo": "BEB-SOL-001",
+    "nome_servico": "Solda Tubulação Bebedouro",
+    "categoria": "Solda",
+    "unidade": "Hora",
+    "preco_base": 150.0,
+    "duracao_min": 60,
+    "equipamento": "Bebedouro",
+    "ativo": true
+  },
+  {
+    "codigo": "BEB-RGS-001",
+    "nome_servico": "Recarga de Gás Bebedouro",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 280.0,
+    "duracao_min": 60,
+    "equipamento": "Bebedouro",
+    "ativo": true
+  },
+  {
+    "codigo": "BEB-INP-001",
+    "nome_servico": "Inspeção e Análise da Água",
+    "categoria": "Inspeção",
+    "unidade": "Visita",
+    "preco_base": 100.0,
+    "duracao_min": 30,
+    "equipamento": "Bebedouro",
+    "ativo": true
+  },
+  {
+    "codigo": "MLV-MAN-001",
+    "nome_servico": "Manutenção Preventiva Máquina de Lavar",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 60,
+    "equipamento": "Máquina de Lavar",
+    "ativo": true
+  },
+  {
+    "codigo": "MLV-MAN-002",
+    "nome_servico": "Manutenção Corretiva Máquina de Lavar",
+    "categoria": "Manutenção",
+    "unidade": "Hora",
+    "preco_base": 120.0,
+    "duracao_min": 120,
+    "equipamento": "Máquina de Lavar",
+    "ativo": true
+  },
+  {
+    "codigo": "MLV-MAN-003",
+    "nome_servico": "Troca de Rolamento",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 450.0,
+    "duracao_min": 180,
+    "equipamento": "Máquina de Lavar",
+    "ativo": true
+  },
+  {
+    "codigo": "MLV-MAN-004",
+    "nome_servico": "Troca de Correia",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 60,
+    "equipamento": "Máquina de Lavar",
+    "ativo": true
+  },
+  {
+    "codigo": "MLV-MAN-005",
+    "nome_servico": "Troca de Bomba D'água",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 320.0,
+    "duracao_min": 90,
+    "equipamento": "Máquina de Lavar",
+    "ativo": true
+  },
+  {
+    "codigo": "MLV-MAN-006",
+    "nome_servico": "Troca de Placa Eletrônica",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 380.0,
+    "duracao_min": 90,
+    "equipamento": "Máquina de Lavar",
+    "ativo": true
+  },
+  {
+    "codigo": "MLV-MAN-007",
+    "nome_servico": "Reparo de Vazamento",
+    "categoria": "Manutenção",
+    "unidade": "Hora",
+    "preco_base": 130.0,
+    "duracao_min": 90,
+    "equipamento": "Máquina de Lavar",
+    "ativo": true
+  },
+  {
+    "codigo": "MLV-INS-001",
+    "nome_servico": "Instalação Máquina de Lavar",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 60,
+    "equipamento": "Máquina de Lavar",
+    "ativo": true
+  },
+  {
+    "codigo": "MLV-INS-002",
+    "nome_servico": "Instalação Lava e Seca",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 280.0,
+    "duracao_min": 90,
+    "equipamento": "Máquina de Lavar",
+    "ativo": true
+  },
+  {
+    "codigo": "MLV-LIM-001",
+    "nome_servico": "Limpeza Técnica Máquina de Lavar",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 150.0,
+    "duracao_min": 60,
+    "equipamento": "Máquina de Lavar",
+    "ativo": true
+  },
+  {
+    "codigo": "MLV-LIM-002",
+    "nome_servico": "Desincrustação de Tambor",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 200.0,
+    "duracao_min": 90,
+    "equipamento": "Máquina de Lavar",
+    "ativo": true
+  },
+  {
+    "codigo": "MLV-INP-001",
+    "nome_servico": "Inspeção Técnica Máquina de Lavar",
+    "categoria": "Inspeção",
+    "unidade": "Visita",
+    "preco_base": 120.0,
+    "duracao_min": 30,
+    "equipamento": "Máquina de Lavar",
+    "ativo": true
+  },
+  {
+    "codigo": "CTF-MAN-001",
+    "nome_servico": "Manutenção Preventiva Centrífuga",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 60,
+    "equipamento": "Centrífuga",
+    "ativo": true
+  },
+  {
+    "codigo": "CTF-MAN-002",
+    "nome_servico": "Manutenção Corretiva Centrífuga",
+    "categoria": "Manutenção",
+    "unidade": "Hora",
+    "preco_base": 130.0,
+    "duracao_min": 120,
+    "equipamento": "Centrífuga",
+    "ativo": true
+  },
+  {
+    "codigo": "CTF-MAN-003",
+    "nome_servico": "Troca de Rolamento Centrífuga",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 380.0,
+    "duracao_min": 120,
+    "equipamento": "Centrífuga",
+    "ativo": true
+  },
+  {
+    "codigo": "CTF-MAN-004",
+    "nome_servico": "Balanceamento Centrífuga",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 250.0,
+    "duracao_min": 90,
+    "equipamento": "Centrífuga",
+    "ativo": true
+  },
+  {
+    "codigo": "CTF-INS-001",
+    "nome_servico": "Instalação Centrífuga",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 250.0,
+    "duracao_min": 90,
+    "equipamento": "Centrífuga",
+    "ativo": true
+  },
+  {
+    "codigo": "CTF-LIM-001",
+    "nome_servico": "Limpeza Técnica Centrífuga",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 140.0,
+    "duracao_min": 45,
+    "equipamento": "Centrífuga",
+    "ativo": true
+  },
+  {
+    "codigo": "CTF-INP-001",
+    "nome_servico": "Inspeção Técnica Centrífuga",
+    "categoria": "Inspeção",
+    "unidade": "Visita",
+    "preco_base": 120.0,
+    "duracao_min": 30,
+    "equipamento": "Centrífuga",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-MAN-001",
+    "nome_servico": "Manutenção Preventiva Expositor",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 280.0,
+    "duracao_min": 90,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-MAN-002",
+    "nome_servico": "Manutenção Corretiva Expositor",
+    "categoria": "Manutenção",
+    "unidade": "Hora",
+    "preco_base": 140.0,
+    "duracao_min": 150,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-MAN-003",
+    "nome_servico": "Troca de Borracha de Vedação",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 220.0,
+    "duracao_min": 60,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-MAN-004",
+    "nome_servico": "Troca de Iluminação LED Interna",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 45,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-MAN-005",
+    "nome_servico": "Troca de Compressor Expositor",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 1200.0,
+    "duracao_min": 240,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-INS-001",
+    "nome_servico": "Instalação Expositor Vertical",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 380.0,
+    "duracao_min": 120,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-INS-002",
+    "nome_servico": "Instalação Expositor Horizontal",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 380.0,
+    "duracao_min": 120,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-INS-003",
+    "nome_servico": "Instalação Vitrine Refrigerada",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 550.0,
+    "duracao_min": 180,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-INS-004",
+    "nome_servico": "Instalação Ilha Refrigerada",
+    "categoria": "Instalação",
+    "unidade": "Diária",
+    "preco_base": 1200.0,
+    "duracao_min": 240,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-LIM-001",
+    "nome_servico": "Limpeza Técnica Expositor",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 60,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-LIM-002",
+    "nome_servico": "Limpeza Condensador Expositor",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 150.0,
+    "duracao_min": 45,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-SOL-001",
+    "nome_servico": "Solda Tubulação Expositor",
+    "categoria": "Solda",
+    "unidade": "Hora",
+    "preco_base": 180.0,
+    "duracao_min": 90,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-RGS-001",
+    "nome_servico": "Recarga de Gás Expositor (R-404A)",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 480.0,
+    "duracao_min": 60,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-RGS-002",
+    "nome_servico": "Recarga de Gás Expositor (R-134a)",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 320.0,
+    "duracao_min": 60,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-INP-001",
+    "nome_servico": "Inspeção Técnica Expositor",
+    "categoria": "Inspeção",
+    "unidade": "Visita",
+    "preco_base": 150.0,
+    "duracao_min": 45,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "EXP-PRJ-001",
+    "nome_servico": "Projeto de Layout para Expositores",
+    "categoria": "Projeto",
+    "unidade": "M²",
+    "preco_base": 28.0,
+    "duracao_min": 240,
+    "equipamento": "Expositor",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-MAN-001",
+    "nome_servico": "Manutenção Preventiva Cervejeira",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 180.0,
+    "duracao_min": 60,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-MAN-002",
+    "nome_servico": "Manutenção Corretiva Cervejeira",
+    "categoria": "Manutenção",
+    "unidade": "Hora",
+    "preco_base": 130.0,
+    "duracao_min": 120,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-MAN-003",
+    "nome_servico": "Manutenção Chopeira",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 280.0,
+    "duracao_min": 90,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-MAN-004",
+    "nome_servico": "Troca de Termostato Cervejeira",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 200.0,
+    "duracao_min": 45,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-MAN-005",
+    "nome_servico": "Calibração de Temperatura",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 140.0,
+    "duracao_min": 30,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-INS-001",
+    "nome_servico": "Instalação Cervejeira",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 220.0,
+    "duracao_min": 60,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-INS-002",
+    "nome_servico": "Instalação Chopeira",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 450.0,
+    "duracao_min": 120,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-LIM-001",
+    "nome_servico": "Limpeza Técnica Cervejeira",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 150.0,
+    "duracao_min": 45,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-LIM-002",
+    "nome_servico": "Higienização Serpentina Chopeira",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 220.0,
+    "duracao_min": 60,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-SOL-001",
+    "nome_servico": "Solda Tubulação Cervejeira",
+    "categoria": "Solda",
+    "unidade": "Hora",
+    "preco_base": 150.0,
+    "duracao_min": 60,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-RGS-001",
+    "nome_servico": "Recarga de Gás Cervejeira",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 320.0,
+    "duracao_min": 60,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-RGS-002",
+    "nome_servico": "Recarga de CO2 Chopeira",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 120.0,
+    "duracao_min": 30,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CVJ-INP-001",
+    "nome_servico": "Inspeção Técnica Cervejeira",
+    "categoria": "Inspeção",
+    "unidade": "Visita",
+    "preco_base": 120.0,
+    "duracao_min": 30,
+    "equipamento": "Cervejeira",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-001",
+    "nome_servico": "Manutenção Preventiva Câmara Fria (até 10m³)",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 480.0,
+    "duracao_min": 180,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-002",
+    "nome_servico": "Manutenção Preventiva Câmara Fria (10m³ a 30m³)",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 750.0,
+    "duracao_min": 240,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-003",
+    "nome_servico": "Manutenção Preventiva Câmara Fria (acima 30m³)",
+    "categoria": "Manutenção",
+    "unidade": "Diária",
+    "preco_base": 1200.0,
+    "duracao_min": 480,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-004",
+    "nome_servico": "Manutenção Corretiva Câmara Fria",
+    "categoria": "Manutenção",
+    "unidade": "Hora",
+    "preco_base": 180.0,
+    "duracao_min": 180,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-005",
+    "nome_servico": "Troca de Compressor Câmara Fria",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 2500.0,
+    "duracao_min": 360,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-006",
+    "nome_servico": "Troca de Evaporador (Forçador)",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 1800.0,
+    "duracao_min": 240,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-007",
+    "nome_servico": "Troca de Condensador",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 1500.0,
+    "duracao_min": 240,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-008",
+    "nome_servico": "Troca de Válvula de Expansão",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 650.0,
+    "duracao_min": 120,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-009",
+    "nome_servico": "Troca de Pressostato",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 380.0,
+    "duracao_min": 60,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-010",
+    "nome_servico": "Troca de Termostato Digital",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 320.0,
+    "duracao_min": 60,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-011",
+    "nome_servico": "Troca de Resistência de Degelo",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 420.0,
+    "duracao_min": 90,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-012",
+    "nome_servico": "Troca de Borracha de Vedação Porta",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 380.0,
+    "duracao_min": 90,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-013",
+    "nome_servico": "Reparo de Porta/Dobradiças",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 350.0,
+    "duracao_min": 120,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-014",
+    "nome_servico": "Troca de Iluminação Interna LED",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 220.0,
+    "duracao_min": 45,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-015",
+    "nome_servico": "Manutenção Sistema de Degelo",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 380.0,
+    "duracao_min": 90,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-MAN-016",
+    "nome_servico": "Calibração de Controlador Eletrônico",
+    "categoria": "Manutenção",
+    "unidade": "Serviço",
+    "preco_base": 250.0,
+    "duracao_min": 60,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INS-001",
+    "nome_servico": "Montagem Câmara Fria Modular (até 10m³)",
+    "categoria": "Instalação",
+    "unidade": "Diária",
+    "preco_base": 1500.0,
+    "duracao_min": 480,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INS-002",
+    "nome_servico": "Montagem Câmara Fria Modular (10m³ a 30m³)",
+    "categoria": "Instalação",
+    "unidade": "Diária",
+    "preco_base": 1800.0,
+    "duracao_min": 960,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INS-003",
+    "nome_servico": "Montagem Câmara Fria Modular (acima 30m³)",
+    "categoria": "Instalação",
+    "unidade": "M²",
+    "preco_base": 380.0,
+    "duracao_min": 1440,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INS-004",
+    "nome_servico": "Instalação Unidade Condensadora",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 1200.0,
+    "duracao_min": 240,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INS-005",
+    "nome_servico": "Instalação Evaporador (Forçador)",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 950.0,
+    "duracao_min": 180,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INS-006",
+    "nome_servico": "Instalação Painel de Comando",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 850.0,
+    "duracao_min": 180,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INS-007",
+    "nome_servico": "Instalação Tubulação Frigorífica",
+    "categoria": "Instalação",
+    "unidade": "M²",
+    "preco_base": 180.0,
+    "duracao_min": 240,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INS-008",
+    "nome_servico": "Instalação Cortina de Ar",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 450.0,
+    "duracao_min": 90,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INS-009",
+    "nome_servico": "Instalação Cortina PVC (Tira de Plástico)",
+    "categoria": "Instalação",
+    "unidade": "Serviço",
+    "preco_base": 280.0,
+    "duracao_min": 60,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INS-010",
+    "nome_servico": "Desmontagem de Câmara Fria",
+    "categoria": "Instalação",
+    "unidade": "Diária",
+    "preco_base": 1200.0,
+    "duracao_min": 480,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INS-011",
+    "nome_servico": "Realocação de Câmara Fria",
+    "categoria": "Instalação",
+    "unidade": "Diária",
+    "preco_base": 1800.0,
+    "duracao_min": 720,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-LIM-001",
+    "nome_servico": "Limpeza Técnica Câmara Fria",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 380.0,
+    "duracao_min": 120,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-LIM-002",
+    "nome_servico": "Higienização Sanitária Câmara Fria",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 580.0,
+    "duracao_min": 180,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-LIM-003",
+    "nome_servico": "Limpeza Química Condensador",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 320.0,
+    "duracao_min": 90,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-LIM-004",
+    "nome_servico": "Limpeza Química Evaporador",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 380.0,
+    "duracao_min": 90,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-LIM-005",
+    "nome_servico": "Desinfecção e Sanitização Completa",
+    "categoria": "Limpeza",
+    "unidade": "Serviço",
+    "preco_base": 750.0,
+    "duracao_min": 240,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-SOL-001",
+    "nome_servico": "Solda Tubulação de Cobre Câmara Fria",
+    "categoria": "Solda",
+    "unidade": "Hora",
+    "preco_base": 220.0,
+    "duracao_min": 120,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-SOL-002",
+    "nome_servico": "Reparo de Vazamento na Tubulação",
+    "categoria": "Solda",
+    "unidade": "Hora",
+    "preco_base": 200.0,
+    "duracao_min": 90,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-RGS-001",
+    "nome_servico": "Recarga de Gás R-404A Câmara Fria",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 850.0,
+    "duracao_min": 90,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-RGS-002",
+    "nome_servico": "Recarga de Gás R-22 Câmara Fria",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 950.0,
+    "duracao_min": 90,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-RGS-003",
+    "nome_servico": "Recarga de Gás R-134a Câmara Fria",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 650.0,
+    "duracao_min": 90,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-RGS-004",
+    "nome_servico": "Recarga de Gás R-407F (Ecológico)",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 1100.0,
+    "duracao_min": 90,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-RGS-005",
+    "nome_servico": "Recarga de Gás R-448A/R-449A",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 1250.0,
+    "duracao_min": 90,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-RGS-006",
+    "nome_servico": "Recolhimento de Gás Refrigerante",
+    "categoria": "Recarga de Gás",
+    "unidade": "Serviço",
+    "preco_base": 480.0,
+    "duracao_min": 120,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INP-001",
+    "nome_servico": "Inspeção Técnica Câmara Fria",
+    "categoria": "Inspeção",
+    "unidade": "Visita",
+    "preco_base": 220.0,
+    "duracao_min": 60,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INP-002",
+    "nome_servico": "Laudo Técnico Câmara Fria",
+    "categoria": "Inspeção",
+    "unidade": "Serviço",
+    "preco_base": 850.0,
+    "duracao_min": 180,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INP-003",
+    "nome_servico": "Análise de Eficiência Energética",
+    "categoria": "Inspeção",
+    "unidade": "Serviço",
+    "preco_base": 1200.0,
+    "duracao_min": 240,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INP-004",
+    "nome_servico": "Teste de Estanqueidade (Vazamento)",
+    "categoria": "Inspeção",
+    "unidade": "Serviço",
+    "preco_base": 480.0,
+    "duracao_min": 120,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-INP-005",
+    "nome_servico": "Mapeamento Térmico (Termografia)",
+    "categoria": "Inspeção",
+    "unidade": "Serviço",
+    "preco_base": 950.0,
+    "duracao_min": 180,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-PRJ-001",
+    "nome_servico": "Projeto Câmara Fria Personalizada",
+    "categoria": "Projeto",
+    "unidade": "M²",
+    "preco_base": 85.0,
+    "duracao_min": 720,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-PRJ-002",
+    "nome_servico": "Dimensionamento de Carga Térmica",
+    "categoria": "Projeto",
+    "unidade": "Serviço",
+    "preco_base": 1500.0,
+    "duracao_min": 360,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-PRJ-003",
+    "nome_servico": "Projeto de Layout e Instalação",
+    "categoria": "Projeto",
+    "unidade": "M²",
+    "preco_base": 65.0,
+    "duracao_min": 480,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-PRJ-004",
+    "nome_servico": "Projeto Sistema de Backup/Redundância",
+    "categoria": "Projeto",
+    "unidade": "Serviço",
+    "preco_base": 2200.0,
+    "duracao_min": 480,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  },
+  {
+    "codigo": "CMF-PRJ-005",
+    "nome_servico": "Consultoria Técnica Câmara Fria",
+    "categoria": "Projeto",
+    "unidade": "Hora",
+    "preco_base": 250.0,
+    "duracao_min": 60,
+    "equipamento": "Câmara Fria",
+    "ativo": true
+  }
+]

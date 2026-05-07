@@ -11,6 +11,9 @@ import BlurText from "./BlurText.jsx";
 import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
 import { FrostIcon } from "./FrostIcons.jsx";
 import AnimatedLogo from "./AnimatedLogo.jsx";
+// Catálogo padrão de serviços (Refrigeração/Climatização) — semeado uma vez
+// por dispositivo via seedServiceCatalog() para popular erp:service: ao iniciar.
+import SERVICE_CATALOG_SEED from "./services-seed.json";
 
 // Detecta se a URL aponta para um arquivo de vídeo (preview do tecnico)
 const VIDEO_EXT_RE = /\.(mp4|mov|webm|m4v|avi|mkv|ogv|3gp)(\?|$)/i;
@@ -898,6 +901,50 @@ function purgeAllUsers() {
   }
   keys.forEach((k) => DB.delete(k));
   return keys.length;
+}
+
+// ─── Seed do catálogo de serviços ───────────────────────────────────────────
+// Importa o JSON padrão (~155 itens de Refrigeração/Climatização) para a tabela
+// erp:service: na primeira execução. Idempotente: pula códigos que já existem,
+// então pode rodar a cada boot sem duplicar.
+//
+// Os registros entram sem companyId — o filtro de tenant trata records sem
+// companyId como "globais", visíveis a todas as empresas, o que é desejável
+// para um catálogo padrão. Empresas que quiserem podem editar/desativar.
+function seedServiceCatalog() {
+  if (!Array.isArray(SERVICE_CATALOG_SEED) || SERVICE_CATALOG_SEED.length === 0) return;
+
+  const existing = DB.listAll("erp:service:");
+  const existingCodes = new Set(
+    existing.map((s) => (s.codigo || "").toUpperCase()).filter(Boolean)
+  );
+
+  let added = 0;
+  for (const item of SERVICE_CATALOG_SEED) {
+    const codigo = String(item.codigo || "").trim();
+    if (!codigo || existingCodes.has(codigo.toUpperCase())) continue;
+
+    const equipamento = String(item.equipamento || "").trim();
+    const newRow = {
+      id: genId(),
+      codigo,
+      nome: String(item.nome_servico || "").trim(),
+      categoria: String(item.categoria || "").trim(),
+      unidade: String(item.unidade || "Serviço").trim(),
+      precoBase: Number(item.preco_base) || 0,
+      duracaoMin: Number(item.duracao_min) || 0,
+      descricao: equipamento ? `Equipamento: ${equipamento}` : "",
+      status: item.ativo === false ? "inativo" : "ativo",
+      createdAt: new Date().toISOString(),
+    };
+    DB.set("erp:service:" + newRow.id, newRow);
+    existingCodes.add(codigo.toUpperCase());
+    added++;
+  }
+
+  if (added > 0) {
+    console.info(`[seedServiceCatalog] ${added} serviço(s) padrão importado(s).`);
+  }
 }
 
 async function seedDatabase() {
@@ -10766,6 +10813,8 @@ export default function App() {
       await seedDatabase();
       // Multi-tenant: garante company padrão e tagga registros legados
       ensureCompanyMigration();
+      // Catálogo padrão de serviços (idempotente — pula códigos já cadastrados)
+      seedServiceCatalog();
       loadAllData();
       setLoading(false);
       // Master mode: verifica se já existe master cadastrado
