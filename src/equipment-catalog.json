@@ -1,0 +1,1872 @@
+[
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Elgin",
+    "modelo": "HVFI09B2IA",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Elgin",
+    "modelo": "HVFI12B2IA",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Elgin",
+    "modelo": "HVFI18B2IA",
+    "capacidade": "18.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Elgin",
+    "modelo": "HVFI24B2IA",
+    "capacidade": "24.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Elgin",
+    "modelo": "HVFI30B2IA",
+    "capacidade": "30.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Midea",
+    "modelo": "MB-12CR",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Midea",
+    "modelo": "MB-18CR",
+    "capacidade": "18.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Midea",
+    "modelo": "MB-24CR",
+    "capacidade": "24.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Midea",
+    "modelo": "Aurora Inverter 9000",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Midea",
+    "modelo": "Aurora Inverter 12000",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Midea",
+    "modelo": "Aurora Inverter 18000",
+    "capacidade": "18.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Midea",
+    "modelo": "Aurora Inverter 24000",
+    "capacidade": "24.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Springer Carrier",
+    "modelo": "42AGCB09S5",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Springer Carrier",
+    "modelo": "42AGCB12S5",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Springer Carrier",
+    "modelo": "42AGCB18S5",
+    "capacidade": "18.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Springer Carrier",
+    "modelo": "42AGCB24S5",
+    "capacidade": "24.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Springer Carrier",
+    "modelo": "Midea X-Power 9000",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Springer Carrier",
+    "modelo": "Midea X-Power 12000",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Gree",
+    "modelo": "GWH09AGA-D3DNB4G",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Gree",
+    "modelo": "GWH12AGA-D3DNB4G",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Gree",
+    "modelo": "GWH18AGA-D3DNB4G",
+    "capacidade": "18.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Gree",
+    "modelo": "GWH24AGA-D3DNB4G",
+    "capacidade": "24.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Gree",
+    "modelo": "GWH36AGA-D3DNB4G",
+    "capacidade": "36.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "LG",
+    "modelo": "S4-W09JA3WA",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Dual Inverter",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "LG",
+    "modelo": "S4-W12JA3WA",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Dual Inverter",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "LG",
+    "modelo": "S4-W18KL3WA",
+    "capacidade": "18.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Dual Inverter",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "LG",
+    "modelo": "S4-W24KL3WA",
+    "capacidade": "24.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Dual Inverter",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Samsung",
+    "modelo": "AR09BVHQAWK",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Wind-Free",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Samsung",
+    "modelo": "AR12BVHQAWK",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Wind-Free",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Samsung",
+    "modelo": "AR18BVHQAWK",
+    "capacidade": "18.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Wind-Free",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Samsung",
+    "modelo": "AR24BVHQAWK",
+    "capacidade": "24.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Wind-Free",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Komeco",
+    "modelo": "KO9FCG1",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Komeco",
+    "modelo": "KO12FCG1",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Komeco",
+    "modelo": "KO18FCG1",
+    "capacidade": "18.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Komeco",
+    "modelo": "KO24FCG1",
+    "capacidade": "24.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Agratto",
+    "modelo": "ICS09FR4-02",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Agratto",
+    "modelo": "ICS12FR4-02",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Agratto",
+    "modelo": "ICS18FR4-02",
+    "capacidade": "18.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Inverter Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Consul",
+    "modelo": "CBN09CBBNA",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Consul",
+    "modelo": "CBN12CBBNA",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Philco",
+    "modelo": "PAC9000TFM5",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Philco",
+    "modelo": "PAC12000TFM5",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Britânia",
+    "modelo": "BAC9000FP9",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Britânia",
+    "modelo": "BAC12000FP9",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split On/Off Hi Wall",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Carrier",
+    "modelo": "40KVQ12C5",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Cassete",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Carrier",
+    "modelo": "40KVQ24C5",
+    "capacidade": "24.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Cassete",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Carrier",
+    "modelo": "40KVQ36C5",
+    "capacidade": "36.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Cassete",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Carrier",
+    "modelo": "40KVQ48C5",
+    "capacidade": "48.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Cassete",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Midea",
+    "modelo": "Piso-Teto 24000",
+    "capacidade": "24.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Piso-Teto",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Midea",
+    "modelo": "Piso-Teto 36000",
+    "capacidade": "36.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Piso-Teto",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Midea",
+    "modelo": "Piso-Teto 48000",
+    "capacidade": "48.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Split Piso-Teto",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Consul",
+    "modelo": "CCB07CBBNA",
+    "capacidade": "7.500",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "110V",
+    "descricao": "Ar de Janela",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Consul",
+    "modelo": "CCB10CBBNA",
+    "capacidade": "10.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Ar de Janela",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Springer",
+    "modelo": "MQA075BB",
+    "capacidade": "7.500",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "110V",
+    "descricao": "Ar de Janela",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Central de Ar (Split/Janela)",
+    "marca": "Springer",
+    "modelo": "MQA100BB",
+    "capacidade": "10.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Ar de Janela",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Brastemp",
+    "modelo": "BRM44HB",
+    "capacidade": "375",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Frost Free 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Brastemp",
+    "modelo": "BRM54HB",
+    "capacidade": "462",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Frost Free 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Brastemp",
+    "modelo": "BRE80AK",
+    "capacidade": "573",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Side by Side",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Consul",
+    "modelo": "CRM44AB",
+    "capacidade": "394",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Frost Free 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Consul",
+    "modelo": "CRM56AB",
+    "capacidade": "483",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Frost Free 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Electrolux",
+    "modelo": "IF55S",
+    "capacidade": "490",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Frost Free 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Electrolux",
+    "modelo": "IF65S",
+    "capacidade": "585",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Frost Free 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Electrolux",
+    "modelo": "DFN53",
+    "capacidade": "459",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Frost Free Duplex",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Samsung",
+    "modelo": "RT38K5A0JS8",
+    "capacidade": "371",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Frost Free 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Samsung",
+    "modelo": "RF28T5F01B4",
+    "capacidade": "595",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira French Door",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Philco",
+    "modelo": "PH400TM",
+    "capacidade": "400",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Frost Free 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Midea",
+    "modelo": "MDRB489FGE01",
+    "capacidade": "489",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Frost Free 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Metalfrio",
+    "modelo": "VB52R",
+    "capacidade": "524",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Comercial Vertical",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Imbera",
+    "modelo": "G319",
+    "capacidade": "319",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Comercial Vertical",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Imbera",
+    "modelo": "G328",
+    "capacidade": "328",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Comercial 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Consul",
+    "modelo": "CRD37E",
+    "capacidade": "370",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Geladeira Comercial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Brastemp",
+    "modelo": "BVR28MB",
+    "capacidade": "228",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Freezer Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Consul",
+    "modelo": "CHB53BB",
+    "capacidade": "534",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Freezer Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Consul",
+    "modelo": "CHB42BB",
+    "capacidade": "420",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Freezer Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Electrolux",
+    "modelo": "H500",
+    "capacidade": "502",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Freezer Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Electrolux",
+    "modelo": "H330",
+    "capacidade": "330",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Freezer Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Brastemp",
+    "modelo": "BVG24MB",
+    "capacidade": "228",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Freezer Vertical",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Consul",
+    "modelo": "CVU30GB",
+    "capacidade": "309",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Freezer Vertical",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Electrolux",
+    "modelo": "FE26",
+    "capacidade": "260",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Freezer Vertical",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Metalfrio",
+    "modelo": "DA550",
+    "capacidade": "550",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Freezer Comercial Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Metalfrio",
+    "modelo": "DA850",
+    "capacidade": "850",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Freezer Comercial Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Fricon",
+    "modelo": "HCEB570",
+    "capacidade": "570",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Freezer Comercial Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Geladeira / Freezer",
+    "marca": "Refrimate",
+    "modelo": "ACH570",
+    "capacidade": "570",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Freezer Comercial Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Brastemp",
+    "modelo": "BWK11AB",
+    "capacidade": "11",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Máquina de Lavar Automática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Brastemp",
+    "modelo": "BWS11AB",
+    "capacidade": "11",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Lava e Seca",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Brastemp",
+    "modelo": "BWL12AB",
+    "capacidade": "12",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Máquina de Lavar Automática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Consul",
+    "modelo": "CWB11AB",
+    "capacidade": "11",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Máquina de Lavar Automática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Consul",
+    "modelo": "CWL12AB",
+    "capacidade": "12",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Máquina de Lavar Automática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Consul",
+    "modelo": "CWT14BB",
+    "capacidade": "14",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Máquina de Lavar Automática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Electrolux",
+    "modelo": "LTC12",
+    "capacidade": "12",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Máquina de Lavar Automática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Electrolux",
+    "modelo": "LWS11",
+    "capacidade": "11",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Lava e Seca",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Electrolux",
+    "modelo": "LTE12",
+    "capacidade": "12",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Máquina de Lavar Automática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Samsung",
+    "modelo": "WA13T5260BW",
+    "capacidade": "13",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Máquina de Lavar Automática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Samsung",
+    "modelo": "WD11T504DBX",
+    "capacidade": "11",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Lava e Seca",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "LG",
+    "modelo": "VC4011WP4",
+    "capacidade": "11",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Máquina de Lavar Automática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "LG",
+    "modelo": "CV5011WP4",
+    "capacidade": "11",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Lava e Seca",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Midea",
+    "modelo": "MA500W11",
+    "capacidade": "11",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Máquina de Lavar Automática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Philco",
+    "modelo": "PLS11AB",
+    "capacidade": "11",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Máquina de Lavar Automática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Suggar",
+    "modelo": "FITMAQ8",
+    "capacidade": "8",
+    "unidade_capacidade": "kg",
+    "voltagem": "110V",
+    "descricao": "Lavadora Semiautomática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Colormaq",
+    "modelo": "LCA8",
+    "capacidade": "8",
+    "unidade_capacidade": "kg",
+    "voltagem": "110V",
+    "descricao": "Lavadora Semiautomática",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Primus",
+    "modelo": "FS16",
+    "capacidade": "16",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Lavadora Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Primus",
+    "modelo": "FS33",
+    "capacidade": "33",
+    "unidade_capacidade": "kg",
+    "voltagem": "380V",
+    "descricao": "Lavadora Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Máquina de Lavar",
+    "marca": "Lavamac",
+    "modelo": "LM16",
+    "capacidade": "16",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Lavadora Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Centrífuga",
+    "marca": "Primus",
+    "modelo": "CE16",
+    "capacidade": "16",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Centrífuga Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Centrífuga",
+    "marca": "Primus",
+    "modelo": "CE35",
+    "capacidade": "35",
+    "unidade_capacidade": "kg",
+    "voltagem": "380V",
+    "descricao": "Centrífuga Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Centrífuga",
+    "marca": "Lavamac",
+    "modelo": "LCEX16",
+    "capacidade": "16",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Centrífuga Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Centrífuga",
+    "marca": "Lavamac",
+    "modelo": "LCEX25",
+    "capacidade": "25",
+    "unidade_capacidade": "kg",
+    "voltagem": "380V",
+    "descricao": "Centrífuga Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Centrífuga",
+    "marca": "Electrolux",
+    "modelo": "CT08F",
+    "capacidade": "8",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Centrífuga Doméstica",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Centrífuga",
+    "marca": "Brastemp",
+    "modelo": "BSE08AB",
+    "capacidade": "8",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Centrífuga Doméstica",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Centrífuga",
+    "marca": "Consul",
+    "modelo": "CCF08AB",
+    "capacidade": "8",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Centrífuga Doméstica",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Centrífuga",
+    "marca": "Suggar",
+    "modelo": "GIROU8",
+    "capacidade": "8",
+    "unidade_capacidade": "kg",
+    "voltagem": "110V",
+    "descricao": "Centrífuga Doméstica",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Centrífuga",
+    "marca": "Mueller",
+    "modelo": "MCF10",
+    "capacidade": "10",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Centrífuga Doméstica",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Centrífuga",
+    "marca": "Itatiaia",
+    "modelo": "IC10",
+    "capacidade": "10",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Centrífuga Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Centrífuga",
+    "marca": "Cimel",
+    "modelo": "CL10",
+    "capacidade": "10",
+    "unidade_capacidade": "kg",
+    "voltagem": "220V",
+    "descricao": "Centrífuga Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Centrífuga",
+    "marca": "Cimel",
+    "modelo": "CL20",
+    "capacidade": "20",
+    "unidade_capacidade": "kg",
+    "voltagem": "380V",
+    "descricao": "Centrífuga Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Metalfrio",
+    "modelo": "VB52R",
+    "capacidade": "524",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Expositor Vertical 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Metalfrio",
+    "modelo": "VB74R",
+    "capacidade": "744",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Expositor Vertical 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Metalfrio",
+    "modelo": "VB99R",
+    "capacidade": "990",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Expositor Vertical 4 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Imbera",
+    "modelo": "G319",
+    "capacidade": "319",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Expositor Vertical 1 Porta",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Imbera",
+    "modelo": "G580",
+    "capacidade": "580",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Expositor Vertical 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Gelopar",
+    "modelo": "GPTU-570",
+    "capacidade": "570",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Expositor Vertical 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Gelopar",
+    "modelo": "GPTU-900",
+    "capacidade": "900",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Expositor Vertical 4 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Fricon",
+    "modelo": "VCM570",
+    "capacidade": "570",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Expositor Vertical 2 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Fricon",
+    "modelo": "VCM900",
+    "capacidade": "900",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Expositor Vertical 4 Portas",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Metalfrio",
+    "modelo": "DA550",
+    "capacidade": "550",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Expositor Horizontal / Ilha",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Gelopar",
+    "modelo": "GHBS-220",
+    "capacidade": "220",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Expositor Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Refrimate",
+    "modelo": "ESF250",
+    "capacidade": "250",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Expositor Semifocal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Fricon",
+    "modelo": "VCH120",
+    "capacidade": "120",
+    "unidade_capacidade": "cm",
+    "voltagem": "220V",
+    "descricao": "Vitrine Refrigerada Horizontal (por largura)",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Fricon",
+    "modelo": "VCH150",
+    "capacidade": "150",
+    "unidade_capacidade": "cm",
+    "voltagem": "220V",
+    "descricao": "Vitrine Refrigerada Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Conservex",
+    "modelo": "HR120",
+    "capacidade": "120",
+    "unidade_capacidade": "cm",
+    "voltagem": "220V",
+    "descricao": "Vitrine Refrigerada Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Conservex",
+    "modelo": "HR150",
+    "capacidade": "150",
+    "unidade_capacidade": "cm",
+    "voltagem": "220V",
+    "descricao": "Vitrine Refrigerada Horizontal",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Gelopar",
+    "modelo": "GEVT-120",
+    "capacidade": "120",
+    "unidade_capacidade": "cm",
+    "voltagem": "220V",
+    "descricao": "Vitrine Refrigerada Vertical",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Expositor / Vitrine Refrigerada",
+    "marca": "Gelopar",
+    "modelo": "GEVT-150",
+    "capacidade": "150",
+    "unidade_capacidade": "cm",
+    "voltagem": "220V",
+    "descricao": "Vitrine Refrigerada Vertical",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro Industrial",
+    "marca": "Everest",
+    "modelo": "BC3300",
+    "capacidade": "100",
+    "unidade_capacidade": "Litros/h",
+    "voltagem": "220V",
+    "descricao": "Bebedouro Industrial Pressão",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro Industrial",
+    "marca": "Everest",
+    "modelo": "BC5000",
+    "capacidade": "200",
+    "unidade_capacidade": "Litros/h",
+    "voltagem": "220V",
+    "descricao": "Bebedouro Industrial Pressão",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro Industrial",
+    "marca": "Elbi",
+    "modelo": "BI-100",
+    "capacidade": "100",
+    "unidade_capacidade": "Litros/h",
+    "voltagem": "220V",
+    "descricao": "Bebedouro Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro Industrial",
+    "marca": "Elbi",
+    "modelo": "BI-200",
+    "capacidade": "200",
+    "unidade_capacidade": "Litros/h",
+    "voltagem": "220V",
+    "descricao": "Bebedouro Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro Industrial",
+    "marca": "Iguassu",
+    "modelo": "BI3000",
+    "capacidade": "100",
+    "unidade_capacidade": "Litros/h",
+    "voltagem": "220V",
+    "descricao": "Bebedouro Industrial com Filtro",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro Industrial",
+    "marca": "Iguassu",
+    "modelo": "BI5000",
+    "capacidade": "200",
+    "unidade_capacidade": "Litros/h",
+    "voltagem": "220V",
+    "descricao": "Bebedouro Industrial com Filtro",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro Industrial",
+    "marca": "Consul",
+    "modelo": "CBI500BA",
+    "capacidade": "50",
+    "unidade_capacidade": "Litros/h",
+    "voltagem": "220V",
+    "descricao": "Bebedouro Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro Industrial",
+    "marca": "Brastemp",
+    "modelo": "BPA30",
+    "capacidade": "30",
+    "unidade_capacidade": "Litros/h",
+    "voltagem": "220V",
+    "descricao": "Bebedouro Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Mesa",
+    "marca": "Electrolux",
+    "modelo": "BE20G",
+    "capacidade": "2,5",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Bebedouro de Mesa",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Mesa",
+    "marca": "Electrolux",
+    "modelo": "BE26G",
+    "capacidade": "2,5",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Bebedouro de Mesa",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Mesa",
+    "marca": "Consul",
+    "modelo": "CBA30AB",
+    "capacidade": "2,0",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Bebedouro de Mesa",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Mesa",
+    "marca": "Brastemp",
+    "modelo": "BPA30AB",
+    "capacidade": "2,5",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Bebedouro de Mesa",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Mesa",
+    "marca": "Ibbl",
+    "modelo": "MELL31",
+    "capacidade": "2,5",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Purificador de Mesa Refrigerado",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Mesa",
+    "marca": "Ibbl",
+    "modelo": "FR600",
+    "capacidade": "2,5",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Purificador de Mesa Refrigerado",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Mesa",
+    "marca": "Latina",
+    "modelo": "PA335",
+    "capacidade": "2,0",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Purificador de Mesa",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Mesa",
+    "marca": "Latina",
+    "modelo": "PA355",
+    "capacidade": "2,0",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Purificador de Mesa com UV",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Mesa",
+    "marca": "Colormaq",
+    "modelo": "BBS10",
+    "capacidade": "2,0",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Bebedouro de Mesa",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Coluna",
+    "marca": "Electrolux",
+    "modelo": "BE28G",
+    "capacidade": "2,5",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Gelágua de Coluna",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Coluna",
+    "marca": "Electrolux",
+    "modelo": "BE35G",
+    "capacidade": "2,5",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Gelágua de Coluna Refrigerado",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Coluna",
+    "marca": "Consul",
+    "modelo": "CBA50AB",
+    "capacidade": "5,0",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Gelágua de Coluna",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Coluna",
+    "marca": "Brastemp",
+    "modelo": "BPA38AB",
+    "capacidade": "5,0",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Gelágua de Coluna",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Coluna",
+    "marca": "Masterfrio",
+    "modelo": "MF-200",
+    "capacidade": "5,0",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Gelágua de Coluna",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Coluna",
+    "marca": "Ibbl",
+    "modelo": "ECCO",
+    "capacidade": "5,0",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Purificador de Coluna Refrigerado",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Coluna",
+    "marca": "Latina",
+    "modelo": "PA550",
+    "capacidade": "5,0",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Purificador de Coluna",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Coluna",
+    "marca": "Latina",
+    "modelo": "PA700",
+    "capacidade": "5,0",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Purificador de Coluna com UV",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Coluna",
+    "marca": "Colormaq",
+    "modelo": "BBC25",
+    "capacidade": "2,5",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Gelágua de Coluna",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Coluna",
+    "marca": "Iguassu",
+    "modelo": "GC200",
+    "capacidade": "5,0",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Gelágua de Coluna com Filtro",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Bebedouro / Gelágua Coluna",
+    "marca": "Everest",
+    "modelo": "STAR+",
+    "capacidade": "5,0",
+    "unidade_capacidade": "Litros",
+    "voltagem": "110V",
+    "descricao": "Bebedouro de Coluna Refrigerado",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Tectermica",
+    "modelo": "CFC-06",
+    "capacidade": "6",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Modular Resfriamento (0°C a +10°C)",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Tectermica",
+    "modelo": "CFC-10",
+    "capacidade": "10",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Modular Resfriamento",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Tectermica",
+    "modelo": "CFC-20",
+    "capacidade": "20",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Modular Resfriamento",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Tectermica",
+    "modelo": "CFG-06",
+    "capacidade": "6",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Modular Congelamento (-18°C)",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Tectermica",
+    "modelo": "CFG-10",
+    "capacidade": "10",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Modular Congelamento",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Tectermica",
+    "modelo": "CFG-20",
+    "capacidade": "20",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Modular Congelamento",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Gfrio",
+    "modelo": "CFA-08",
+    "capacidade": "8",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Modular Resfriamento",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Gfrio",
+    "modelo": "CFA-15",
+    "capacidade": "15",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Modular Resfriamento",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Gfrio",
+    "modelo": "CFB-08",
+    "capacidade": "8",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Modular Congelamento",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Gfrio",
+    "modelo": "CFB-15",
+    "capacidade": "15",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Modular Congelamento",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Bitzer",
+    "modelo": "CSH7553-100Y",
+    "capacidade": "100",
+    "unidade_capacidade": "HP",
+    "voltagem": "380V",
+    "descricao": "Unidade Condensadora Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Bitzer",
+    "modelo": "CSH6553-70Y",
+    "capacidade": "70",
+    "unidade_capacidade": "HP",
+    "voltagem": "380V",
+    "descricao": "Unidade Condensadora Industrial",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Danfoss",
+    "modelo": "MTZ32JG4VE",
+    "capacidade": "3",
+    "unidade_capacidade": "HP",
+    "voltagem": "220V",
+    "descricao": "Unidade Condensadora Compacta",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Danfoss",
+    "modelo": "MTZ50JH4VE",
+    "capacidade": "5",
+    "unidade_capacidade": "HP",
+    "voltagem": "220V",
+    "descricao": "Unidade Condensadora Compacta",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Copeland",
+    "modelo": "ZF11K4E-TFD",
+    "capacidade": "10",
+    "unidade_capacidade": "HP",
+    "voltagem": "380V",
+    "descricao": "Unidade Condensadora Scroll",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Copeland",
+    "modelo": "ZF15K4E-TFD",
+    "capacidade": "15",
+    "unidade_capacidade": "HP",
+    "voltagem": "380V",
+    "descricao": "Unidade Condensadora Scroll",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Sob Medida",
+    "modelo": "Painel PUR 100mm",
+    "capacidade": "Personalizável",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Resfriamento Construída no Local",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Sob Medida",
+    "modelo": "Painel PUR 150mm",
+    "capacidade": "Personalizável",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Congelamento Construída no Local",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Câmara Fria",
+    "marca": "Sob Medida",
+    "modelo": "Painel EPS 100mm",
+    "capacidade": "Personalizável",
+    "unidade_capacidade": "m³",
+    "voltagem": "220V",
+    "descricao": "Câmara Fria Resfriamento Econômica",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Outro",
+    "marca": "Elgin",
+    "modelo": "Boiler Solar 200L",
+    "capacidade": "200",
+    "unidade_capacidade": "Litros",
+    "voltagem": "220V",
+    "descricao": "Aquecedor Solar",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Outro",
+    "marca": "Komeco",
+    "modelo": "KOT24FCG1",
+    "capacidade": "24.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Ar Condicionado Portátil",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Outro",
+    "marca": "Midea",
+    "modelo": "MPF-09CRN1",
+    "capacidade": "9.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Ar Condicionado Portátil",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Outro",
+    "marca": "Philco",
+    "modelo": "PAC10000",
+    "capacidade": "10.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Ar Condicionado Portátil",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Outro",
+    "marca": "Actus",
+    "modelo": "DES12L",
+    "capacidade": "12",
+    "unidade_capacidade": "Litros/dia",
+    "voltagem": "220V",
+    "descricao": "Desumidificador",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Outro",
+    "marca": "Actus",
+    "modelo": "DES20L",
+    "capacidade": "20",
+    "unidade_capacidade": "Litros/dia",
+    "voltagem": "220V",
+    "descricao": "Desumidificador",
+    "ativo": true
+  },
+  {
+    "tipo_equipamento": "Outro",
+    "marca": "Gree",
+    "modelo": "GKHN12AA-D1NNA4A",
+    "capacidade": "12.000",
+    "unidade_capacidade": "BTUs",
+    "voltagem": "220V",
+    "descricao": "Ar Condicionado Portátil Inverter",
+    "ativo": true
+  }
+]

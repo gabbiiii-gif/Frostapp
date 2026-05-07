@@ -17,6 +17,10 @@ import SERVICE_CATALOG_SEED from "./services-seed.json";
 // Catálogo padrão de produtos (peças/insumos) — semeado via seedProductCatalog().
 // Cada item entra no estoque com saldo inicial de 10 unidades.
 import PRODUCT_CATALOG_SEED from "./products-seed.json";
+// Catálogo de equipamentos (marca/modelo/capacidade) usado no picker da OS:
+// quando o usuário escolhe o tipo, o select de modelo é populado e a
+// capacidade preenchida automaticamente ao selecionar um item.
+import EQUIPMENT_CATALOG_RAW from "./equipment-catalog.json";
 
 // Detecta se a URL aponta para um arquivo de vídeo (preview do tecnico)
 const VIDEO_EXT_RE = /\.(mp4|mov|webm|m4v|avi|mkv|ogv|3gp)(\?|$)/i;
@@ -160,6 +164,50 @@ const EQUIPMENT_TYPES = {
     capacityKey: "equipamentoEspecificacao",
   },
 };
+
+// ─── Índice do catálogo de equipamentos por tipo interno ────────────────────
+// Para cada tipo interno (central, geladeira, ...) montamos a lista de modelos
+// disponíveis. O JSON usa o label do tipo (ex: "Central de Ar (Split/Janela)"),
+// então construímos um label→key reverso de EQUIPMENT_TYPES.
+const _LABEL_TO_TYPE_KEY = (() => {
+  const m = {};
+  for (const [key, meta] of Object.entries(EQUIPMENT_TYPES)) {
+    m[(meta.label || "").trim()] = key;
+  }
+  return m;
+})();
+
+// Mapa: tipoKey → [{ marca, modelo, capacidade, unidade, voltagem, descricao, label }]
+// `label` é o texto exibido no select (ex: "Elgin HVFI09B2IA — 9.000 BTUs · 220V").
+const EQUIPMENT_CATALOG_BY_KEY = (() => {
+  const out = {};
+  for (const item of (EQUIPMENT_CATALOG_RAW || [])) {
+    if (item.ativo === false) continue;
+    const tipoKey = _LABEL_TO_TYPE_KEY[(item.tipo_equipamento || "").trim()] || "outro";
+    const cap = String(item.capacidade || "").trim();
+    const uni = String(item.unidade_capacidade || "").trim();
+    const volt = String(item.voltagem || "").trim();
+    const marca = String(item.marca || "").trim();
+    const modelo = String(item.modelo || "").trim();
+    const label =
+      `${marca}${marca && modelo ? " " : ""}${modelo}` +
+      (cap ? ` — ${cap}${uni ? " " + uni : ""}` : "") +
+      (volt ? ` · ${volt}` : "");
+    if (!out[tipoKey]) out[tipoKey] = [];
+    out[tipoKey].push({ marca, modelo, capacidade: cap, unidade: uni, voltagem: volt, label });
+  }
+  // Ordena por marca, depois capacidade numérica
+  for (const key of Object.keys(out)) {
+    out[key].sort((a, b) => {
+      if (a.marca !== b.marca) return a.marca.localeCompare(b.marca);
+      const na = parseFloat(String(a.capacidade).replace(/\./g, "").replace(",", "."));
+      const nb = parseFloat(String(b.capacidade).replace(/\./g, "").replace(",", "."));
+      if (!isNaN(na) && !isNaN(nb)) return na - nb;
+      return (a.modelo || "").localeCompare(b.modelo || "");
+    });
+  }
+  return out;
+})();
 
 // ─── TIPOS DE SERVIÇO — OS ───────────────────────────────────────────────────
 // Lista usada no dropdown de serviços da OS e da Agenda.
@@ -5637,13 +5685,13 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                       </div>
                     </div>
 
-                    {/* Linha 2: Equipamento por serviço — tipo / modelo / capacidade */}
+                    {/* Linha 2: Equipamento por serviço — tipo / picker de modelo cadastrado */}
                     <div className="grid grid-cols-12 gap-2 pt-2 border-t border-gray-700/60">
                       <div className="col-span-12 sm:col-span-5">
                         <label className="block text-xs text-gray-400 mb-1">Tipo de Equipamento</label>
                         <select name="equipamentoTipo"
                           value={s.equipamentoTipo || "central"}
-                          onChange={(e) => updateServico(idx, { equipamentoTipo: e.target.value, equipamentoCapacidade: "" })}
+                          onChange={(e) => updateServico(idx, { equipamentoTipo: e.target.value, equipamentoModelo: "", equipamentoCapacidade: "" })}
                           className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
                         >
                           {Object.entries(EQUIPMENT_TYPES).map(([key, meta]) => (
@@ -5651,17 +5699,52 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                           ))}
                         </select>
                       </div>
-                      <div className="col-span-6 sm:col-span-4">
+                      {/* Picker de modelo cadastrado: ao escolher, preenche modelo + capacidade abaixo */}
+                      <div className="col-span-12 sm:col-span-7">
+                        <label className="block text-xs text-gray-400 mb-1">Modelo Cadastrado</label>
+                        <select
+                          value={(() => {
+                            const list = EQUIPMENT_CATALOG_BY_KEY[s.equipamentoTipo || "central"] || [];
+                            const match = list.find((it) =>
+                              (`${it.marca} ${it.modelo}`.trim() === (s.equipamentoModelo || "").trim()) &&
+                              (String(it.capacidade) === String(s.equipamentoCapacidade || ""))
+                            );
+                            return match ? `${match.marca}|${match.modelo}|${match.capacidade}` : "";
+                          })()}
+                          onChange={(e) => {
+                            const v = e.target.value;
+                            if (!v) return;
+                            const [marca, modelo, capacidade] = v.split("|");
+                            const modeloFull = `${marca}${marca && modelo ? " " : ""}${modelo}`.trim();
+                            updateServico(idx, { equipamentoModelo: modeloFull, equipamentoCapacidade: capacidade || "" });
+                          }}
+                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
+                        >
+                          <option value="">— Selecione um modelo (ou preencha manualmente abaixo) —</option>
+                          {(EQUIPMENT_CATALOG_BY_KEY[s.equipamentoTipo || "central"] || []).map((it) => (
+                            <option
+                              key={`${it.marca}|${it.modelo}|${it.capacidade}`}
+                              value={`${it.marca}|${it.modelo}|${it.capacidade}`}
+                            >
+                              {it.label}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    {/* Linha 3: Modelo + Capacidade (livres — preenchidos pelo picker ou manualmente) */}
+                    <div className="grid grid-cols-12 gap-2">
+                      <div className="col-span-7 sm:col-span-9">
                         <label className="block text-xs text-gray-400 mb-1">Modelo</label>
                         <input name="equipamentoModelo"
                           type="text"
                           value={s.equipamentoModelo || ""}
                           onChange={(e) => updateServico(idx, { equipamentoModelo: e.target.value })}
-                          placeholder="Marca/modelo"
+                          placeholder="Marca/modelo (livre)"
                           className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
                         />
                       </div>
-                      <div className="col-span-6 sm:col-span-3">
+                      <div className="col-span-5 sm:col-span-3">
                         <label className="block text-xs text-gray-400 mb-1">{equipMeta.capacityLabel}</label>
                         <input name="equipamentoCapacidade"
                           type="text"
