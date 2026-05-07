@@ -14,6 +14,9 @@ import AnimatedLogo from "./AnimatedLogo.jsx";
 // Catálogo padrão de serviços (Refrigeração/Climatização) — semeado uma vez
 // por dispositivo via seedServiceCatalog() para popular erp:service: ao iniciar.
 import SERVICE_CATALOG_SEED from "./services-seed.json";
+// Catálogo padrão de produtos (peças/insumos) — semeado via seedProductCatalog().
+// Cada item entra no estoque com saldo inicial de 10 unidades.
+import PRODUCT_CATALOG_SEED from "./products-seed.json";
 
 // Detecta se a URL aponta para um arquivo de vídeo (preview do tecnico)
 const VIDEO_EXT_RE = /\.(mp4|mov|webm|m4v|avi|mkv|ogv|3gp)(\?|$)/i;
@@ -944,6 +947,74 @@ function seedServiceCatalog() {
 
   if (added > 0) {
     console.info(`[seedServiceCatalog] ${added} serviço(s) padrão importado(s).`);
+  }
+}
+
+// ─── Seed do catálogo de produtos (peças/insumos) ────────────────────────────
+// Importa o JSON padrão (~126 itens: gases, capacitores, compressores,
+// filtros, peças e insumos) na primeira execução. Cada produto recebe
+// um registro de estoque com saldo inicial de 10 unidades.
+//
+// Idempotente: pula SKUs já cadastrados, então pode rodar a cada boot.
+// Registros entram sem companyId (catálogo global).
+function seedProductCatalog() {
+  if (!Array.isArray(PRODUCT_CATALOG_SEED) || PRODUCT_CATALOG_SEED.length === 0) return;
+
+  const existingProducts = DB.listAll("erp:product:");
+  const existingSkus = new Set(
+    existingProducts.map((p) => (p.codigo || "").toUpperCase()).filter(Boolean)
+  );
+
+  const SALDO_INICIAL = 10; // quantidade pedida pelo usuário para cada item
+  let added = 0;
+
+  for (const item of PRODUCT_CATALOG_SEED) {
+    const sku = String(item.sku || "").trim();
+    if (!sku || existingSkus.has(sku.toUpperCase())) continue;
+
+    const aplicacao = String(item.aplicacao || "").trim();
+    const baseDesc = String(item.descricao || "").trim();
+    const descricao = aplicacao
+      ? (baseDesc ? `${baseDesc} (Aplicação: ${aplicacao})` : `Aplicação: ${aplicacao}`)
+      : baseDesc;
+
+    const product = {
+      id: genId(),
+      codigo: sku,
+      codigoBarras: String(item.codigo_barras || "").trim(),
+      nome: String(item.nome_produto || "").trim(),
+      categoria: String(item.categoria || "").trim(),
+      unidade: String(item.unidade || "UN").trim(),
+      precoCusto: Number(item.preco_custo) || 0,
+      precoVenda: Number(item.preco_venda) || 0,
+      fornecedorId: "",
+      fornecedorNome: String(item.fornecedor || "").trim(),
+      ncm: String(item.ncm || "").trim(),
+      descricao,
+      status: item.ativo === false ? "inativo" : "ativo",
+      createdAt: new Date().toISOString(),
+    };
+    DB.set("erp:product:" + product.id, product);
+
+    // Cria registro de estoque com saldo inicial = 10 (e mantém estoque mínimo do JSON)
+    const stock = {
+      id: genId(),
+      produtoId: product.id,
+      saldo: SALDO_INICIAL,
+      estoqueMinimo: Number(item.estoque_minimo) || 0,
+      estoqueMaximo: 0,
+      localizacao: "",
+      observacoes: "Estoque inicial gerado automaticamente",
+      createdAt: new Date().toISOString(),
+    };
+    DB.set("erp:stock:" + stock.id, stock);
+
+    existingSkus.add(sku.toUpperCase());
+    added++;
+  }
+
+  if (added > 0) {
+    console.info(`[seedProductCatalog] ${added} produto(s) padrão importado(s) com saldo inicial 10.`);
   }
 }
 
@@ -10815,6 +10886,8 @@ export default function App() {
       ensureCompanyMigration();
       // Catálogo padrão de serviços (idempotente — pula códigos já cadastrados)
       seedServiceCatalog();
+      // Catálogo padrão de produtos + estoque inicial 10 (idempotente)
+      seedProductCatalog();
       loadAllData();
       setLoading(false);
       // Master mode: verifica se já existe master cadastrado
