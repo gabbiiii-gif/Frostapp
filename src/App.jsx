@@ -1715,6 +1715,171 @@ function SearchInput({ value, onChange, placeholder = "Buscar..." }) {
   );
 }
 
+/*
+ * Combobox — select pesquisável (substituto do <select> nativo).
+ *
+ * Por que: o usuário precisa achar um cliente entre centenas, um modelo
+ * entre 187 ou um serviço entre 155 — selects nativos não filtram.
+ *
+ * Uso:
+ *   <Combobox
+ *     value={form.clienteId}
+ *     onChange={(v) => setForm({ ...form, clienteId: v })}
+ *     options={[{ value: "abc", label: "Maria Silva", searchText: "12345..." }]}
+ *     placeholder="Selecione..."
+ *     emptyLabel="— Nenhum —"
+ *   />
+ *
+ * `searchText` é opcional — quando presente, é incluído no match (útil
+ * para procurar cliente por CPF/telefone, p.ex.).
+ */
+function Combobox({
+  value,
+  onChange,
+  options,
+  placeholder = "Selecione...",
+  emptyLabel = "— Nenhum —",
+  showEmpty = true,
+  disabled = false,
+  className = "",
+  size = "md",
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [highlighted, setHighlighted] = useState(0);
+  const containerRef = useRef(null);
+  const inputRef = useRef(null);
+  const listRef = useRef(null);
+
+  const selectedLabel = useMemo(() => {
+    const m = (options || []).find((o) => o.value === value);
+    return m?.label || "";
+  }, [options, value]);
+
+  const filtered = useMemo(() => {
+    const list = options || [];
+    if (!query.trim()) return list;
+    const q = query
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, ""); // remove acentos para busca tolerante
+    const norm = (s) => String(s || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[̀-ͯ]/g, "");
+    return list.filter((o) =>
+      norm(o.label).includes(q) || norm(o.searchText).includes(q)
+    );
+  }, [options, query]);
+
+  // Fecha ao clicar fora
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  useEffect(() => { setHighlighted(0); }, [query, open]);
+
+  const select = useCallback((v) => {
+    onChange(v);
+    setOpen(false);
+    setQuery("");
+    if (inputRef.current) inputRef.current.blur();
+  }, [onChange]);
+
+  const onKeyDown = useCallback((e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (!open) { setOpen(true); return; }
+      setHighlighted((h) => Math.min(h + 1, filtered.length - 1));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setHighlighted((h) => Math.max(h - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const item = filtered[highlighted];
+      if (item) select(item.value);
+    } else if (e.key === "Escape") {
+      setOpen(false);
+      setQuery("");
+    }
+  }, [open, filtered, highlighted, select]);
+
+  const padY = size === "sm" ? "py-2" : "py-2.5";
+
+  return (
+    <div ref={containerRef} className={`relative ${className}`}>
+      <input
+        ref={inputRef}
+        type="text"
+        value={open ? query : selectedLabel}
+        onChange={(e) => { setOpen(true); setQuery(e.target.value); }}
+        onFocus={() => { if (!disabled) { setOpen(true); setQuery(""); } }}
+        onKeyDown={onKeyDown}
+        placeholder={placeholder}
+        disabled={disabled}
+        className={`w-full bg-gray-700 border border-gray-600 rounded-lg px-3 ${padY} text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition disabled:opacity-50 disabled:cursor-not-allowed pr-9`}
+      />
+      <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1 pointer-events-none">
+        {value && !open ? (
+          <button
+            type="button"
+            onMouseDown={(e) => { e.preventDefault(); onChange(""); }}
+            className="text-gray-400 hover:text-white pointer-events-auto"
+            aria-label="Limpar seleção"
+            title="Limpar"
+          >
+            ×
+          </button>
+        ) : null}
+        <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </div>
+
+      {open && (
+        <div
+          ref={listRef}
+          className="absolute z-50 left-0 right-0 mt-1 max-h-64 overflow-y-auto bg-gray-800 border border-gray-600 rounded-lg shadow-xl"
+        >
+          {showEmpty && (
+            <button
+              type="button"
+              onMouseDown={(e) => { e.preventDefault(); select(""); }}
+              className="w-full text-left px-3 py-2 text-sm text-gray-400 italic hover:bg-gray-700 transition"
+            >
+              {emptyLabel}
+            </button>
+          )}
+          {filtered.length === 0 ? (
+            <div className="px-3 py-3 text-sm text-gray-500 text-center">Nenhum resultado para "{query}"</div>
+          ) : (
+            filtered.map((o, i) => (
+              <button
+                key={o.value}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); select(o.value); }}
+                onMouseEnter={() => setHighlighted(i)}
+                className={`w-full text-left px-3 py-2 text-sm transition ${
+                  i === highlighted ? "bg-blue-600/30 text-white" : "text-gray-200 hover:bg-gray-700"
+                } ${o.value === value ? "font-semibold" : ""}`}
+              >
+                {o.label}
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* Diálogo de confirmação com suporte a digitação obrigatória para ações destrutivas */
 function ConfirmDialog({ message, onConfirm, onCancel, requireType = null }) {
   const [typed, setTyped] = useState("");
@@ -5541,10 +5706,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">Cliente *</label>
             <div className="flex gap-2">
-              <select
+              <Combobox
+                className="flex-1"
                 value={form.clienteId}
-                onChange={(e) => {
-                  const cid = e.target.value;
+                onChange={(cid) => {
                   const c = (allClients || []).find((cl) => cl.id === cid);
                   setForm({
                     ...form,
@@ -5552,13 +5717,15 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                     endereco: c?.endereco ? `${c.endereco.rua}, ${c.endereco.bairro} - ${c.endereco.cidade}/${c.endereco.estado}` : form.endereco,
                   });
                 }}
-                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                <option value="">Selecione...</option>
-                {(allClients || []).map((c) => (
-                  <option key={c.id} value={c.id}>{c.nome}</option>
-                ))}
-              </select>
+                options={(allClients || []).map((c) => ({
+                  value: c.id,
+                  label: c.nome,
+                  // Permite buscar por CPF/CNPJ e telefone também
+                  searchText: `${c.cpf || ""} ${c.cnpj || ""} ${c.telefone || ""}`,
+                }))}
+                placeholder="Buscar cliente por nome, CPF/CNPJ ou telefone..."
+                emptyLabel="— Nenhum cliente selecionado —"
+              />
               <button
                 type="button"
                 onClick={() => { setQuickClient(EMPTY_QUICK_CLIENT); setQuickClientOpen(true); }}
@@ -5615,14 +5782,12 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                     {serviceCatalog.length > 0 && (
                       <div>
                         <label className="block text-xs text-gray-400 mb-1">Serviço cadastrado (opcional)</label>
-                        <select
+                        <Combobox
                           value={s.servicoId || ""}
-                          onChange={(e) => {
-                            const id = e.target.value;
+                          onChange={(id) => {
                             if (!id) { updateServico(idx, { servicoId: "" }); return; }
                             const sv = serviceCatalog.find((x) => x.id === id);
                             if (sv) {
-                              // Casa o tipo do serviço cadastrado com a lista de tipos da OS quando bater
                               const tipoMatched = SERVICE_TYPES.find((t) => t.toLowerCase() === (sv.categoria || "").toLowerCase()) || s.tipo;
                               updateServico(idx, {
                                 servicoId: id,
@@ -5632,18 +5797,18 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                               });
                             }
                           }}
-                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
-                        >
-                          <option value="">— Personalizado —</option>
-                          {serviceCatalog
+                          options={serviceCatalog
                             .filter((sv) => (sv.status || "ativo") === "ativo")
                             .sort((a, b) => (a.nome || "").localeCompare(b.nome || ""))
-                            .map((sv) => (
-                              <option key={sv.id} value={sv.id}>
-                                {sv.nome}{sv.precoBase ? ` — ${formatCurrency(Number(sv.precoBase) || 0)}` : ""}
-                              </option>
-                            ))}
-                        </select>
+                            .map((sv) => ({
+                              value: sv.id,
+                              label: `${sv.nome}${sv.precoBase ? ` — ${formatCurrency(Number(sv.precoBase) || 0)}` : ""}`,
+                              searchText: `${sv.codigo || ""} ${sv.categoria || ""}`,
+                            }))}
+                          placeholder="Buscar serviço por nome, código ou categoria..."
+                          emptyLabel="— Personalizado —"
+                          size="sm"
+                        />
                       </div>
                     )}
 
@@ -5702,7 +5867,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                       {/* Picker de modelo cadastrado: ao escolher, preenche modelo + capacidade abaixo */}
                       <div className="col-span-12 sm:col-span-7">
                         <label className="block text-xs text-gray-400 mb-1">Modelo Cadastrado</label>
-                        <select
+                        <Combobox
                           value={(() => {
                             const list = EQUIPMENT_CATALOG_BY_KEY[s.equipamentoTipo || "central"] || [];
                             const match = list.find((it) =>
@@ -5711,25 +5876,24 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                             );
                             return match ? `${match.marca}|${match.modelo}|${match.capacidade}` : "";
                           })()}
-                          onChange={(e) => {
-                            const v = e.target.value;
-                            if (!v) return;
+                          onChange={(v) => {
+                            if (!v) {
+                              updateServico(idx, { equipamentoModelo: "", equipamentoCapacidade: "" });
+                              return;
+                            }
                             const [marca, modelo, capacidade] = v.split("|");
                             const modeloFull = `${marca}${marca && modelo ? " " : ""}${modelo}`.trim();
                             updateServico(idx, { equipamentoModelo: modeloFull, equipamentoCapacidade: capacidade || "" });
                           }}
-                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500 transition"
-                        >
-                          <option value="">— Selecione um modelo (ou preencha manualmente abaixo) —</option>
-                          {(EQUIPMENT_CATALOG_BY_KEY[s.equipamentoTipo || "central"] || []).map((it) => (
-                            <option
-                              key={`${it.marca}|${it.modelo}|${it.capacidade}`}
-                              value={`${it.marca}|${it.modelo}|${it.capacidade}`}
-                            >
-                              {it.label}
-                            </option>
-                          ))}
-                        </select>
+                          options={(EQUIPMENT_CATALOG_BY_KEY[s.equipamentoTipo || "central"] || []).map((it) => ({
+                            value: `${it.marca}|${it.modelo}|${it.capacidade}`,
+                            label: it.label,
+                            searchText: `${it.marca} ${it.modelo} ${it.capacidade} ${it.voltagem} ${it.descricao || ""}`,
+                          }))}
+                          placeholder="Buscar modelo por marca, capacidade, voltagem..."
+                          emptyLabel="— Manual / Personalizado —"
+                          size="sm"
+                        />
                       </div>
                     </div>
                     {/* Linha 3: Modelo + Capacidade (livres — preenchidos pelo picker ou manualmente) */}
@@ -5917,16 +6081,17 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Técnico</label>
-              <select name="tecnicoId"
+              <Combobox
                 value={form.tecnicoId}
-                onChange={(e) => setForm({ ...form, tecnicoId: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                <option value="">Selecione...</option>
-                {tecnicos.map((t) => (
-                  <option key={t.id} value={t.id}>{t.nome}</option>
-                ))}
-              </select>
+                onChange={(v) => setForm({ ...form, tecnicoId: v })}
+                options={tecnicos.map((t) => ({
+                  value: t.id,
+                  label: t.nome,
+                  searchText: `${t.email || ""} ${t.telefone || ""}`,
+                }))}
+                placeholder="Buscar técnico..."
+                emptyLabel="— Sem técnico —"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Data Agendada</label>
@@ -6890,10 +7055,9 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Cliente *</label>
-              <select
+              <Combobox
                 value={form.clienteId}
-                onChange={(e) => {
-                  const cid = e.target.value;
+                onChange={(cid) => {
                   const c = (allClients || []).find((cl) => cl.id === cid);
                   setForm({
                     ...form,
@@ -6901,26 +7065,28 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
                     endereco: c?.endereco ? `${c.endereco.rua}, ${c.endereco.bairro}` : form.endereco,
                   });
                 }}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                <option value="">Selecione...</option>
-                {(allClients || []).map((c) => (
-                  <option key={c.id} value={c.id}>{c.nome}</option>
-                ))}
-              </select>
+                options={(allClients || []).map((c) => ({
+                  value: c.id,
+                  label: c.nome,
+                  searchText: `${c.cpf || ""} ${c.cnpj || ""} ${c.telefone || ""}`,
+                }))}
+                placeholder="Buscar cliente..."
+                emptyLabel="— Nenhum cliente —"
+              />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Técnico *</label>
-              <select name="tecnicoId"
+              <Combobox
                 value={form.tecnicoId}
-                onChange={(e) => setForm({ ...form, tecnicoId: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
-              >
-                <option value="">Selecione...</option>
-                {tecnicos.map((t) => (
-                  <option key={t.id} value={t.id}>{t.nome}</option>
-                ))}
-              </select>
+                onChange={(v) => setForm({ ...form, tecnicoId: v })}
+                options={tecnicos.map((t) => ({
+                  value: t.id,
+                  label: t.nome,
+                  searchText: `${t.email || ""} ${t.telefone || ""}`,
+                }))}
+                placeholder="Buscar técnico..."
+                emptyLabel="— Nenhum técnico —"
+              />
             </div>
           </div>
 
