@@ -1,5 +1,5 @@
 
-import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect, Component } from "react";
 import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip,
@@ -9,6 +9,63 @@ import { animate } from "animejs";
 import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
+
+// ─── ErrorBoundary por módulo ────────────────────────────────────────────────
+// Sem isto, qualquer crash em um módulo (Recharts com dado malformado, OS legada
+// num formatDate, etc) branqueia o app inteiro e o operador perde a sessão. O
+// boundary isola o módulo: módulo X morre, restante (sidebar, header, toasts)
+// continua. Reset automático quando moduleKey muda — usuário troca de módulo
+// e tenta de novo. Logamos no console pra captura por Sentry/LogRocket futuro.
+class ModuleErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { error };
+  }
+  componentDidCatch(error, info) {
+    console.error("[ModuleErrorBoundary]", this.props.moduleKey, error, info?.componentStack);
+  }
+  componentDidUpdate(prevProps) {
+    // Reset ao trocar de módulo — permite ao usuário sair do erro
+    if (prevProps.moduleKey !== this.props.moduleKey && this.state.error) {
+      this.setState({ error: null });
+    }
+  }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[60vh] p-6 text-center">
+          <div className="w-16 h-16 rounded-full bg-red-500/10 border border-red-500/30 flex items-center justify-center mb-4">
+            <svg className="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <h2 className="text-lg font-semibold text-gray-100 mb-2">
+            Erro ao carregar este módulo
+          </h2>
+          <p className="text-sm text-gray-400 mb-4 max-w-md">
+            Algo quebrou inesperadamente. Tente trocar de módulo e voltar, ou recarregue a página. Os dados já salvos não foram perdidos.
+          </p>
+          <details className="text-xs text-gray-500 mb-4 max-w-md">
+            <summary className="cursor-pointer">Detalhes técnicos</summary>
+            <pre className="mt-2 p-2 bg-gray-800 rounded text-left overflow-auto">
+              {String(this.state.error?.message || this.state.error)}
+            </pre>
+          </details>
+          <button
+            onClick={() => this.setState({ error: null })}
+            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition"
+          >
+            Tentar novamente
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 // ─── Crossfade entre módulos do ERP ─────────────────────────────────────────
 // Anima troca de módulo no painel principal: opacity 0→1 (200ms, easeOutQuad).
@@ -12126,8 +12183,9 @@ export default function App() {
           )}
         </header>
 
-        {/* Content Area — wrapper ModuleSwitcher faz crossfade entre módulos */}
+        {/* Content Area — ErrorBoundary isola crashes; ModuleSwitcher faz crossfade entre módulos */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">
+         <ModuleErrorBoundary moduleKey={activeModule}>
           <ModuleSwitcher moduleKey={activeModule}>
             {activeModule === "dashboard" && (
               <Dashboard user={user} dateFilter={dateFilter} onNavigate={setActiveModule} />
@@ -12148,6 +12206,7 @@ export default function App() {
               <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} theme={theme} setTheme={setTheme} />
             )}
           </ModuleSwitcher>
+         </ModuleErrorBoundary>
         </main>
       </div>
 
