@@ -116,26 +116,34 @@ export default async function handler(req, res) {
   const supabase = createClient(supabaseUrl, supabaseKey);
 
   try {
-    // Valida o token comparando com o salvo em erp:calendarFeedToken
-    const { data: tokenRow, error: tokenErr } = await supabase
+    // CORRIGIDO (vazamento cross-tenant): a chave do token e escopada por
+    // empresa (erp:calendarFeedToken:<companyId>). Antes, o handler buscava
+    // 'erp:calendarFeedToken' (nao escopada) e, ao consultar OS/agenda,
+    // nao filtrava por company_id — qualquer tenant com token valido recebia
+    // dados de todos os outros. Agora pegamos o company_id do tokenRow e
+    // filtramos as queries seguintes.
+    const { data: tokenRows, error: tokenErr } = await supabase
       .from('kv_store')
-      .select('value')
-      .eq('key', 'erp:calendarFeedToken')
-      .maybeSingle();
+      .select('value, company_id')
+      .like('key', 'erp:calendarFeedToken:%');
 
     if (tokenErr) {
       res.status(500).send('Erro ao validar token.');
       return;
     }
-    if (!tokenRow || !tokenRow.value || tokenRow.value.token !== token || tokenRow.value.enabled === false) {
+    const tokenRow = (tokenRows || []).find(r =>
+      r.value && r.value.token === token && r.value.enabled !== false
+    );
+    if (!tokenRow || !tokenRow.company_id) {
       res.status(403).send('Token revogado ou inválido.');
       return;
     }
 
-    // Busca agendamentos e OS
+    // Busca agendamentos e OS APENAS da empresa dona do token
     const { data: rows, error } = await supabase
       .from('kv_store')
       .select('key, value')
+      .eq('company_id', tokenRow.company_id)
       .or('key.like.erp:schedule:%,key.like.erp:os:%');
 
     if (error) {
