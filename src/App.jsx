@@ -222,13 +222,21 @@ const SERVICE_TYPES_OS = [
 
 // ─── DB LAYER ───────────────────────────────────────────────────────────────────
 
-// Use localStorage if available, otherwise fall back to in-memory store
+// Tenta localStorage; se indisponível (modo privado em alguns browsers, iframe sandboxed,
+// SSR, cota cheia), cai num Map em memória. Quando isso ocorre, marca-se a sessão como
+// efêmera para que o usuário seja avisado — caso contrário, perderia tudo no reload.
+let __storageIsEphemeral = false;
 try {
+  // Sanity check: alguns browsers expõem localStorage mas tiram o write em modo privado
+  const probe = "__frost_storage_probe__";
+  localStorage.setItem(probe, "1");
+  localStorage.removeItem(probe);
   window.storage = localStorage;
 } catch {
-  // localStorage unavailable (e.g. sandboxed iframe)
+  // localStorage indisponível ou negando writes
 }
 if (!window.storage) {
+  __storageIsEphemeral = true;
   const _store = new Map();
   window.storage = {
     getItem(key) { return _store.has(key) ? _store.get(key) : null; },
@@ -238,6 +246,34 @@ if (!window.storage) {
     key(i) { return Array.from(_store.keys())[i] || null; },
     clear() { _store.clear(); },
   };
+}
+
+// ─── Banner de aviso quando storage é efêmero ───────────────────────────────
+// Injeta um banner fixo no topo via DOM puro (independente do return tree do App,
+// que tem múltiplos caminhos: splash, login, app técnico, app principal). Responsivo.
+if (__storageIsEphemeral && typeof document !== "undefined") {
+  const mount = () => {
+    if (document.getElementById("frost-storage-warning")) return;
+    const el = document.createElement("div");
+    el.id = "frost-storage-warning";
+    el.setAttribute("role", "alert");
+    el.style.cssText = [
+      "position:fixed", "top:0", "left:0", "right:0", "z-index:9999",
+      "background:#b91c1c", "color:#fff",
+      "font:600 13px/1.4 'DM Sans',system-ui,sans-serif",
+      "padding:8px 12px", "text-align:center",
+      "box-shadow:0 2px 8px rgba(0,0,0,0.4)",
+    ].join(";");
+    el.innerHTML = '<span style="display:inline-block;max-width:100%">⚠️ Armazenamento local indisponível (modo privado/anônimo). <strong>Os dados serão perdidos ao recarregar.</strong> Saia do modo privado para persistir.</span> <button id="frost-storage-warning-close" aria-label="Fechar aviso" style="margin-left:12px;background:transparent;border:1px solid rgba(255,255,255,0.6);color:#fff;border-radius:4px;padding:2px 8px;cursor:pointer;font:inherit">×</button>';
+    document.body.appendChild(el);
+    document.body.style.paddingTop = (el.offsetHeight || 36) + "px";
+    el.querySelector("#frost-storage-warning-close")?.addEventListener("click", () => {
+      el.remove();
+      document.body.style.paddingTop = "";
+    });
+  };
+  if (document.body) mount();
+  else document.addEventListener("DOMContentLoaded", mount, { once: true });
 }
 
 // ─── Multi-tenant: company ativa e prefixos com escopo ──────────────────────
@@ -820,13 +856,18 @@ async function checkPassword(plain, stored) {
       return { match: rehashed === stored, needsRehash: false };
     }
   }
-  // Formato legado (DJB2 customizado)
+  // Formato legado (DJB2 customizado) — DEPRECADO. Aceito apenas para permitir
+  // login + re-hash imediato em PBKDF2. Os call sites já gravam o novo hash no DB
+  // quando needsRehash=true. Quando todos os usuários migrarem, esta branch deve
+  // ser removida (junto com hashPasswordLegacy).
   if (stored === hashPasswordLegacy(plain)) {
+    console.warn("[auth] Senha em formato DJB2 legado detectada — re-hash automático para PBKDF2 será aplicado.");
     return { match: true, needsRehash: true };
   }
   // Formato antigo (base64 — inseguro, apenas para migração)
   try {
     if (stored === btoa(plain)) {
+      console.warn("[auth] Senha em formato base64 legado detectada — re-hash automático para PBKDF2 será aplicado.");
       return { match: true, needsRehash: true };
     }
   } catch { /* ignora erro de codificação */ }
