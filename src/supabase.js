@@ -18,10 +18,30 @@ if (supabase) {
   console.warn('[FrostERP] Supabase DESCONECTADO ❌ — variáveis de ambiente não encontradas. Rodando apenas local.');
 }
 
-// Chaves nunca sincronizadas (dados sensíveis estritamente locais)
-const SENSITIVE_PREFIXES = [];
+// Chaves nunca sincronizadas (dados sensíveis estritamente locais).
+// Usado para bloquear chaves inteiras. Para campos sensíveis dentro de
+// objetos sincronizáveis (ex: erp:user:* precisa sincronizar nome/email/role
+// mas NUNCA password/2FA), use sanitizeForSync() abaixo.
+const SENSITIVE_PREFIXES = [
+  'erp:autoBackup:', // backups locais — não duplicar no kv_store
+];
 function isSensitive(key) {
   return SENSITIVE_PREFIXES.some(prefix => key.startsWith(prefix));
+}
+
+// ─── Sanitização de campos sensíveis ANTES do sync ──────────────────────────
+// Senhas (PBKDF2), tokens de sessão e secrets TOTP NUNCA devem sair do device.
+// A linha 'erp:user:' precisa sincronizar metadados (nome, email, role, status)
+// pra cross-device, mas o objeto bruto contém credenciais. Limpa aqui.
+const USER_SECRET_FIELDS = ['password', 'sessionTokenHash', 'twoFactorSecret', 'twoFactorBackupCodes'];
+function sanitizeForSync(key, value) {
+  if (typeof value !== 'object' || value === null) return value;
+  if (key.startsWith('erp:user:') || key.startsWith('master:user:')) {
+    const cleaned = { ...value };
+    USER_SECRET_FIELDS.forEach(f => { delete cleaned[f]; });
+    return cleaned;
+  }
+  return value;
 }
 
 // ─── Estado de sessão (em memória + localStorage cache) ──────────────────────
@@ -171,7 +191,8 @@ export async function uploadAllToSupabase() {
       const raw = window.storage.getItem(key);
       if (raw === null) continue;
       try {
-        rows.push({ key, value: JSON.parse(raw), company_id: companyId, updated_at: new Date().toISOString() });
+        const parsed = JSON.parse(raw);
+        rows.push({ key, value: sanitizeForSync(key, parsed), company_id: companyId, updated_at: new Date().toISOString() });
       } catch { /* skip */ }
     }
     if (rows.length === 0) return;
@@ -187,14 +208,16 @@ export async function uploadAllToSupabase() {
 }
 
 // ─── Sync unitário (chamado por DB.set) ──────────────────────────────────────
+// Sanitiza secrets de usuário antes do upsert — NUNCA enviar password/2FA pro Supabase.
 export function syncToSupabase(key, value) {
   if (!supabase) return;
   if (isSensitive(key)) return;
   const companyId = getCompanyId();
   if (!companyId) return; // sem auth → fica só local; será uploaded no próximo login
+  const safeValue = sanitizeForSync(key, value);
   supabase
     .from('kv_store')
-    .upsert({ key, value, company_id: companyId, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+    .upsert({ key, value: safeValue, company_id: companyId, updated_at: new Date().toISOString() }, { onConflict: 'key' })
     .then(({ error }) => {
       if (error) console.warn('Sync error:', key, error.message);
     });
