@@ -1,13 +1,37 @@
 
-import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect } from "react";
 import {
   LineChart, Line,
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer
 } from "recharts";
+import { animate } from "animejs";
 import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
+
+// ─── Crossfade entre módulos do ERP ─────────────────────────────────────────
+// Anima troca de módulo no painel principal: opacity 0→1 (200ms, easeOutQuad).
+// Só opacidade — evita CLS, reflow e layout shift em tabelas densas.
+// Respeita prefers-reduced-motion (a11y). Re-monta via prop `key`, então o
+// módulo antigo simplesmente desmonta (exit implícito, sem bloquear input).
+function ModuleSwitcher({ moduleKey, children }) {
+  const ref = useRef(null);
+  useLayoutEffect(() => {
+    if (!ref.current) return;
+    if (typeof window !== "undefined" &&
+        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
+      ref.current.style.opacity = "1";
+      return;
+    }
+    animate(ref.current, {
+      opacity: [0, 1],
+      duration: 200,
+      ease: "outQuad",
+    });
+  }, [moduleKey]);
+  return <div ref={ref} key={moduleKey} className="h-full">{children}</div>;
+}
 import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
 import { FrostIcon } from "./FrostIcons.jsx";
 import AnimatedLogo from "./AnimatedLogo.jsx";
@@ -12102,26 +12126,28 @@ export default function App() {
           )}
         </header>
 
-        {/* Content Area */}
+        {/* Content Area — wrapper ModuleSwitcher faz crossfade entre módulos */}
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">
-          {activeModule === "dashboard" && (
-            <Dashboard user={user} dateFilter={dateFilter} onNavigate={setActiveModule} />
-          )}
-          {activeModule === "processos" && (
-            <ProcessModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} reloadData={loadAllData} />
-          )}
-          {activeModule === "agenda" && (
-            <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} onNavigate={setActiveModule} />
-          )}
-          {activeModule === "financeiro" && (
-            <FinanceModule user={user} dateFilter={dateFilter} addToast={addToast} />
-          )}
-          {activeModule === "cadastro" && (
-            <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
-          )}
-          {activeModule === "config" && (
-            <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} theme={theme} setTheme={setTheme} />
-          )}
+          <ModuleSwitcher moduleKey={activeModule}>
+            {activeModule === "dashboard" && (
+              <Dashboard user={user} dateFilter={dateFilter} onNavigate={setActiveModule} />
+            )}
+            {activeModule === "processos" && (
+              <ProcessModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} reloadData={loadAllData} />
+            )}
+            {activeModule === "agenda" && (
+              <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} onNavigate={setActiveModule} />
+            )}
+            {activeModule === "financeiro" && (
+              <FinanceModule user={user} dateFilter={dateFilter} addToast={addToast} />
+            )}
+            {activeModule === "cadastro" && (
+              <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
+            )}
+            {activeModule === "config" && (
+              <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} theme={theme} setTheme={setTheme} />
+            )}
+          </ModuleSwitcher>
         </main>
       </div>
 
