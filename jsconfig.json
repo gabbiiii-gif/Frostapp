@@ -13,7 +13,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
-    }
+    },
+    "ignoreDeprecations": "6.0"
   },
   "include": ["src/**/*", "api/**/*", "vite.config.js"],
   "exclude": ["node_modules", "dist"]
