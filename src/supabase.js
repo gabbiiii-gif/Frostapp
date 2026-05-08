@@ -22,8 +22,15 @@ if (supabase) {
 // Usado para bloquear chaves inteiras. Para campos sensíveis dentro de
 // objetos sincronizáveis (ex: erp:user:* precisa sincronizar nome/email/role
 // mas NUNCA password/2FA), use sanitizeForSync() abaixo.
+//
+// master:user:* é local-only por design de seguranca: contas master concedem
+// poder cross-tenant, entao nao podem ser portaveis via kv_store (qualquer
+// admin da empresa que injetar uma master:user:hack no localStorage viraria
+// super-admin). Mover criacao/auth de master pra uma Edge Function com claim
+// JWT is_super_admin é o fix definitivo (TODO).
 const SENSITIVE_PREFIXES = [
   'erp:autoBackup:', // backups locais — não duplicar no kv_store
+  'master:user:',    // master mode é puramente local; nao sincroniza
 ];
 function isSensitive(key) {
   return SENSITIVE_PREFIXES.some(prefix => key.startsWith(prefix));
@@ -166,7 +173,13 @@ export async function hydrateFromSupabase() {
     }
     keysToRemove.forEach(key => window.storage.removeItem(key));
     if (data && data.length > 0) {
-      data.forEach((row) => window.storage.setItem(row.key, JSON.stringify(row.value)));
+      // Pula chaves sensiveis ao escrever no local: ex master:user:* nao
+      // pode ser sobrescrito pelo Supabase (so existe local, e pra evitar
+      // que uma versao stripada do servidor apague o password do device).
+      data.forEach((row) => {
+        if (isSensitive(row.key)) return;
+        window.storage.setItem(row.key, JSON.stringify(row.value));
+      });
     }
     console.log(`Sync completo: ${(data || []).length} chaves do Supabase, ${keysToRemove.length} removidas localmente`);
   } catch (err) {

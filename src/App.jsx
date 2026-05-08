@@ -2710,6 +2710,17 @@ function FirstUserSetup({ onComplete }) {
 // ─── MASTER USER (multi-tenant): primeiro setup, login e dashboard de empresas ──
 // Master é o usuário "do dono do app" — cadastra novas empresas (companies) e
 // um admin inicial em cada uma. Não pertence a nenhuma company.
+//
+// SEGURANCA: master:user:* é local-only (excluido de SENSITIVE_PREFIXES no
+// supabase.js). Nao sincroniza pro kv_store, nao e sobrescrito por hydrate.
+// Isso impede que admins de uma empresa leiam/falsifiquem credenciais master
+// via kv_store. Porem nao protege contra XSS/manipulation no proprio device.
+//
+// TODO(security #2): mover criacao/login/operacoes master pra Edge Function
+// com check JWT 'is_super_admin' do company_members. Hoje, qualquer XSS que
+// escreva master:user:hack no localStorage + URL ?master=1 ainda permite
+// escalation. RLS protege as escritas em kv_store/companies, mas a UI
+// confia no flag local — fix definitivo exige server-side gating.
 
 const MASTER_PREFIX = "master:user:";
 
