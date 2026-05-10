@@ -9,3 +9,9 @@ dev-dist
 
 # Configurações locais do Claude Code (não devem ir pro repo)
 .claude/settings.local.json
+
+# Obsidian (raiz do projeto = cofre do wiki em docs/)
+# Estado de UI pessoal não vai pro repo; configs compartilhadas (app.json) podem ir
+.obsidian/workspace*
+.obsidian/cache
+.obsidian/graph.json

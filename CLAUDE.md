@@ -2,58 +2,139 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Princípio operacional:** Este projeto adota o padrão **LLM Wiki** (ver seção [Wiki do Projeto](#wiki-do-projeto-padrão-llm-wiki)). O conhecimento sobre o código, decisões, fluxos de negócio e fontes brutas é mantido em `docs/wiki/` por Claude — não pelo humano. O usuário curadoriza fontes e faz perguntas; Claude faz o bookkeeping (resumir, cruzar referências, manter consistência). Antes de responder qualquer pergunta de domínio ou implementar uma feature não-trivial, leia `docs/wiki/index.md` primeiro.
+
+---
+
 ## Build & Dev Commands
 
 - `npm run dev` — Start Vite dev server
 - `npm run build` — Production build (output in `dist/`)
 - `npm run preview` — Preview production build locally
-- No test runner or linter is configured.
+- `npm run test` — Run Vitest test suite (one-shot)
+- `npm run test:watch` — Vitest in watch mode
+- No linter is configured.
 
 ## Tech Stack
 
 - **React 19** with JSX (no TypeScript)
-- **Vite 6** as bundler with `@vitejs/plugin-react`
+- **Vite 6** as bundler with `@vitejs/plugin-react` and **`vite-plugin-pwa`** (the app is installable as a PWA)
 - **Tailwind CSS 4** via `@tailwindcss/vite` plugin (imported in `src/index.css`)
-- **Recharts** for charts/graphs
-- **Supabase** (`@supabase/supabase-js`) — cloud sync backend via `src/supabase.js`
+- **Recharts** for charts/graphs in the Dashboard and Finance reports
+- **Supabase** (`@supabase/supabase-js`) — cloud sync + Realtime + Storage backend via `src/supabase.js`
 - **Motion** (`motion`) — animation library used in `src/BlurText.jsx`
+- **anime.js** (`animejs`) — used by `src/AnimatedLogo.jsx` and `src/AnimatedSnowflake.jsx`
 - **OGL** (`ogl`) — WebGL library used in `src/Aurora.jsx` for the login background
-- No router library — navigation is state-driven within a single component
+- **qrcode** — generates QR codes (TOTP/2FA enrollment, calendar feed, etc.)
+- **Vitest** + `@testing-library/react` + `happy-dom` — unit tests for pure utils (`src/utils.test.js`)
+- No router library — navigation is state-driven within a single component (`activeModule` useState)
 
 ## Architecture
 
-This is a single-file ERP application ("FrostERP") — the entire app lives in `src/App.jsx` (~7600 lines). There are no other component files, no routing, and no external state management.
+FrostERP is an effectively-single-file React app. The vast majority of the UI lives in `src/App.jsx` (~12.228 lines as of 2026-05-10). A few pieces have been extracted to enable unit testing and reuse:
 
-### Key structural sections in App.jsx (in order):
+- `src/constants.js` — exported constants (`STATUS_MAP`, `COLORS`, `VIDEO_EXT_RE`, etc.). Note: some of these constants are also still inlined in `App.jsx` — there is in-flight extraction work.
+- `src/utils.js` — pure utilities (`genId`, `genSecureToken`, `sha256Hex`, `formatCurrency`, …). Covered by `src/utils.test.js`.
+- `src/supabase.js` — cloud sync layer (see [Supabase Sync Layer](#supabase-sync-layer-srcsupabasejs)).
+- `src/main.jsx` — Vite entry point.
+- `src/Aurora.jsx`, `src/BlurText.jsx`, `src/AnimatedLogo.jsx`, `src/AnimatedSnowflake.jsx`, `src/FrostIcons.jsx` — visual/animation components.
+- `src/equipment-catalog.json`, `src/products-seed.json`, `src/services-seed.json` — seed data for first-run demo.
+- `api/calendar.js` — Vercel serverless function that exposes the user's agenda as an iCal feed (consumed by Google Calendar / Outlook via the Calendar Feed token).
 
-1. **Constants** (~lines 8–53) — Color palettes, revenue/expense categories, status mappings, role permissions, message templates, payment methods
-2. **DB Layer** (~lines 55–115) — `window.storage`-backed persistence using a `DB` object with `get/set/delete/list` methods (JSON-serialized key-value store, falls back to in-memory Map)
-3. **Utility Functions** (~lines 117–240) — ID generation, currency/date/CPF/CNPJ/phone formatting, date filtering, password hashing, permission checks
-4. **Seed Data** (~lines 242–513) — `seedDatabase()` populates demo data on first run
-5. **CSS StyleSheet** (~lines 514–595) — Injected CSS via a `<style>` component (animations, print styles)
-6. **Base UI Components** (~lines 596–980) — Modal, Toast, StatusBadge, KPICard, DataTable (with sort/filter/pagination), DateFilterBar, SearchInput, ConfirmDialog, EmptyState, LoadingSkeleton
-7. **LoginScreen** (~lines 982–1085)
-8. **Dashboard** (~lines 1087–1427) — KPIs, charts, recent activity
-9. **Feature Modules** — Each is a self-contained function component:
-   - `FinanceModule` (~line 1493) — Revenue/expenses with printable reports
-   - `InventoryModule` (~line 1878) — Stock management
-   - `InvoiceModule` (~line 2579) — NF-e/NFS-e invoices and boletos with print views
-   - `PDVModule` (~line 3255) — Point of sale
-   - `WebdeskModule` (~line 3694) — Support tickets
-   - `ProcessModule` (~line 4095) — Service orders (OS)
-   - `ScheduleModule` (~line 4629) — Calendar/agenda
-   - `BankingModule` (~line 5251) — Bank accounts and transfers
-   - `CadastroModule` (~line 5622) — Client and employee registration
-   - `MessageCenter` (~line 6452) — WhatsApp/Email messaging
-   - `SettingsModule` (~line 6605) — App config, user management, data backup/restore
-10. **Main App component** (~line 7000) — Orchestrates login, sidebar navigation, module rendering, and global state
+Everything else — modules, dialogs, dashboards, the master/admin shell, the technician mobile shell — lives in `App.jsx`.
+
+### Key structural sections in App.jsx (in order)
+
+Line numbers are approximate and drift on every edit. When in doubt, grep for the function name.
+
+| Lines        | What                                                                                         |
+| ------------ | -------------------------------------------------------------------------------------------- |
+| 1–110        | `ModuleSwitcher`, `ModuleErrorBoundary` (crossfade + crash isolation between modules), video URL helpers |
+| 110–290      | Constants: `COLORS`, `STATUS_MAP`, `ROLE_PERMISSIONS`, revenue/expense categories, `PAYMENT_METHODS`, `EQUIPMENT_TYPES`, `SERVICE_TYPES_OS` |
+| 365–500      | **Multi-tenant scope**: `SCOPED_PREFIXES`, `SCOPED_SINGLETONS`, active user/company tracking (`getActiveCompanyId`), legacy migration (`migrateLegacyConfigOnce`, `ensureCompanyMigration`), `ensureAutoBackup` |
+| 500–650      | **Audit trail**: `AUDITED_PREFIXES`, `recordAudit` (records mutations to a per-company audit log) |
+| 544–650      | **DB layer**: `DB.get/set/delete/list` (window.storage-backed, scoped/audited/synced) |
+| 700–960      | Utilities still inline: `genId`, `genSecureToken`, formatters, `filterByDate`, **TOTP/2FA** (`generateTotpSecret`, `base32Encode/Decode`, `buildOtpAuthUri`), legacy password hashing |
+| 982          | `syncOSToFinance` — bridges service-order completion into finance entries |
+| 1030         | `ALL_MODULES` (canonical list of UI modules) and `hasPermission` |
+| 1069–1350    | `purgeAllUsers`, `seedServiceCatalog`, `seedProductCatalog` (first-run demo data) |
+| 1355         | `StyleSheet` (injected global CSS — animations + `@media print` rules) |
+| 1437–2090    | **Base UI primitives**: `Modal`, `Toast`/`ToastContainer`, `StatusBadge`, `KPICard`, `DataTable` (sort/filter/pagination), `DateFilterBar`, `SearchInput`, `Combobox`, `ConfirmDialog`, `EmptyState`, `LoadingSkeleton` |
+| 2087–2107    | Login attempt throttling (`frost_login_attempts`) |
+| 2108         | `LoginScreen` — regular user login |
+| 2484         | `ForcePasswordChangeDialog` |
+| 2575         | `FirstUserSetup` — first-run admin bootstrap |
+| 2725–2802    | **Master tier setup**: `MASTER_PREFIX`, `FirstMasterSetup` |
+| 2802         | `MasterLoginScreen` — separate login for the master/super-admin tier |
+| 2889         | `MasterApp` — admin shell for managing companies/tenants (separate from the ERP shell) |
+| 3326         | `LogoPicker` |
+| 3511         | `MasterAuditLog` |
+| 3564         | **`Dashboard`** — KPIs, charts, recent activity (replaces what used to be its own module) |
+| 3844         | **`FinanceModule`** — revenue/expenses with printable reports |
+| 4385–4910    | **HTML document generators**: `openHTMLDoc`, plus `generateOrcamentoHTML`, `generateOSHTML`, `generateReciboHTML` and shared blocks (`_docHeader`, `_clienteBlock`, `_pixBlock`, …). These open a print-styled HTML document in a new window — they replaced the old "InvoiceModule" pattern |
+| 5021         | **`ProcessModule`** — Ordens de Serviço (OS) — the heart of the app |
+| 6548         | **`ScheduleModule`** — Agenda |
+| 7289–7327    | Cadastro form constants (produtos, fornecedores, serviços, estoque) |
+| 7328         | **`CadastroModule`** — Clients, employees, products, suppliers, services, **stock movements** (the old "InventoryModule" got folded in here) |
+| 9446         | `UserManagement` — sub-panel of Settings |
+| 9843         | `CalendarFeedPanel` — sub-panel of Settings (manages the iCal token consumed by `api/calendar.js`) |
+| 9931         | `CompanyAuditPanel` — sub-panel of Settings (reads the audit log) |
+| 10021        | `AutoBackupPanel` — sub-panel of Settings |
+| 10105        | **`SettingsModule`** — orchestrates the sub-panels above plus app config and data backup/restore |
+| 10690        | `ProductivityReport` — monthly per-technician productivity (must remain available to admin/gerente — see Regra 4) |
+| 10871        | **`TecnicoMobileApp`** — dedicated shell for `role="tecnico"` (no ERP sidebar; see Regra 4) |
+| 11025        | `TecnicoOSDetail` — per-OS detail screen used inside `TecnicoMobileApp` |
+| 11600+       | Main `App` component — orchestrates auth (regular vs. master), sidebar, `ModuleSwitcher`, global state |
+
+### Modules actually rendered in the sidebar
+
+`navItems` (around line 11669) and the `<ModuleSwitcher>` block (around line 12200) are the ground truth. Today there are **6** modules:
+
+1. `dashboard` → `Dashboard`
+2. `processos` → `ProcessModule` ("Ordens de Serviço")
+3. `agenda` → `ScheduleModule`
+4. `financeiro` → `FinanceModule`
+5. `cadastro` → `CadastroModule`
+6. `config` → `SettingsModule` (admin only)
+
+Modules referenced in earlier versions of this file but **no longer in the codebase**: `InventoryModule` (merged into `CadastroModule`), `InvoiceModule` (replaced by HTML doc generators around line 4385–4910), `PDVModule`, `WebdeskModule`, `BankingModule`, `MessageCenter`. Don't reintroduce them by name without checking whether the use case is already covered elsewhere.
+
+### Multi-tenancy and scoping
+
+The DB layer is **company-scoped**. Most keys (those matching `SCOPED_PREFIXES`) are automatically rewritten to `cmp_<id>:<key>` so that multiple tenants can share the same `window.storage` and Supabase `kv_store`. `SCOPED_SINGLETONS` lists keys that are scoped per-company but stored as a single value. `migrateLegacyConfigOnce` and `ensureCompanyMigration` migrate pre-multi-tenant data on load. The **Master** tier (`MasterApp`) is a separate shell for managing companies; it has its own login (`MasterLoginScreen`) and its own audit log (`MasterAuditLog`).
+
+### Audit trail
+
+Mutations to keys matching `AUDITED_PREFIXES` are logged via `recordAudit` (with `summarizeRecord` redacting sensitive fields). The `CompanyAuditPanel` inside Settings reads this log. Don't bypass `DB.set/delete` for audited entities — write through the DB layer so audit entries are produced.
+
+### Authentication
+
+- Regular users: password hashed (legacy `hashPasswordLegacy` + newer flow), with login-attempt throttling (`frost_login_attempts`).
+- Optional **TOTP/2FA**: `generateTotpSecret` + `buildOtpAuthUri` + `qrcode` produce the enrollment QR. Base32 helpers live alongside.
+- **Forgot-password** and **force-password-change** flows have dedicated dialogs.
+- **Master** users live under the `master:user:` prefix and authenticate through `MasterLoginScreen`.
+
+### Calendar feed (iCal export)
+
+`api/calendar.js` is a Vercel serverless function that returns an iCal feed for a given user, authenticated by an opaque token stored hashed on the user. `CalendarFeedPanel` (Settings) lets the user generate / regenerate / disable the token. Don't expose calendar data via any other path — the token is the auth boundary.
+
+### Document generation (orçamento / OS / recibo)
+
+There is no longer an "InvoiceModule". Printable documents are produced imperatively:
+
+- `openHTMLDoc(html)` opens a new window with the document.
+- `generateOrcamentoHTML(os, clients)`, `generateOSHTML(os, clients)`, `generateReciboHTML(os, clients)` build the HTML.
+- Shared building blocks: `_docStyles`, `_docHeader`, `_clienteBlock`, `_pixBlock`, `_agradecimentoBlock`, `_equipamentoDescricao`.
+
+Any new printable artifact should follow the same pattern — don't introduce a new "module" for it.
 
 ### Data & State Patterns
 
-- All data is persisted to `window.storage` (localStorage or in-memory polyfill) via the `DB` utility with prefixed keys (e.g., `frost_clients`, `frost_transactions`)
-- Navigation between modules uses `useState` (`currentPage`) — no URL routing
-- Role-based access control via `ROLE_PERMISSIONS` with roles: `admin`, `gerente`, `tecnico`, `atendente`
-- Toast notifications managed at the App level and passed down as `addToast` prop
+- All data is persisted to `window.storage` (localStorage or in-memory polyfill) via the `DB` utility. Keys use prefixes (`frost_clients`, `frost_transactions`, `erp:config`, …) and are auto-scoped to the active company when matched by `SCOPED_PREFIXES`.
+- Navigation between modules uses `useState` (`activeModule`) — no URL routing.
+- Role-based access control via `ROLE_PERMISSIONS` with roles `admin`, `gerente`, `tecnico`, `atendente`. **`customPermissions`** on a user object overrides the role (admin can restrict an individual user even within their role). Always go through `hasPermission(user, module)` — don't compare roles directly.
+- Toast notifications managed at the App level and passed down as `addToast` prop.
+- `ModuleErrorBoundary` isolates crashes to the active module; `ModuleSwitcher` does a crossfade between modules.
 
 ### Language
 
@@ -70,17 +151,222 @@ The app syncs its `window.storage` key-value data to a Supabase table `kv_store`
 - `subscribeToChanges(cb)` — Realtime listener; propagates changes from other devices/tabs
 - Keys prefixed with `erp:user:` are never synced (sensitive local-only data)
 
-## Animation Components
+## Animation & Visual Components
 
 - `src/Aurora.jsx` — WebGL aurora background rendered via OGL, shown on the login screen
 - `src/BlurText.jsx` — Text reveal animation using Motion, used for decorative text
+- `src/AnimatedLogo.jsx`, `src/AnimatedSnowflake.jsx` — anime.js-driven brand visuals
+- `src/FrostIcons.jsx` — icon set used by the sidebar (`iconName` field on `navItems`)
 
 ## Working with This Codebase
 
-- Since the entire app is a single file, any change requires careful attention to the section boundaries documented above.
+- The app is effectively single-file. Any change to `App.jsx` requires careful attention to the section table above — and that table drifts on every edit, so **grep the function name** rather than trusting line numbers blindly.
 - Font: DM Sans, loaded from Google Fonts in `index.html`.
-- The `StyleSheet` component injects global CSS including print media queries and animations — check there for styling that isn't Tailwind.
+- The `StyleSheet` component injects global CSS including `@media print` rules and animations — check there for styling that isn't Tailwind.
 - The `DataTable` component is reused across all modules and supports sorting, filtering, pagination, and inline actions.
+- The app is a **PWA** (`vite-plugin-pwa`); test the installable / offline behavior when touching service-worker-adjacent code.
+- Pure helpers live in `src/utils.js` and are covered by Vitest. New pure helpers should go there with a test, not into `App.jsx`.
+- Before reintroducing a "module" name (Inventory, Invoice, PDV, Webdesk, Banking, MessageCenter), check whether the use case is already handled by `CadastroModule`, the HTML doc generators, or another existing flow — these names appeared in earlier versions and were intentionally consolidated.
+
+---
+
+## Wiki do Projeto (Padrão LLM Wiki)
+
+A complexidade do FrostERP (App.jsx com ~7600 linhas, ~11 módulos, regras de negócio em pt-BR, integração Supabase, fluxo dedicado do técnico) supera o que cabe nesse `CLAUDE.md`. Para acumular conhecimento sem inflar este arquivo, mantemos um **wiki incremental** em `docs/wiki/`. Claude é o mantenedor; o humano é o curador.
+
+### Três camadas
+
+| Camada       | Onde                | Quem escreve     | O que é                                                                 |
+| ------------ | ------------------- | ---------------- | ----------------------------------------------------------------------- |
+| Raw sources  | `docs/raw/`         | Humano (curador) | Imutável: PRDs, prints de bug, transcripts, requisitos do cliente, dumps de chat, screenshots de tela do app |
+| Wiki         | `docs/wiki/`        | **Claude**       | Markdown estruturado e interlinkado: páginas de módulo, conceito, decisão, fluxo, fonte |
+| Schema       | `CLAUDE.md` (este)  | Co-evoluído      | Convenções, layout, operações                                           |
+
+### Layout de diretórios
+
+```
+docs/
+├── raw/                          # fontes brutas (humano dropa aqui — Claude lê, nunca modifica)
+│   ├── assets/                   # imagens, screenshots referenciadas
+│   ├── prds/                     # documentos de requisito de feature
+│   ├── bugs/                     # prints/descrições de bug do usuário final
+│   ├── transcripts/              # conversas com cliente, reuniões
+│   └── reference/                # docs externos: Receita Federal NF-e, layout boleto, etc.
+└── wiki/                         # Claude mantém — humano só lê
+    ├── index.md                  # catálogo de tudo (lido primeiro em qualquer query)
+    ├── log.md                    # cronológico append-only de ingests/queries/lints
+    ├── modules/                  # 1 página por módulo do App.jsx
+    │   ├── finance.md
+    │   ├── inventory.md
+    │   ├── invoice.md
+    │   ├── pdv.md
+    │   ├── webdesk.md
+    │   ├── process.md            # OS (ordem de serviço)
+    │   ├── schedule.md
+    │   ├── banking.md
+    │   ├── cadastro.md
+    │   ├── message-center.md
+    │   ├── settings.md
+    │   └── tecnico-mobile.md     # shell dedicado para role=tecnico
+    ├── concepts/                 # padrões transversais que tocam vários módulos
+    │   ├── db-layer.md           # window.storage + DB utility
+    │   ├── supabase-sync.md      # hydrate/sync/realtime, prefixos não-sincronizados
+    │   ├── role-permissions.md   # ROLE_PERMISSIONS, gating de módulos
+    │   ├── data-table.md         # contrato do componente reutilizado
+    │   ├── seed-data.md          # como seedDatabase() popula demo
+    │   └── print-views.md        # @media print, modais de impressão de NF-e/relatórios
+    ├── flows/                    # fluxos end-to-end multi-módulo
+    │   ├── os-tecnico-aprovacao.md   # criação OS → atribuição → mobile → revisão admin
+    │   ├── emissao-nfe.md
+    │   └── pdv-checkout.md
+    ├── decisions/                # ADRs leves (uma decisão arquitetural por arquivo)
+    │   ├── 001-single-file-app.md
+    │   ├── 002-window-storage-sem-orm.md
+    │   ├── 003-sem-router.md
+    │   └── 004-pt-br-no-codigo.md
+    └── sources/                  # 1 página por documento ingerido em docs/raw/
+        └── <slug>.md
+```
+
+### Convenções de página
+
+Toda página em `docs/wiki/` começa com frontmatter YAML:
+
+```yaml
+---
+title: Módulo Finance
+type: module                    # module | concept | flow | decision | source
+updated: 2026-05-10
+sources:                        # links para docs/raw/ que alimentaram esta página
+  - ../raw/prds/finance-v2.md
+related:                        # wikilinks para páginas vizinhas
+  - ../concepts/db-layer.md
+  - ../flows/emissao-nfe.md
+code_refs:                      # apontadores ESTÁVEIS para o código (sempre verifique antes de citar)
+  - src/App.jsx#FinanceModule
+---
+```
+
+Regras:
+
+- **Conteúdo em pt-BR** (alinhado com o app). Termos técnicos podem ficar em inglês.
+- **Wikilinks relativos**: `[[../concepts/db-layer]]` — facilita refactor de pastas.
+- **Code refs como ponteiros, não cópias**: cite `src/App.jsx#FinanceModule` ou `src/App.jsx:1493`. Nunca cole blocos grandes de código no wiki — eles ficam stale na hora.
+- **Citações de fonte obrigatórias**: toda afirmação não-óbvia deve linkar para uma página em `sources/` ou um arquivo em `raw/`. Sem fonte → marque como `[inferido]` ou `[a confirmar com o usuário]`.
+
+### Operações
+
+#### Ingest (humano dropa fonte → Claude integra)
+
+Disparado quando o humano coloca um arquivo novo em `docs/raw/` e diz algo como _"ingest esse PRD"_ ou _"adicione esse print de bug"_.
+
+1. Ler a fonte completa em `docs/raw/`.
+2. Discutir com o usuário o que é mais relevante.
+3. Criar `docs/wiki/sources/<slug>.md` com resumo + link de volta para o raw.
+4. Atualizar todas as páginas de `modules/`, `concepts/`, `flows/` afetadas — propagar mudanças, marcar contradições com `> ⚠️ Contradição:`.
+5. Atualizar `docs/wiki/index.md` (linha por nova página criada).
+6. Append em `docs/wiki/log.md`:
+   ```
+   ## [2026-05-10] ingest | <título da fonte>
+   - source: docs/raw/prds/<arquivo>.md
+   - touched: modules/finance.md, concepts/db-layer.md, flows/emissao-nfe.md
+   - decisions: <se aplicável>
+   ```
+
+Uma única ingest tipicamente toca 5–15 páginas. Não tenha medo de propagar.
+
+#### Query (humano pergunta → Claude responde a partir do wiki)
+
+1. **Sempre** ler `docs/wiki/index.md` primeiro.
+2. Drilar nas páginas relevantes (não no código direto, a menos que precise verificar code_refs).
+3. Responder citando o caminho da página: _"Conforme `docs/wiki/modules/process.md`, o fluxo do técnico..."_.
+4. **Filar respostas valiosas de volta no wiki**: se a query produziu uma síntese, comparação ou descoberta nova (não apenas leitura), crie ou atualize uma página. Comparações e investigações **são** conhecimento — não devem viver só no histórico do chat.
+
+#### Lint (saúde periódica do wiki)
+
+Disparado quando o humano pede _"lint do wiki"_ ou _"health check"_.
+
+Verificar:
+- Páginas órfãs (sem inbound links em outras páginas)
+- Conceitos mencionados em várias páginas mas sem página própria → candidatos a promover
+- Wikilinks quebrados
+- Code refs apontando para linhas que mudaram (rodar grep contra `src/`)
+- Claims contraditórios entre páginas
+- Fontes em `docs/raw/` sem página correspondente em `sources/`
+- Páginas com `updated` muito antiga vs. mudanças recentes nos arquivos referenciados
+
+Saída do lint: lista priorizada de itens, **não** correções automáticas. Humano decide o que atacar.
+
+### `index.md` — formato
+
+Catálogo plano por categoria. Uma linha por página: `- [Título](path) — gancho de uma linha`. Sem frontmatter. Mantenha conciso (sub-200 linhas — se passar, é hora de quebrar).
+
+```markdown
+# Wiki Index
+
+## Módulos
+- [Finance](modules/finance.md) — receitas/despesas, relatórios imprimíveis
+- [Process / OS](modules/process.md) — ordens de serviço, ciclo de aprovação
+...
+
+## Conceitos
+- [DB Layer](concepts/db-layer.md) — window.storage + DB utility, prefixos `frost_*`
+...
+
+## Fluxos
+- [OS técnico → aprovação](flows/os-tecnico-aprovacao.md) — criação até finalização revisada
+
+## Decisões
+- [001 single-file App.jsx](decisions/001-single-file-app.md) — por que tudo em um arquivo
+
+## Fontes
+- [PRD Finance v2](sources/prd-finance-v2.md) — req 2026-04
+```
+
+### `log.md` — formato
+
+Append-only, prefixo consistente para ser parseável com `grep "^## \[" log.md | tail -10`.
+
+```markdown
+# Log
+
+## [2026-05-10] ingest | PRD Finance v2
+- source: docs/raw/prds/finance-v2.md
+- touched: modules/finance.md, concepts/db-layer.md
+- new pages: sources/prd-finance-v2.md, decisions/005-categorias-revenue-fixas.md
+
+## [2026-05-09] query | "como o técnico finaliza uma OS?"
+- consulted: modules/tecnico-mobile.md, flows/os-tecnico-aprovacao.md
+- filed back: nenhum (resposta direta de página existente)
+
+## [2026-05-08] lint
+- 3 órfãs encontradas: concepts/print-views.md, ...
+- 2 code refs stale em modules/banking.md
+```
+
+### Quando NÃO usar o wiki
+
+- **Não duplique código.** Aponte para `App.jsx:LINHA` em vez de colar.
+- **Não documente o que `git log` já diz.** Histórico de commits é autoritativo para "o que mudou quando".
+- **Bug fix pontual não vira página.** A correção está no código e no commit. Só vira página se descobriu algo sobre o domínio que vale guardar.
+- **Não criar pasta `docs/`/wiki preventivamente.** Comece quando houver primeira fonte para ingerir. Páginas vazias são pior que ausência de páginas.
+
+### Bootstrap
+
+Na primeira vez que o humano disser _"vamos começar o wiki"_ ou _"ingest essa fonte"_:
+1. Criar `docs/raw/` e `docs/wiki/`.
+2. Criar `docs/wiki/index.md` (vazio com cabeçalhos de categoria) e `docs/wiki/log.md` (vazio com `# Log`).
+3. Em seguida, executar a operação de ingest.
+
+### Obsidian como IDE do wiki
+
+A **raiz do projeto é o cofre Obsidian** (não há cofre separado). O humano abre `Frostapp-main/` como vault no Obsidian — `docs/wiki/` e `docs/raw/` aparecem como pastas normais, wikilinks `[[../concepts/db-layer]]` resolvem nativos, graph view funciona.
+
+- `.obsidian/` é criado pelo Obsidian ao abrir o cofre. Estado de UI (`workspace*`, `cache`, `graph.json`) está no `.gitignore`. Configs compartilhadas (`app.json`, `appearance.json`, `core-plugins.json`, `community-plugins.json`) **podem** ir pro repo se quisermos consistência entre máquinas.
+- Plugins recomendados (instalar manualmente no Obsidian): **Dataview** (queries em frontmatter YAML), **Templater** (snippets), **Obsidian Git** (já temos git mas integra commit/push). Opcional: **Marp** se precisar gerar slides do wiki.
+- Não criar arquivos fora de `docs/` para o cofre — código continua sendo código, wiki continua em `docs/`. O cofre só "vê" tudo porque é a raiz; isso não significa que tudo é nota.
+
+---
 
 ## Regras Obrigatórias do Projeto
 
@@ -88,3 +374,4 @@ The app syncs its `window.storage` key-value data to a Supabase table `kv_store`
 2. **Comentários nos pontos importantes (em PT-BR)** — Comentar todos os pontos mais importantes do código (funções principais, lógica de negócio, integrações, decisões arquiteturais) para facilitar manutenção e entendimento. Todos os comentários devem ser escritos em Português Brasileiro (pt-BR).
 3. **Sistema integrado PC + Mobile** — O sistema deve funcionar integrado ao PC e como um app mobile responsivo. Todas as telas e componentes devem ser responsivos e adaptados para desktop e dispositivos móveis.
 4. **App do Técnico — fluxo dedicado** — Usuários com `role="tecnico"` devem ver exclusivamente o `TecnicoMobileApp` (sem sidebar do ERP). Esse shell mostra apenas as OS atribuídas ao próprio técnico, com fluxo: visualizar demanda → marcar chegada (registra `tecnico.chegada`) → preencher descrição detalhada e upload de fotos → finalizar (status muda para `aguardando_finalizacao` e registra `tecnico.saida`). Nunca dar acesso a outros módulos para esse role. Toda OS finalizada pelo técnico precisa ser revisada e aprovada por admin/gerente no ERP antes de virar `finalizado`. O relatório mensal de produtividade por técnico (`ProductivityReport`) deve sempre estar disponível para admin/gerente. Fotos do serviço são armazenadas no bucket Supabase Storage `os-fotos` (público) — qualquer feature nova relacionada a OS deve preservar esse fluxo de revisão.
+5. **Wiki como memória do projeto** — Mudanças arquiteturais, novos fluxos de negócio, decisões não-triviais e PRDs do cliente devem ser ingeridos no wiki em `docs/wiki/` (ver seção [Wiki do Projeto](#wiki-do-projeto-padrão-llm-wiki)). Antes de implementar uma feature complexa, consultar `docs/wiki/index.md` para verificar contexto pré-existente.
