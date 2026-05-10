@@ -2572,7 +2572,7 @@ function ForcePasswordChangeDialog({ user, onComplete }) {
 // Exibido quando NÃO há nenhum usuário cadastrado. O usuário criado aqui recebe
 // role admin (acesso total) e é o responsável por criar/gerenciar os demais.
 
-function FirstUserSetup({ onComplete }) {
+function FirstUserSetup({ onComplete, onSwitchToLogin }) {
   const [nome, setNome] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -2700,6 +2700,23 @@ function FirstUserSetup({ onComplete }) {
             >
               {saving ? "Criando..." : "Criar Super Administrador"}
             </button>
+
+            {/* Botão para usuários que já têm conta cadastrada (ex: novo dispositivo, app reinstalado).
+                Tenta hidratar do Supabase + fazer login com credenciais existentes. */}
+            {onSwitchToLogin && (
+              <div className="pt-2 border-t border-gray-700/50">
+                <p className="text-center text-xs text-gray-500 mb-2">
+                  Já tem conta cadastrada em outro dispositivo?
+                </p>
+                <button
+                  type="button"
+                  onClick={onSwitchToLogin}
+                  className="w-full bg-transparent border border-gray-600 text-gray-300 py-2.5 rounded-lg font-medium hover:bg-gray-700/40 hover:border-gray-500 transition"
+                >
+                  Já tenho conta — fazer login
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -11847,12 +11864,16 @@ export default function App() {
     );
   }
 
-  // Primeiro acesso: nenhum usuário cadastrado → cria super admin
+  // Primeiro acesso: nenhum usuário cadastrado → cria super admin.
+  // Botão "já tenho conta" pula pra LoginScreen (caso novo device com conta sincronizável).
   if (needsFirstUser && !user) {
     return (
       <>
         <StyleSheet />
-        <FirstUserSetup onComplete={handleFirstUserCreated} />
+        <FirstUserSetup
+          onComplete={handleFirstUserCreated}
+          onSwitchToLogin={() => setNeedsFirstUser(false)}
+        />
       </>
     );
   }

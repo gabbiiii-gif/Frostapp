@@ -15,3 +15,25 @@ dev-dist
 .obsidian/workspace*
 .obsidian/cache
 .obsidian/graph.json
+
+# Capacitor / Android build artifacts
+android/.gradle
+android/build
+android/app/build
+android/app/release
+android/local.properties
+android/.idea
+android/captures
+android/.cxx
+android/app/src/main/assets/public
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+*.keystore
+*.jks
+keystore.properties
+
+# iOS (futuro)
+ios/App/Pods
+ios/App/build
+ios/App/App/public
+ios/.DS_Store

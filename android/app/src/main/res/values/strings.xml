@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">FrostERP</string>
+    <string name="title_activity_main">FrostERP</string>
+    <string name="package_name">br.com.frosterp.app</string>
+    <string name="custom_url_scheme">br.com.frosterp.app</string>
+</resources>
