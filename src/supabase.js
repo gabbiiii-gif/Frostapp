@@ -271,6 +271,53 @@ export async function adminCreateUser({ email, password, role, nome, avatar, leg
   return { ok: true, ...body };
 }
 
+// ─── Master users: sync via tabela dedicada (sem company_id) ────────────────
+// Master tier e separado do kv_store por design (master nao pertence a empresa).
+// Hash PBKDF2 100k iter aceitavel pra MVP exposto via SELECT anon (RLS).
+// Permite cadastrar master no PC e logar no APK com mesmas creds.
+export async function listMastersRemote() {
+  if (!supabase) return [];
+  try {
+    const { data, error } = await supabase.from('master_users').select('*');
+    if (error) { console.warn('listMastersRemote:', error.message); return []; }
+    return (data || []).map(row => ({
+      id: row.id,
+      email: row.email,
+      nome: row.nome,
+      password: row.password,
+      role: row.role || 'master',
+      sessionTokenHash: row.session_token_hash || null,
+      createdAt: row.created_at,
+    }));
+  } catch (e) { console.warn('listMastersRemote falhou:', e.message); return []; }
+}
+
+export async function upsertMasterRemote(master) {
+  if (!supabase || !master?.id) return false;
+  try {
+    const { error } = await supabase.from('master_users').upsert({
+      id: master.id,
+      email: (master.email || '').trim().toLowerCase(),
+      nome: master.nome,
+      password: master.password,
+      role: master.role || 'master',
+      session_token_hash: master.sessionTokenHash || null,
+      updated_at: new Date().toISOString(),
+    }, { onConflict: 'id' });
+    if (error) { console.warn('upsertMasterRemote:', error.message); return false; }
+    return true;
+  } catch (e) { console.warn('upsertMasterRemote falhou:', e.message); return false; }
+}
+
+export async function deleteMasterRemote(id) {
+  if (!supabase || !id) return false;
+  try {
+    const { error } = await supabase.from('master_users').delete().eq('id', id);
+    if (error) { console.warn('deleteMasterRemote:', error.message); return false; }
+    return true;
+  } catch (e) { console.warn('deleteMasterRemote falhou:', e.message); return false; }
+}
+
 // ─── Storage: upload/delete de fotos da OS ───────────────────────────────────
 export async function uploadFotoOS(file, osId) {
   if (!supabase) return null;

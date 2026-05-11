@@ -6,9 +6,12 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember } from "./supabase.js";
+import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, listMastersRemote, upsertMasterRemote, deleteMasterRemote } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
+import { PasswordInput } from "./PasswordInput.jsx";
+// Biometria: APK pode logar com Touch ID / Face ID / digital
+import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin } from "./platform.js";
 
 // ─── ErrorBoundary por módulo ────────────────────────────────────────────────
 // Sem isto, qualquer crash em um módulo (Recharts com dado malformado, OS legada
@@ -2113,6 +2116,14 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
   // Estado intermediário do 2FA — quando senha OK mas usuário tem TOTP ativado
   const [pending2FA, setPending2FA] = useState(null);
   const [totpCodeInput, setTotpCodeInput] = useState("");
+  // ─── Biometria (APK) ──────────────────────────────────────────────────────
+  // bioAvail: hardware tem biometria configurada (digital/face/iris)
+  // bioEnabled: usuario ja optou por habilitar login biometrico nesse device
+  // bioEnroll: apos login com senha, oferece habilitar biometria pra proximas vezes
+  const [bioAvail, setBioAvail] = useState(false);
+  const [bioEnabled, setBioEnabled] = useState(false);
+  const [bioEnroll, setBioEnroll] = useState(null); // { email, password, user }
+  const [bioBusy, setBioBusy] = useState(false);
   // Inicializa a partir do sessionStorage para que o lockout persista entre recargas
   const initial = readLoginAttempts();
   const [failedAttempts, setFailedAttempts] = useState(initial.count);
@@ -2132,8 +2143,8 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
     return () => clearInterval(id);
   }, [lockoutUntil]);
 
-  const handleSubmit = useCallback(async (e) => {
-    e.preventDefault();
+  const handleSubmit = useCallback(async (e, overrideEmail, overridePassword) => {
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
     setError("");
 
     // Rate limiting — bloqueia tentativas durante lockout (consulta sessionStorage também)
@@ -2144,14 +2155,18 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
       return;
     }
 
-    if (!email.trim() || !password.trim()) {
+    // Permite chamada programatica (biometria) com creds salvas, sem depender do state
+    const useEmailRaw = overrideEmail ?? email;
+    const usePassword = overridePassword ?? password;
+
+    if (!useEmailRaw.trim() || !usePassword.trim()) {
       setError("Preencha todos os campos.");
       return;
     }
 
     // Validação de formato de email
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedEmail = useEmailRaw.trim().toLowerCase();
     if (!emailRegex.test(normalizedEmail)) {
       setError("Formato de email inválido.");
       return;
@@ -2164,19 +2179,63 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
       //  - estabelece JWT server-validated (item 3),
       //  - libera RLS por company para hydrate (item 2),
       //  - migra usuários PBKDF2 legados via Edge Function migrate-login.
-      const authResp = await signInWithFallback(normalizedEmail, password);
-      if (!authResp.ok) {
-        // Mantém contagem de tentativas legada para lockout
-        const persistedNow = readLoginAttempts();
-        const attemptsNow = (persistedNow.count || failedAttempts) + 1;
-        let lockNow = 0;
-        if (attemptsNow >= 15) lockNow = Date.now() + 300000;
-        else if (attemptsNow >= 10) lockNow = Date.now() + 60000;
-        else if (attemptsNow >= 5) lockNow = Date.now() + 30000;
-        setFailedAttempts(attemptsNow);
-        setLockoutUntil(lockNow || null);
-        writeLoginAttempts({ count: attemptsNow, lockoutUntil: lockNow });
-        setError(authResp.error || "Email ou senha incorretos.");
+      const authResp = await signInWithFallback(normalizedEmail, usePassword);
+      // Fallback local: usuarios cadastrados antes da migracao Supabase Auth
+      // (ou Supabase indisponivel) — valida via PBKDF2 contra erp:user:* local.
+      // Pulamos lockout aqui se o local matchear; Supabase falhou mas creds OK.
+      const supabaseFailed = !authResp.ok;
+      if (supabaseFailed) {
+        const localUsers = DB.listAll("erp:user:");
+        let localMatch = null;
+        for (const u of localUsers) {
+          if ((u.email || "").trim().toLowerCase() === normalizedEmail) {
+            const r = await checkPassword(usePassword, u.password);
+            if (r.match) { localMatch = u; break; }
+          }
+        }
+        if (!localMatch) {
+          // Falha de fato — aplica lockout normal
+          const persistedNow = readLoginAttempts();
+          const attemptsNow = (persistedNow.count || failedAttempts) + 1;
+          let lockNow = 0;
+          if (attemptsNow >= 15) lockNow = Date.now() + 300000;
+          else if (attemptsNow >= 10) lockNow = Date.now() + 60000;
+          else if (attemptsNow >= 5) lockNow = Date.now() + 30000;
+          setFailedAttempts(attemptsNow);
+          setLockoutUntil(lockNow || null);
+          writeLoginAttempts({ count: attemptsNow, lockoutUntil: lockNow });
+          setError(authResp.error || "Email ou senha incorretos.");
+          setLoading(false);
+          return;
+        }
+        // Local OK — segue fluxo de bloqueios + onLogin abaixo (skip hydrate)
+        if (localMatch.companyId) {
+          const company = DB.get("erp:company:" + localMatch.companyId);
+          if (company && company.ativo === false) {
+            setError("Empresa bloqueada. Contate o administrador.");
+            setLoading(false);
+            return;
+          }
+        }
+        if (localMatch.status && localMatch.status !== "ativo") {
+          setError("Usuário desativado. Contate o administrador.");
+          setLoading(false);
+          return;
+        }
+        setFailedAttempts(0);
+        setLockoutUntil(null);
+        clearLoginAttempts();
+        if (localMatch.twoFactorEnabled && localMatch.twoFactorSecret) {
+          setPending2FA(localMatch);
+          setLoading(false);
+          return;
+        }
+        if (isNative() && bioAvail && !bioEnabled && !overrideEmail) {
+          setBioEnroll({ email: normalizedEmail, password: usePassword, user: localMatch });
+          setLoading(false);
+          return;
+        }
+        onLogin(localMatch);
         setLoading(false);
         return;
       }
@@ -2190,13 +2249,13 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
       // Comparação case-insensitive para tolerar registros antigos
       for (const u of users) {
         if ((u.email || "").trim().toLowerCase() === normalizedEmail) {
-          const result = await checkPassword(password, u.password);
+          const result = await checkPassword(usePassword, u.password);
           if (result.match) {
             // Normaliza email persistido caso esteja em maiúsculas
             if (u.email !== normalizedEmail) u.email = normalizedEmail;
             // Migração automática: re-hash com PBKDF2 se senha em formato antigo
             if (result.needsRehash) {
-              const newHash = await hashPassword(password);
+              const newHash = await hashPassword(usePassword);
               u.password = newHash;
             }
             DB.set("erp:user:" + u.id, u);
@@ -2250,6 +2309,13 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
           setLoading(false);
           return;
         }
+        // APK: se biometria disponivel mas ainda nao habilitada, oferece habilitar
+        // antes de fechar a tela. Pulamos se ja veio de login biometrico (override).
+        if (isNative() && bioAvail && !bioEnabled && !overrideEmail) {
+          setBioEnroll({ email: normalizedEmail, password: usePassword, user: found });
+          setLoading(false);
+          return;
+        }
         onLogin(found);
       } else {
         const attempts = (persisted.count || failedAttempts) + 1;
@@ -2266,7 +2332,67 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
     } finally {
       setLoading(false);
     }
-  }, [email, password, onLogin, failedAttempts, lockoutUntil]);
+  }, [email, password, onLogin, failedAttempts, lockoutUntil, bioAvail, bioEnabled]);
+
+  // ─── Biometria: probe + auto-prompt ──────────────────────────────────────
+  // Na entrada da tela de login no APK: checa disponibilidade. Se ja habilitado
+  // pra esse device, dispara o prompt biometrico automaticamente.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!isNative()) return;
+      const av = await isBiometricAvailable();
+      if (cancelled) return;
+      const enabled = await isBiometricEnabled();
+      if (cancelled) return;
+      setBioAvail(!!av.available);
+      setBioEnabled(enabled);
+      if (av.available && enabled) {
+        // Auto prompt — ajuda o usuario a entrar sem digitar
+        handleBiometricLogin();
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Login via biometria: autentica → recupera creds salvas → chama handleSubmit
+  const handleBiometricLogin = useCallback(async () => {
+    if (bioBusy) return;
+    setBioBusy(true);
+    setError("");
+    try {
+      const ok = await authenticateBiometric('Entrar no FrostERP');
+      if (!ok) return;
+      const creds = await getBiometricCreds();
+      if (!creds || !creds.email || !creds.password) {
+        setError("Credenciais biométricas não encontradas. Faça login com senha uma vez.");
+        await disableBiometricLogin();
+        setBioEnabled(false);
+        return;
+      }
+      await handleSubmit(null, creds.email, creds.password);
+    } finally {
+      setBioBusy(false);
+    }
+  }, [bioBusy, handleSubmit]);
+
+  // Confirma habilitar biometria com creds atuais e fecha login
+  const confirmEnableBiometric = useCallback(async () => {
+    if (!bioEnroll) return;
+    await enableBiometricLogin(bioEnroll.email, bioEnroll.password);
+    setBioEnabled(true);
+    const u = bioEnroll.user;
+    setBioEnroll(null);
+    onLogin(u);
+  }, [bioEnroll, onLogin]);
+
+  const skipEnableBiometric = useCallback(() => {
+    if (!bioEnroll) return;
+    const u = bioEnroll.user;
+    setBioEnroll(null);
+    onLogin(u);
+  }, [bioEnroll, onLogin]);
 
   const handleVerify2FA = useCallback(async (e) => {
     e.preventDefault();
@@ -2414,10 +2540,9 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
 
             <div>
               <label htmlFor="login-password" className="block text-sm font-medium text-gray-300 mb-1.5">Senha</label>
-              <input
+              <PasswordInput
                 id="login-password"
                 name="password"
-                type="password"
                 autoComplete="current-password"
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); setError(""); }}
@@ -2455,6 +2580,22 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
                 "Entrar"
               )}
             </button>
+
+            {/* Botao biometria — APK only, so se hardware suporta + ja habilitado */}
+            {bioAvail && bioEnabled && (
+              <button
+                type="button"
+                onClick={handleBiometricLogin}
+                disabled={bioBusy || loading}
+                className="w-full mt-2 bg-gray-700/60 border border-gray-600 text-gray-100 py-3 rounded-lg font-medium hover:bg-gray-700 active:scale-[0.98] transition disabled:opacity-50 flex items-center justify-center gap-2 min-h-[44px]"
+              >
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M17.81 4.47c-.08 0-.16-.02-.23-.06C15.66 3.42 14 3 12.01 3c-1.98 0-3.86.47-5.57 1.41-.24.13-.54.04-.68-.2-.13-.24-.04-.55.2-.68C7.82 2.52 9.86 2 12.01 2c2.13 0 3.99.47 6.03 1.52.25.13.34.43.21.67-.09.18-.26.28-.44.28zM3.5 9.72c-.1 0-.2-.03-.29-.09-.23-.16-.28-.47-.12-.7.99-1.4 2.25-2.5 3.75-3.27C9.98 4.04 14 4.03 17.15 5.65c1.5.77 2.76 1.86 3.75 3.25.16.22.11.54-.12.7-.23.16-.54.11-.7-.12-.9-1.26-2.04-2.25-3.39-2.94-2.87-1.47-6.54-1.47-9.4.01-1.36.7-2.5 1.7-3.4 2.96-.08.14-.23.21-.39.21z"/>
+                  <path d="M9.75 21.79c-.13 0-.26-.05-.35-.15-.87-.87-1.34-1.43-2.01-2.64-.69-1.23-1.05-2.73-1.05-4.34 0-2.97 2.54-5.39 5.66-5.39s5.66 2.42 5.66 5.39c0 .28-.22.5-.5.5s-.5-.22-.5-.5c0-2.42-2.09-4.39-4.66-4.39S7.34 12.24 7.34 14.66c0 1.44.32 2.77.93 3.85.64 1.15 1.08 1.64 1.85 2.42.19.2.19.51 0 .71-.11.1-.24.15-.37.15zm9.43-2.44c-1.19 0-2.24-.3-3.1-.89-1.49-1.01-2.38-2.65-2.38-4.4 0-.28.22-.5.5-.5s.5.22.5.5c0 1.42.72 2.75 1.94 3.57.71.48 1.54.71 2.54.71.24 0 .64-.03 1.04-.1.27-.05.53.13.58.41.05.27-.13.53-.41.58-.57.11-1.07.12-1.21.12zM17.17 22c-.04 0-.09-.01-.13-.02-1.59-.44-2.63-1.03-3.72-2.1-1.4-1.39-2.17-3.24-2.17-5.22 0-1.62 1.38-2.94 3.08-2.94s3.08 1.32 3.08 2.94c0 1.07.93 1.94 2.08 1.94s2.08-.87 2.08-1.94c0-3.77-3.25-6.83-7.25-6.83-2.84 0-5.44 1.58-6.61 4.03-.39.81-.59 1.76-.59 2.8 0 .78.07 2.01.67 3.61.1.26-.03.55-.29.64-.26.1-.55-.04-.64-.29-.49-1.31-.73-2.61-.73-3.96 0-1.2.23-2.29.68-3.24 1.33-2.79 4.28-4.6 7.51-4.6 4.55 0 8.25 3.51 8.25 7.83 0 1.62-1.38 2.94-3.08 2.94s-3.08-1.32-3.08-2.94c0-1.07-.93-1.94-2.08-1.94s-2.08.87-2.08 1.94c0 1.71.66 3.31 1.87 4.51.95.94 1.86 1.46 3.27 1.85.27.07.42.35.35.61-.05.23-.26.38-.47.38z"/>
+                </svg>
+                {bioBusy ? "Aguardando biometria..." : "Entrar com biometria"}
+              </button>
+            )}
           </form>
           )}
 
@@ -2474,6 +2615,35 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
           </div>
         </div>
       </div>
+
+      {/* Modal: oferece habilitar biometria apos primeiro login no APK */}
+      {bioEnroll && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-gray-800 rounded-2xl border border-gray-700 max-w-sm w-full p-6 shadow-2xl">
+            <div className="text-center mb-4">
+              <div className="text-5xl mb-3">🔒</div>
+              <h3 className="text-lg font-bold text-white">Habilitar biometria?</h3>
+              <p className="text-gray-400 text-sm mt-2">
+                Use sua digital ou Face ID pra entrar mais rápido nas próximas vezes.
+              </p>
+            </div>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={confirmEnableBiometric}
+                className="w-full bg-gradient-to-b from-blue-500 to-blue-600 text-white py-3 rounded-lg font-medium hover:from-blue-400 hover:to-blue-500 active:scale-[0.98] transition"
+              >
+                Habilitar agora
+              </button>
+              <button
+                onClick={skipEnableBiometric}
+                className="w-full bg-gray-700 text-gray-200 py-2.5 rounded-lg font-medium hover:bg-gray-600 transition"
+              >
+                Agora não
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -2528,8 +2698,7 @@ function ForcePasswordChangeDialog({ user, onComplete }) {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Nova Senha</label>
-              <input name="newPassword"
-                type="password"
+              <PasswordInput name="newPassword"
                 value={newPassword}
                 onChange={(e) => { setNewPassword(e.target.value); setError(""); }}
                 placeholder="Mínimo 8 caracteres"
@@ -2539,8 +2708,7 @@ function ForcePasswordChangeDialog({ user, onComplete }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar Senha</label>
-              <input name="confirmPassword"
-                type="password"
+              <PasswordInput name="confirmPassword"
                 value={confirmPassword}
                 onChange={(e) => { setConfirmPassword(e.target.value); setError(""); }}
                 placeholder="Repita a nova senha"
@@ -2666,8 +2834,7 @@ function FirstUserSetup({ onComplete, onSwitchToLogin }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Senha</label>
-              <input name="password"
-                type="password"
+              <PasswordInput name="password"
                 autoComplete="new-password"
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); setError(""); }}
@@ -2677,8 +2844,7 @@ function FirstUserSetup({ onComplete, onSwitchToLogin }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar Senha</label>
-              <input name="confirmPassword"
-                type="password"
+              <PasswordInput name="confirmPassword"
                 autoComplete="new-password"
                 value={confirmPassword}
                 onChange={(e) => { setConfirmPassword(e.target.value); setError(""); }}
@@ -2773,7 +2939,8 @@ function FirstMasterSetup({ onComplete, theme, setTheme }) {
       };
       // Master usa prefixo dedicado e nunca é decorado com companyId
       window.storage.setItem(MASTER_PREFIX + newMaster.id, JSON.stringify(newMaster));
-      try { syncToSupabase(MASTER_PREFIX + newMaster.id, newMaster); } catch { /* ignora */ }
+      // Sync via tabela dedicada master_users — permite logar em outros devices
+      try { await upsertMasterRemote(newMaster); } catch { /* ignora — local OK */ }
       onComplete(newMaster);
     } finally {
       setSaving(false);
@@ -2803,8 +2970,8 @@ function FirstMasterSetup({ onComplete, theme, setTheme }) {
           <div className="space-y-4">
             <input name="nome" type="text" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
             <input name="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
-            <input name="password" type="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha (min. 8)" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
-            <input name="confirm" type="password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Confirmar senha" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
+            <PasswordInput name="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha (min. 8)" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
+            <PasswordInput name="confirm" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Confirmar senha" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
             {error && <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">{error}</div>}
             <button onClick={handleSave} disabled={saving} className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50">
               {saving ? "Criando..." : "Criar Master"}
@@ -2829,6 +2996,14 @@ function MasterLoginScreen({ onLogin, onCancel, theme, setTheme }) {
     const normalized = email.trim().toLowerCase();
     setLoading(true);
     try {
+      // Hidrata masters remotos antes — garante que master cadastrado em outro
+      // device esteja visivel pra login. Local fallback se Supabase offline.
+      try {
+        const remoteMasters = await listMastersRemote();
+        remoteMasters.forEach(m => {
+          window.storage.setItem(MASTER_PREFIX + m.id, JSON.stringify(m));
+        });
+      } catch { /* offline — usa local */ }
       // Lista direto (não filtra por company — master não tem company)
       const masters = DB.listAll(MASTER_PREFIX);
       let found = null;
@@ -2836,7 +3011,10 @@ function MasterLoginScreen({ onLogin, onCancel, theme, setTheme }) {
         if ((m.email || "").trim().toLowerCase() === normalized) {
           const result = await checkPassword(password, m.password);
           if (result.match) {
-            if (result.needsRehash) m.password = await hashPassword(password);
+            if (result.needsRehash) {
+              m.password = await hashPassword(password);
+              try { await upsertMasterRemote(m); } catch { /* ignora */ }
+            }
             window.storage.setItem(MASTER_PREFIX + m.id, JSON.stringify(m));
             found = m; break;
           }
@@ -2888,7 +3066,7 @@ function MasterLoginScreen({ onLogin, onCancel, theme, setTheme }) {
           </div>
           <form onSubmit={handleSubmit} className="space-y-4">
             <input name="email" type="email" autoComplete="email" value={email} onChange={(e) => { setEmail(e.target.value); setError(""); }} placeholder="Email" autoFocus className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
-            <input name="password" type="password" autoComplete="current-password" value={password} onChange={(e) => { setPassword(e.target.value); setError(""); }} placeholder="Senha" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
+            <PasswordInput name="password" autoComplete="current-password" value={password} onChange={(e) => { setPassword(e.target.value); setError(""); }} placeholder="Senha" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
             {error && <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">{error}</div>}
             <button type="submit" disabled={loading} className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50">
               {loading ? "Entrando..." : "Entrar como Master"}
@@ -3298,7 +3476,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
                 <div className="grid grid-cols-2 gap-3">
                   <input name="adminNome" type="text" value={adminNome} onChange={(e) => setAdminNome(e.target.value)} placeholder="Nome do admin *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
                   <input name="adminEmail" type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="Email do admin *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
-                  <input name="adminSenha" type="password" value={adminSenha} onChange={(e) => setAdminSenha(e.target.value)} placeholder="Senha provisória (min. 8) *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white col-span-2" />
+                  <PasswordInput name="adminSenha" value={adminSenha} onChange={(e) => setAdminSenha(e.target.value)} placeholder="Senha provisória (min. 8) *" containerClassName="col-span-2" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
                 </div>
                 <p className="text-xs text-gray-400">O admin será forçado a trocar a senha no primeiro login.</p>
               </>
@@ -9755,8 +9933,7 @@ function UserManagement({ currentUser, addToast }) {
               <label className="block text-sm font-medium text-gray-300 mb-1.5">
                 Senha {editing && <span className="text-xs text-gray-500">(deixe vazio para manter)</span>}
               </label>
-              <input name="password"
-                type="password"
+              <PasswordInput name="password"
                 autoComplete="new-password"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
@@ -9766,8 +9943,7 @@ function UserManagement({ currentUser, addToast }) {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar senha</label>
-              <input name="confirmPassword"
-                type="password"
+              <PasswordInput name="confirmPassword"
                 autoComplete="new-password"
                 value={form.confirmPassword}
                 onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
@@ -11486,6 +11662,26 @@ export default function App() {
       setLoading(false);
       // Master mode: verifica se já existe master cadastrado
       if (masterMode) {
+        // Hidrata masters do Supabase (cross-device sync) antes de decidir
+        // se mostra FirstMasterSetup ou MasterLoginScreen.
+        let remoteMasters = [];
+        try {
+          remoteMasters = await listMastersRemote();
+          remoteMasters.forEach(m => {
+            window.storage.setItem(MASTER_PREFIX + m.id, JSON.stringify(m));
+          });
+        } catch { /* offline — usa local */ }
+        // Migracao: masters cadastrados antes da feature de sync ainda só
+        // existem local. Faz upload pra ficarem disponiveis em outros devices.
+        try {
+          const remoteIds = new Set(remoteMasters.map(m => m.id));
+          const localMasters = DB.listAll(MASTER_PREFIX);
+          for (const m of localMasters) {
+            if (m.id && !remoteIds.has(m.id)) {
+              await upsertMasterRemote(m);
+            }
+          }
+        } catch { /* ignora — nao bloqueia boot */ }
         const masters = DB.listAll(MASTER_PREFIX);
         if (masters.length === 0) setNeedsFirstMaster(true);
         // Restaura sessão master se houver

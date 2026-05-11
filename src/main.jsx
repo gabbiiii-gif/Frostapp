@@ -2,6 +2,11 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App.jsx'
 import './index.css'
+import { initNative, hideSplash } from './platform.js'
+
+// Boot nativo (Capacitor): StatusBar + garante splash escondida. No-op no web.
+// Splash desabilitada via capacitor.config + manifest, mas chamamos hide por seguranca.
+initNative().finally(() => { hideSplash(); });
 
 // ─── Error Boundary — captura erros de renderização do React ─────────────────
 // Exibe fallback em pt-BR em vez de uma tela branca quando ocorre um erro
