@@ -11,7 +11,7 @@ import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
-import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin } from "./platform.js";
+import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage } from "./platform.js";
 
 // ─── ErrorBoundary por módulo ────────────────────────────────────────────────
 // Sem isto, qualquer crash em um módulo (Recharts com dado malformado, OS legada
@@ -13158,18 +13158,130 @@ export default function App() {
     ];
   }, [computedNotifications, aiPendingCount, dismissedNotifs]);
 
-  // Dispara toast quando NOVA notificação aparece (não na primeira carga)
+  // Dispara toast + Notification do SO quando NOVA notificação aparece.
+  // - Web: Notification API (funciona com tab em background, não funciona com browser fechado).
+  // - APK nativo: Capacitor Local Notifications (banner no Android imediato).
   const prevNotifIdsRef = useRef(null);
   useEffect(() => {
     if (prevNotifIdsRef.current === null) {
-      // primeira carga — não dispara toast pra não spam
+      // primeira carga — não dispara nada (evita spam ao logar)
       prevNotifIdsRef.current = new Set(notificationsWithAI.map((n) => n.id));
       return;
     }
     const newOnes = notificationsWithAI.filter((n) => !prevNotifIdsRef.current.has(n.id));
-    newOnes.forEach((n) => addToast(n.message, n.type === "danger" ? "error" : n.type === "warning" ? "warning" : "info"));
+    newOnes.forEach((n) => {
+      addToast(n.message, n.type === "danger" ? "error" : n.type === "warning" ? "warning" : "info");
+      // Dispara notificação nativa (web ou APK) — silent fail se sem permissão
+      showNotification({
+        title: n.icon ? `${n.icon} FrostERP` : "FrostERP",
+        body: n.message,
+        tag: n.id,
+        url: `#${n.module || ""}`,
+      });
+    });
     prevNotifIdsRef.current = new Set(notificationsWithAI.map((n) => n.id));
   }, [notificationsWithAI, addToast]);
+
+  // Pede permissão de notificação ao logar (1x por sessão, lazy).
+  useEffect(() => {
+    if (!user) return;
+    let cancelled = false;
+    (async () => {
+      const ok = await requestNotifPermission();
+      if (!cancelled && ok) {
+        console.log("[notif] permissão concedida");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user]);
+
+  // Click na Notification do browser → navega pro módulo correspondente.
+  useEffect(() => {
+    const handler = (e) => {
+      const url = e.detail?.url || "";
+      const mod = url.replace(/^#/, "");
+      if (mod) setActiveModule(mod);
+    };
+    window.addEventListener("frost-notif-click", handler);
+    return () => window.removeEventListener("frost-notif-click", handler);
+  }, []);
+
+  // ─── APK: agenda Local Notifications para OS futuras do técnico ───────────
+  // Roda quando o user é técnico em APK nativo. Pra cada OS dele agendada
+  // pra amanhã (com hora), agenda notif local 1h antes. Idempotente via tag.
+  useEffect(() => {
+    if (!user || user.role !== "tecnico") return;
+    if (!isNative()) return;
+    const minhasOS = (data.services || []).filter((os) =>
+      os.tecnicoId === user.id &&
+      (os.status === "agendada" || os.status === "pendente" || os.status === "aguardando") &&
+      (os.dataAgendada || os.dataPrevista)
+    );
+    minhasOS.forEach((os) => {
+      const data1 = os.dataAgendada || os.dataPrevista;
+      const hora = os.horaAgendada || "09:00";
+      const when = new Date(`${data1}T${hora}:00`);
+      // Notifica 1h antes
+      const remind = new Date(when.getTime() - 60 * 60 * 1000);
+      if (remind.getTime() <= Date.now() + 30 * 1000) return; // já passou ou muito perto
+      scheduleNotification({
+        title: "🔔 Lembrete: OS daqui a 1h",
+        body: `${os.numero} — ${os.clienteNome}${os.enderecoBairro ? ` — ${os.enderecoBairro}` : ""}`,
+        at: remind,
+        tag: `os-remind-${os.id}`,
+        url: "#processos",
+      });
+    });
+  }, [user, data.services]);
+
+  // ─── WhatsApp: envia lembrete pro cliente na véspera da OS ────────────────
+  // Roda no boot e quando data.services muda. Persiste em erp:waLog
+  // (set de IDs já lembrados) pra evitar spam. Só dispara se Evolution
+  // estiver configurada (ai_agent_config.evolution_url presente).
+  const [waLog, setWaLog] = useState(() => new Set(DB.get("erp:waLog") || []));
+  useEffect(() => {
+    if (!user || (user.role !== "admin" && user.role !== "gerente")) return;
+    if (!supabase) return;
+    const now = new Date();
+    const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = toISODate(tomorrow);
+    const candidatas = (data.services || []).filter((os) => {
+      if (os.status === "finalizado" || os.status === "cancelado") return false;
+      const d = os.dataAgendada || os.dataPrevista;
+      if (d !== tomorrowStr) return false;
+      const cliente = (data.clients || []).find((c) => c.id === os.clienteId);
+      const telefone = os.clienteTelefone || cliente?.telefone;
+      if (!telefone) return false;
+      return !waLog.has("os-" + os.id);
+    });
+    if (candidatas.length === 0) return;
+    const member = getCurrentMember();
+    if (!member?.company_id) return;
+    let cancelled = false;
+    (async () => {
+      const novoLog = new Set(waLog);
+      for (const os of candidatas) {
+        if (cancelled) return;
+        const cliente = (data.clients || []).find((c) => c.id === os.clienteId);
+        const telefone = os.clienteTelefone || cliente?.telefone;
+        const hora = os.horaAgendada ? ` às ${os.horaAgendada}` : "";
+        const msg = `Olá ${cliente?.nome || ""}! Lembramos que sua visita técnica está agendada para amanhã${hora}. Endereço: ${os.enderecoRua || cliente?.endereco?.rua || ""} ${os.enderecoNumero || cliente?.endereco?.numero || ""}. Em caso de dúvida, responda esta mensagem.`;
+        const r = await sendWhatsAppMessage(supabase, member.company_id, telefone, msg);
+        if (r.ok) {
+          novoLog.add("os-" + os.id);
+          console.log(`[wa] lembrete enviado OS ${os.numero}`);
+        } else if (r.error !== "evolution_nao_configurada") {
+          console.warn(`[wa] falha lembrete OS ${os.numero}:`, r.error);
+        }
+      }
+      if (!cancelled && novoLog.size !== waLog.size) {
+        setWaLog(novoLog);
+        DB.set("erp:waLog", Array.from(novoLog));
+      }
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, data.services, data.clients]);
 
   useEffect(() => {
     setNotifications(notificationsWithAI);

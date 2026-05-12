@@ -205,3 +205,182 @@ export async function disableBiometricLogin() {
     await Preferences.remove({ key: BIOMETRIC_CREDS });
   } catch { /* ignora */ }
 }
+
+// ─── NOTIFICAÇÕES — Web (Notification API) + Capacitor (Local) ────────────────
+// Estratégia híbrida:
+// - Web (PWA/browser): usa Notification API. Funciona com aba em background.
+//   Não funciona com browser fechado — pra isso precisa Push API + service worker
+//   + servidor (fase futura).
+// - APK nativo: usa @capacitor/local-notifications. Notificação agendada local,
+//   dispara no horário mesmo com app fechado. Não precisa de servidor.
+//
+// Permissão é solicitada na primeira vez que tentamos disparar (lazy).
+
+let _notifPermissionAsked = false;
+
+// Pede permissão pra notificar (web ou nativo). Idempotente.
+export async function requestNotifPermission() {
+  if (isNative()) {
+    try {
+      const { LocalNotifications } = await import('@capacitor/local-notifications');
+      const perm = await LocalNotifications.checkPermissions();
+      if (perm.display !== 'granted') {
+        const req = await LocalNotifications.requestPermissions();
+        return req.display === 'granted';
+      }
+      return true;
+    } catch (e) {
+      console.warn('[notif] requestPermission native falhou:', e?.message || e);
+      return false;
+    }
+  }
+  // Web
+  if (typeof Notification === 'undefined') return false;
+  if (Notification.permission === 'granted') return true;
+  if (Notification.permission === 'denied') return false;
+  if (_notifPermissionAsked) return false;
+  _notifPermissionAsked = true;
+  try {
+    const result = await Notification.requestPermission();
+    return result === 'granted';
+  } catch {
+    return false;
+  }
+}
+
+// Dispara notificação imediata (banner do SO ou tab inativa do browser).
+// Web: Notification(); Nativo: LocalNotifications agendada pra "agora".
+export async function showNotification({ title, body, tag, icon, url }) {
+  if (isNative()) {
+    try {
+      const { LocalNotifications } = await import('@capacitor/local-notifications');
+      const id = Math.abs(hashCode(tag || String(Date.now())));
+      await LocalNotifications.schedule({
+        notifications: [{
+          id,
+          title: title || 'FrostERP',
+          body: body || '',
+          smallIcon: 'ic_stat_icon_config_sample',
+          schedule: { at: new Date(Date.now() + 100) },
+          extra: { url, tag },
+        }],
+      });
+      return true;
+    } catch (e) {
+      console.warn('[notif] showNative falhou:', e?.message || e);
+      return false;
+    }
+  }
+  // Web
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return false;
+  try {
+    const n = new Notification(title || 'FrostERP', {
+      body: body || '',
+      icon: icon || '/icon-192x192.png',
+      badge: '/icon-192x192.png',
+      tag: tag || undefined,
+      renotify: false,
+    });
+    if (url) {
+      n.onclick = () => {
+        window.focus();
+        // tag pode ser usado pra navegar (App escuta evento abaixo)
+        try {
+          window.dispatchEvent(new CustomEvent('frost-notif-click', { detail: { tag, url } }));
+        } catch { /* ignora */ }
+        n.close();
+      };
+    }
+    return true;
+  } catch (e) {
+    console.warn('[notif] showWeb falhou:', e?.message || e);
+    return false;
+  }
+}
+
+// Agenda notificação futura (APK nativo apenas — web não persiste sem service worker).
+// `at` é Date. Retorna o id agendado.
+export async function scheduleNotification({ title, body, at, tag, url }) {
+  if (!isNative()) return null;
+  try {
+    const { LocalNotifications } = await import('@capacitor/local-notifications');
+    const id = Math.abs(hashCode(tag || String(at.getTime())));
+    await LocalNotifications.schedule({
+      notifications: [{
+        id,
+        title: title || 'FrostERP',
+        body: body || '',
+        smallIcon: 'ic_stat_icon_config_sample',
+        schedule: { at },
+        extra: { url, tag },
+      }],
+    });
+    return id;
+  } catch (e) {
+    console.warn('[notif] scheduleNotification falhou:', e?.message || e);
+    return null;
+  }
+}
+
+export async function cancelNotification(id) {
+  if (!isNative() || !id) return;
+  try {
+    const { LocalNotifications } = await import('@capacitor/local-notifications');
+    await LocalNotifications.cancel({ notifications: [{ id }] });
+  } catch { /* ignora */ }
+}
+
+// Lista notificações agendadas pendentes (debug + dedupe).
+export async function getPendingNotifications() {
+  if (!isNative()) return [];
+  try {
+    const { LocalNotifications } = await import('@capacitor/local-notifications');
+    const { notifications } = await LocalNotifications.getPending();
+    return notifications || [];
+  } catch { return []; }
+}
+
+// Hash determinístico pra ID estável a partir de uma string (tag) → int32.
+// Permite re-agendar idempotente: mesmo tag = mesmo id = sobrescreve.
+function hashCode(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) - h) + str.charCodeAt(i);
+    h |= 0;
+  }
+  return h;
+}
+
+// ─── WHATSAPP — disparo via Evolution API (lembrete cliente) ──────────────────
+// Reaproveita config do agente IA (ai_agent_config no Supabase).
+// Não bloqueia se Evolution não estiver configurada (silent fail).
+export async function sendWhatsAppMessage(supabase, companyId, phone, text) {
+  if (!supabase || !companyId || !phone || !text) return { ok: false, error: 'params' };
+  try {
+    const { data: cfg } = await supabase
+      .from('ai_agent_config')
+      .select('evolution_url, evolution_instance, metadata')
+      .eq('company_id', companyId)
+      .maybeSingle();
+    if (!cfg?.evolution_url || !cfg?.evolution_instance) {
+      return { ok: false, error: 'evolution_nao_configurada' };
+    }
+    const apikey = cfg.metadata?.evolution_apikey || '';
+    const url = `${cfg.evolution_url.replace(/\/$/, '')}/message/sendText/${cfg.evolution_instance}`;
+    // Normaliza telefone: tira tudo que não é dígito; se começa com 0 (BR DDD antigo), tira.
+    const number = String(phone).replace(/\D/g, '').replace(/^0+/, '');
+    const fullNumber = number.startsWith('55') ? number : '55' + number;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey },
+      body: JSON.stringify({ number: fullNumber, text }),
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 100)}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
