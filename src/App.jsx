@@ -142,7 +142,7 @@ const STATUS_MAP = {
 // Matriz de permissões por role — inclui módulo financeiro
 const ROLE_PERMISSIONS = {
   admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia"],
+  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha"],
   tecnico: ["dashboard", "os", "agenda"],
   atendente: ["dashboard", "clientes", "os", "agenda", "ia"],
 };
@@ -1036,6 +1036,7 @@ const ALL_MODULES = [
   { id: "agenda", label: "Agenda" },
   { id: "cadastro", label: "Cadastros" },
   { id: "ia", label: "IA / Atendimento" },
+  { id: "folha", label: "Folha de Pagamento" },
   { id: "config", label: "Configurações (admin)" },
 ];
 
@@ -4596,6 +4597,61 @@ function _fmtBRL(n) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(Number(n) || 0);
 }
 
+// ─── FOLHA DE PAGAMENTO — cálculos previdenciários e fiscais 2026 ─────────────
+// Tabela INSS 2026 (faixas progressivas — referência: portaria interministerial vigente).
+// O cálculo é progressivo: cada faixa contribui só sobre o valor que cai DENTRO dela.
+// Teto contribuição 2026: R$ 8.157,41 (alíquota efetiva máxima ~14%).
+// Se as alíquotas mudarem, atualize INSS_FAIXAS_2026 — o restante do código segue igual.
+const INSS_FAIXAS_2026 = [
+  { ate: 1518.00, aliq: 0.075 },
+  { ate: 2793.88, aliq: 0.09 },
+  { ate: 4190.83, aliq: 0.12 },
+  { ate: 8157.41, aliq: 0.14 },
+];
+function calcINSS(salarioContribuicao) {
+  const sal = Math.max(0, Number(salarioContribuicao) || 0);
+  let total = 0;
+  let pisoAnterior = 0;
+  for (const faixa of INSS_FAIXAS_2026) {
+    if (sal <= pisoAnterior) break;
+    const tetoFaixa = Math.min(sal, faixa.ate);
+    total += (tetoFaixa - pisoAnterior) * faixa.aliq;
+    pisoAnterior = faixa.ate;
+    if (sal <= faixa.ate) break;
+  }
+  return Math.round(total * 100) / 100;
+}
+
+// Tabela IRRF 2026 (deduções por faixa, vigente a partir de fev/2024 e mantida em 2026).
+// Base de cálculo = salário bruto - INSS - dependentes. Existe a opção do desconto
+// simplificado (R$ 564) que é mais vantajoso para muita gente — escolhemos o menor IR.
+const IRRF_FAIXAS_2026 = [
+  { ate: 2428.80, aliq: 0,      deducao: 0 },
+  { ate: 2826.65, aliq: 0.075,  deducao: 182.16 },
+  { ate: 3751.05, aliq: 0.15,   deducao: 394.16 },
+  { ate: 4664.68, aliq: 0.225,  deducao: 675.49 },
+  { ate: Infinity, aliq: 0.275, deducao: 908.73 },
+];
+const IRRF_DEPENDENTE_2026 = 189.59;
+const IRRF_DESCONTO_SIMPLIFICADO_2026 = 564.80;
+function calcIRRF(salarioBruto, inss, dependentes = 0) {
+  const bruto = Math.max(0, Number(salarioBruto) || 0);
+  const dep = Math.max(0, Number(dependentes) || 0);
+  // Base com deduções legais (INSS + dependentes)
+  const baseLegal = Math.max(0, bruto - (Number(inss) || 0) - (dep * IRRF_DEPENDENTE_2026));
+  // Base com desconto simplificado (substitui qualquer dedução)
+  const baseSimpl = Math.max(0, bruto - IRRF_DESCONTO_SIMPLIFICADO_2026);
+  const base = Math.min(baseLegal, baseSimpl);
+  const faixa = IRRF_FAIXAS_2026.find((f) => base <= f.ate) || IRRF_FAIXAS_2026[IRRF_FAIXAS_2026.length - 1];
+  const ir = Math.max(0, base * faixa.aliq - faixa.deducao);
+  return Math.round(ir * 100) / 100;
+}
+
+// FGTS — não desconta do funcionário (empregador deposita), mas mostramos informativo.
+function calcFGTS(salarioBruto) {
+  return Math.round((Math.max(0, Number(salarioBruto) || 0) * 0.08) * 100) / 100;
+}
+
 // Resolve URL para absoluto. Documentos abertos via Blob URL não conseguem
 // carregar caminhos relativos (`/qr.jpeg`) porque a base é blob:... — então
 // transformamos em http(s)://host/path antes de injetar no HTML.
@@ -5206,6 +5262,170 @@ function generateReciboHTML(os, clients) {
     ${_agradecimentoBlock(config)}
 
     <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
+  </div>
+</main>
+${_actionBar()}
+</body></html>`;
+}
+
+// ─── Contracheque — gerador HTML imprimível (padrão dos outros documentos) ───
+// O HTML usa o mesmo _docStyles/_docHeader das demais peças (orçamento/OS/recibo)
+// para manter identidade visual. Print-friendly via @media print já incluído no _docStyles.
+// Em Chrome/Edge o usuário pode "Imprimir → Salvar como PDF" pra baixar.
+function generateContrachequeHTML(contracheque, employee) {
+  const config = DB.get("erp:config") || {};
+  const emp = employee || {};
+  const [ano, mes] = String(contracheque.mesRef || "").split("-");
+  const mesNome = ["", "Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"][Number(mes)] || mes || "—";
+  const adicionais = Array.isArray(contracheque.adicionais) ? contracheque.adicionais : [];
+  const descontos = Array.isArray(contracheque.descontos) ? contracheque.descontos : [];
+
+  const totalAdicionais = adicionais.reduce((s, a) => s + (Number(a.valor) || 0), 0);
+  const totalProventos = (Number(contracheque.salarioBase) || 0) + totalAdicionais;
+  const inss = Number(contracheque.inss) || 0;
+  const irrf = Number(contracheque.irrf) || 0;
+  const totalOutrosDesc = descontos.reduce((s, d) => s + (Number(d.valor) || 0), 0);
+  const totalDescontos = inss + irrf + totalOutrosDesc;
+  const liquido = totalProventos - totalDescontos;
+  const fgts = calcFGTS(totalProventos);
+
+  const rowsAdic = [
+    `<tr><td>Salário Base</td><td class="num">${_fmtBRL(contracheque.salarioBase || 0)}</td></tr>`,
+    ...adicionais.map((a) => `<tr><td>${_h(a.descricao || "Adicional")}</td><td class="num">${_fmtBRL(a.valor || 0)}</td></tr>`),
+  ].join("");
+
+  const rowsDesc = [
+    `<tr><td>INSS</td><td class="num">${_fmtBRL(inss)}</td></tr>`,
+    `<tr><td>IRRF</td><td class="num">${_fmtBRL(irrf)}</td></tr>`,
+    ...descontos.map((d) => `<tr><td>${_h(d.descricao || d.tipo || "Desconto")}</td><td class="num">${_fmtBRL(d.valor || 0)}</td></tr>`),
+  ].join("");
+
+  const dataEmissao = new Date().toLocaleDateString("pt-BR");
+
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Contracheque ${_h(emp.nome || "")} — ${mesNome}/${ano}</title>
+<style>${_docStyles("#0f766e")}</style>
+</head>
+<body>
+<main class="page">
+  <div class="page-inner">
+    ${_docHeader(config, "Recibo de Pagamento de Salário", `${mesNome}/${ano}`, `Emitido em ${dataEmissao}`)}
+
+    <!-- Bloco de dados do funcionário -->
+    <div class="section">
+      <div class="section-title">Funcionário</div>
+      <table>
+        <tr><td style="width:30%"><strong>Nome</strong></td><td>${_h(emp.nome || "—")}</td></tr>
+        ${emp.cpf ? `<tr><td><strong>CPF</strong></td><td>${_h(emp.cpf)}</td></tr>` : ""}
+        ${emp.cargo ? `<tr><td><strong>Cargo</strong></td><td>${_h(emp.cargo)}</td></tr>` : ""}
+        ${emp.dataAdmissao ? `<tr><td><strong>Admissão</strong></td><td>${_h(emp.dataAdmissao)}</td></tr>` : ""}
+        <tr><td><strong>Competência</strong></td><td>${mesNome}/${ano}</td></tr>
+      </table>
+    </div>
+
+    <!-- Proventos -->
+    <div class="section">
+      <div class="section-title">Proventos</div>
+      <table>
+        <thead><tr><th>Descrição</th><th class="num" style="width:160px">Valor</th></tr></thead>
+        <tbody>${rowsAdic}</tbody>
+        <tfoot><tr><td><strong>Total de Proventos</strong></td><td class="num"><strong>${_fmtBRL(totalProventos)}</strong></td></tr></tfoot>
+      </table>
+    </div>
+
+    <!-- Descontos -->
+    <div class="section">
+      <div class="section-title">Descontos</div>
+      <table>
+        <thead><tr><th>Descrição</th><th class="num" style="width:160px">Valor</th></tr></thead>
+        <tbody>${rowsDesc}</tbody>
+        <tfoot><tr><td><strong>Total de Descontos</strong></td><td class="num"><strong>${_fmtBRL(totalDescontos)}</strong></td></tr></tfoot>
+      </table>
+    </div>
+
+    <!-- Valor líquido em destaque -->
+    <div class="hero-amount">
+      <div class="hero-label">Valor Líquido a Receber</div>
+      <div class="hero-value">${_fmtBRL(liquido)}</div>
+      <div class="hero-hint">Base FGTS (informativa): ${_fmtBRL(totalProventos)} — Depósito FGTS (8%): ${_fmtBRL(fgts)}</div>
+    </div>
+
+    <!-- Assinatura -->
+    <div class="section" style="margin-top:40px">
+      <div style="display:flex;gap:32px;justify-content:space-between">
+        <div style="flex:1;border-top:1px solid #94a3b8;padding-top:8px;text-align:center">
+          <div style="font-size:12px;color:#475569">Assinatura do Funcionário</div>
+          <div style="font-size:13px;margin-top:4px"><strong>${_h(emp.nome || "")}</strong></div>
+        </div>
+        <div style="flex:1;border-top:1px solid #94a3b8;padding-top:8px;text-align:center">
+          <div style="font-size:12px;color:#475569">Assinatura da Empresa</div>
+          <div style="font-size:13px;margin-top:4px"><strong>${_h(config.nomeEmpresa || config.empresa || "")}</strong></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="watermark">Contracheque ${contracheque.id} · gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
+  </div>
+</main>
+${_actionBar()}
+</body></html>`;
+}
+
+// ─── Vale — recibo simples imprimível ────────────────────────────────────────
+function generateValeHTML(vale, employee) {
+  const config = DB.get("erp:config") || {};
+  const emp = employee || {};
+  const data = vale.data ? new Date(vale.data + "T00:00:00").toLocaleDateString("pt-BR") : "—";
+  const valor = Number(vale.valor) || 0;
+  return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vale — ${_h(emp.nome || "")} — ${data}</title>
+<style>${_docStyles("#b45309")}</style>
+</head>
+<body>
+<main class="page">
+  <div class="page-inner">
+    ${_docHeader(config, "Recibo de Vale (Adiantamento Salarial)", vale.id || "", `Data: ${data}`)}
+
+    <div class="hero-amount">
+      <div class="hero-label">Valor Recebido</div>
+      <div class="hero-value">${_fmtBRL(valor)}</div>
+      <div class="hero-hint">Será descontado do próximo contracheque</div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Funcionário</div>
+      <table>
+        <tr><td style="width:30%"><strong>Nome</strong></td><td>${_h(emp.nome || "—")}</td></tr>
+        ${emp.cpf ? `<tr><td><strong>CPF</strong></td><td>${_h(emp.cpf)}</td></tr>` : ""}
+        ${emp.cargo ? `<tr><td><strong>Cargo</strong></td><td>${_h(emp.cargo)}</td></tr>` : ""}
+        <tr><td><strong>Motivo</strong></td><td>${_h(vale.motivo || "—")}</td></tr>
+        <tr><td><strong>Status</strong></td><td>${vale.status === "descontado" ? "Descontado" : "Pendente"}</td></tr>
+      </table>
+    </div>
+
+    <p style="margin-top:32px;font-size:13px;line-height:1.6">
+      Eu, <strong>${_h(emp.nome || "")}</strong>${emp.cpf ? `, portador do CPF <strong>${_h(emp.cpf)}</strong>,` : ""}
+      declaro ter recebido nesta data, da empresa <strong>${_h(config.nomeEmpresa || config.empresa || "—")}</strong>,
+      a importância de <strong>${_fmtBRL(valor)}</strong> a título de <strong>${_h(vale.motivo || "adiantamento salarial")}</strong>,
+      que será descontado integralmente do meu próximo pagamento de salário.
+    </p>
+
+    <div class="section" style="margin-top:48px">
+      <div style="border-top:1px solid #94a3b8;padding-top:8px;text-align:center;max-width:60%;margin:0 auto">
+        <div style="font-size:12px;color:#475569">Assinatura do Funcionário</div>
+        <div style="font-size:13px;margin-top:4px"><strong>${_h(emp.nome || "")}</strong></div>
+      </div>
+    </div>
+
+    <div class="watermark">FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
 </main>
 ${_actionBar()}
@@ -11058,6 +11278,557 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
   );
 }
 
+// ─── FOLHA DE PAGAMENTO ─────────────────────────────────────────────────────
+// Módulo de RH leve: vales (adiantamentos salariais) + contracheques mensais.
+// Vales: simples (funcionário/data/valor/motivo/status). Quando contracheque
+// é gerado, os vales pendentes do funcionário no mês entram automaticamente
+// como desconto e mudam pra status="descontado" ao fechar o contracheque.
+// Contracheque calcula INSS/IRRF/FGTS via tabelas 2026 (calcINSS, calcIRRF).
+// HTML imprimível segue o mesmo padrão dos outros docs do app.
+function FolhaModule({ user, addToast, employees, reloadData }) {
+  const [tab, setTab] = useState("vales");
+  const [vales, setVales] = useState([]);
+  const [contracheques, setContracheques] = useState([]);
+  const [showValeForm, setShowValeForm] = useState(false);
+  const [showCcForm, setShowCcForm] = useState(false);
+  const [editingVale, setEditingVale] = useState(null);
+  const [editingCc, setEditingCc] = useState(null);
+  const [reload, setReload] = useState(0);
+
+  // Carrega dados locais via DB (que já está company-scoped)
+  useEffect(() => {
+    setVales((DB.list("erp:vale:") || []).sort((a, b) => (b.data || "").localeCompare(a.data || "")));
+    setContracheques((DB.list("erp:contracheque:") || []).sort((a, b) => (b.mesRef || "").localeCompare(a.mesRef || "")));
+  }, [reload]);
+
+  const reloadLocal = () => setReload((r) => r + 1);
+  const empById = useMemo(() => {
+    const m = {};
+    (employees || []).forEach((e) => { m[e.id] = e; });
+    return m;
+  }, [employees]);
+
+  // ─── Vales: CRUD ──────────────────────────────────────────────────────────
+  const saveVale = (data) => {
+    const id = data.id || ("vale_" + genId());
+    const vale = {
+      id,
+      employeeId: data.employeeId,
+      data: data.data,
+      valor: Number(data.valor) || 0,
+      motivo: data.motivo || "",
+      status: data.status || "pendente",
+      criadoEm: data.criadoEm || new Date().toISOString(),
+      criadoPor: user?.nome || user?.email || "",
+    };
+    DB.set("erp:vale:" + id, vale);
+    addToast?.(data.id ? "Vale atualizado" : "Vale registrado", "success");
+    setShowValeForm(false);
+    setEditingVale(null);
+    reloadLocal();
+  };
+  const deleteVale = (vale) => {
+    if (!window.confirm(`Excluir vale de ${_fmtBRL(vale.valor)}? Esta ação não pode ser desfeita.`)) return;
+    DB.delete("erp:vale:" + vale.id);
+    addToast?.("Vale excluído", "success");
+    reloadLocal();
+  };
+  const printVale = (vale) => {
+    openHTMLDoc(generateValeHTML(vale, empById[vale.employeeId]));
+  };
+
+  // ─── Contracheque: geração + cálculo ──────────────────────────────────────
+  const saveContracheque = (data) => {
+    const id = data.id || ("cc_" + genId());
+    const cc = {
+      id,
+      employeeId: data.employeeId,
+      mesRef: data.mesRef,
+      salarioBase: Number(data.salarioBase) || 0,
+      adicionais: (data.adicionais || []).filter((a) => Number(a.valor) > 0),
+      descontos: (data.descontos || []).filter((d) => Number(d.valor) > 0),
+      dependentes: Number(data.dependentes) || 0,
+      inss: Number(data.inss) || 0,
+      irrf: Number(data.irrf) || 0,
+      totalProventos: Number(data.totalProventos) || 0,
+      totalDescontos: Number(data.totalDescontos) || 0,
+      liquido: Number(data.liquido) || 0,
+      status: data.status || "rascunho",
+      paidAt: data.paidAt || null,
+      criadoEm: data.criadoEm || new Date().toISOString(),
+      criadoPor: user?.nome || user?.email || "",
+    };
+    DB.set("erp:contracheque:" + id, cc);
+    addToast?.(data.id ? "Contracheque atualizado" : "Contracheque gerado", "success");
+    setShowCcForm(false);
+    setEditingCc(null);
+    reloadLocal();
+  };
+
+  // Fecha contracheque: marca como pago, liga vales como descontados,
+  // e lança despesa de salário no financeiro pra fechar o ciclo contábil.
+  const fecharContracheque = (cc) => {
+    if (cc.status === "pago") {
+      addToast?.("Contracheque já foi fechado", "warning");
+      return;
+    }
+    if (!window.confirm(`Fechar e marcar como PAGO o contracheque de ${empById[cc.employeeId]?.nome || ""} (${cc.mesRef})?\nIsso vai:\n• Marcar vales descontados como quitados\n• Lançar despesa no financeiro`)) return;
+    const updated = { ...cc, status: "pago", paidAt: new Date().toISOString() };
+    DB.set("erp:contracheque:" + cc.id, updated);
+
+    // Marca vales referenciados como descontados
+    (cc.descontos || []).forEach((d) => {
+      if (d.valeId) {
+        const vale = DB.get("erp:vale:" + d.valeId);
+        if (vale && vale.status !== "descontado") {
+          DB.set("erp:vale:" + d.valeId, { ...vale, status: "descontado", contrachequeId: cc.id });
+        }
+      }
+    });
+
+    // Lança despesa no financeiro (categoria Salário)
+    const txId = "fin_" + genId();
+    const emp = empById[cc.employeeId] || {};
+    const tx = {
+      id: txId,
+      tipo: "despesa",
+      categoria: "Salário",
+      descricao: `Salário ${cc.mesRef} — ${emp.nome || "Funcionário"}`,
+      valor: Number(cc.liquido) || 0,
+      data: new Date().toISOString().split("T")[0],
+      formaPagamento: "Transferência",
+      pagoEm: new Date().toISOString(),
+      origem: "folha",
+      contrachequeId: cc.id,
+    };
+    DB.set("erp:finance:" + txId, tx);
+
+    addToast?.("Contracheque fechado e lançado no financeiro", "success");
+    reloadLocal();
+    reloadData?.();
+  };
+
+  const deleteContracheque = (cc) => {
+    if (cc.status === "pago") {
+      addToast?.("Não é possível excluir contracheque já pago. Reabra antes.", "warning");
+      return;
+    }
+    if (!window.confirm(`Excluir contracheque ${cc.mesRef}?`)) return;
+    DB.delete("erp:contracheque:" + cc.id);
+    addToast?.("Contracheque excluído", "success");
+    reloadLocal();
+  };
+
+  const reabrirContracheque = (cc) => {
+    if (!window.confirm("Reabrir o contracheque para edição? A despesa no financeiro NÃO será removida automaticamente — remova manualmente se necessário.")) return;
+    DB.set("erp:contracheque:" + cc.id, { ...cc, status: "rascunho", paidAt: null });
+    addToast?.("Contracheque reaberto", "success");
+    reloadLocal();
+  };
+
+  const printContracheque = (cc) => {
+    openHTMLDoc(generateContrachequeHTML(cc, empById[cc.employeeId]));
+  };
+
+  // ─── Render ────────────────────────────────────────────────────────────────
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Folha de Pagamento</h1>
+          <p className="text-sm text-slate-400">Vales e contracheques mensais</p>
+        </div>
+        <div className="flex gap-2">
+          {tab === "vales" && (
+            <button onClick={() => { setEditingVale(null); setShowValeForm(true); }}
+              className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-medium">
+              + Novo Vale
+            </button>
+          )}
+          {tab === "contracheques" && (
+            <button onClick={() => { setEditingCc(null); setShowCcForm(true); }}
+              className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-lg text-sm font-medium">
+              + Gerar Contracheque
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex gap-2 mb-4 border-b border-slate-700">
+        <button onClick={() => setTab("vales")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition ${tab === "vales" ? "border-amber-500 text-white" : "border-transparent text-slate-400 hover:text-slate-200"}`}>
+          Vales ({vales.length})
+        </button>
+        <button onClick={() => setTab("contracheques")}
+          className={`px-4 py-2 text-sm font-medium border-b-2 transition ${tab === "contracheques" ? "border-teal-500 text-white" : "border-transparent text-slate-400 hover:text-slate-200"}`}>
+          Contracheques ({contracheques.length})
+        </button>
+      </div>
+
+      {tab === "vales" && (
+        <FolhaValesTab vales={vales} empById={empById}
+          onEdit={(v) => { setEditingVale(v); setShowValeForm(true); }}
+          onDelete={deleteVale} onPrint={printVale} />
+      )}
+      {tab === "contracheques" && (
+        <FolhaContrachequesTab contracheques={contracheques} empById={empById}
+          onEdit={(c) => { setEditingCc(c); setShowCcForm(true); }}
+          onDelete={deleteContracheque} onPrint={printContracheque}
+          onFechar={fecharContracheque} onReabrir={reabrirContracheque} />
+      )}
+
+      {showValeForm && (
+        <ValeForm initial={editingVale} employees={employees || []}
+          onSave={saveVale} onClose={() => { setShowValeForm(false); setEditingVale(null); }} />
+      )}
+      {showCcForm && (
+        <ContrachequeForm initial={editingCc} employees={employees || []}
+          vales={vales} onSave={saveContracheque}
+          onClose={() => { setShowCcForm(false); setEditingCc(null); }} />
+      )}
+    </div>
+  );
+}
+
+// ─── Sub-componente: tabela de vales ────────────────────────────────────────
+function FolhaValesTab({ vales, empById, onEdit, onDelete, onPrint }) {
+  if (vales.length === 0) {
+    return <div className="bg-slate-800 rounded-lg p-8 text-center text-slate-400">
+      Nenhum vale cadastrado. Clique em <strong>+ Novo Vale</strong> para registrar.
+    </div>;
+  }
+  return (
+    <div className="bg-slate-800 rounded-lg overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-700/60 text-xs uppercase text-slate-300">
+          <tr>
+            <th className="px-3 py-2 text-left">Data</th>
+            <th className="px-3 py-2 text-left">Funcionário</th>
+            <th className="px-3 py-2 text-left">Motivo</th>
+            <th className="px-3 py-2 text-right">Valor</th>
+            <th className="px-3 py-2 text-center">Status</th>
+            <th className="px-3 py-2 text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {vales.map((v) => {
+            const emp = empById[v.employeeId];
+            return (
+              <tr key={v.id} className="border-t border-slate-700/50 text-white">
+                <td className="px-3 py-2">{v.data ? new Date(v.data + "T00:00:00").toLocaleDateString("pt-BR") : "—"}</td>
+                <td className="px-3 py-2">{emp?.nome || <span className="text-slate-500">(removido)</span>}</td>
+                <td className="px-3 py-2 text-slate-300">{v.motivo || "—"}</td>
+                <td className="px-3 py-2 text-right font-mono">{_fmtBRL(v.valor)}</td>
+                <td className="px-3 py-2 text-center">
+                  <span className={`text-xs px-2 py-0.5 rounded ${v.status === "descontado" ? "bg-emerald-500/20 text-emerald-400" : "bg-amber-500/20 text-amber-400"}`}>
+                    {v.status === "descontado" ? "Descontado" : "Pendente"}
+                  </span>
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex gap-2 justify-center">
+                    <button onClick={() => onPrint(v)} className="text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded">Imprimir</button>
+                    <button onClick={() => onEdit(v)} className="text-xs px-2 py-1 bg-blue-600/40 hover:bg-blue-600/60 rounded">Editar</button>
+                    <button onClick={() => onDelete(v)} className="text-xs px-2 py-1 bg-red-600/30 hover:bg-red-600/50 rounded">Excluir</button>
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── Sub-componente: tabela de contracheques ────────────────────────────────
+function FolhaContrachequesTab({ contracheques, empById, onEdit, onDelete, onPrint, onFechar, onReabrir }) {
+  if (contracheques.length === 0) {
+    return <div className="bg-slate-800 rounded-lg p-8 text-center text-slate-400">
+      Nenhum contracheque gerado. Clique em <strong>+ Gerar Contracheque</strong>.
+    </div>;
+  }
+  return (
+    <div className="bg-slate-800 rounded-lg overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="bg-slate-700/60 text-xs uppercase text-slate-300">
+          <tr>
+            <th className="px-3 py-2 text-left">Competência</th>
+            <th className="px-3 py-2 text-left">Funcionário</th>
+            <th className="px-3 py-2 text-right">Proventos</th>
+            <th className="px-3 py-2 text-right">Descontos</th>
+            <th className="px-3 py-2 text-right">Líquido</th>
+            <th className="px-3 py-2 text-center">Status</th>
+            <th className="px-3 py-2 text-center">Ações</th>
+          </tr>
+        </thead>
+        <tbody>
+          {contracheques.map((c) => {
+            const emp = empById[c.employeeId];
+            return (
+              <tr key={c.id} className="border-t border-slate-700/50 text-white">
+                <td className="px-3 py-2 font-mono">{c.mesRef}</td>
+                <td className="px-3 py-2">{emp?.nome || <span className="text-slate-500">(removido)</span>}</td>
+                <td className="px-3 py-2 text-right font-mono">{_fmtBRL(c.totalProventos)}</td>
+                <td className="px-3 py-2 text-right font-mono text-red-400">{_fmtBRL(c.totalDescontos)}</td>
+                <td className="px-3 py-2 text-right font-mono font-bold text-emerald-400">{_fmtBRL(c.liquido)}</td>
+                <td className="px-3 py-2 text-center">
+                  <span className={`text-xs px-2 py-0.5 rounded ${c.status === "pago" ? "bg-emerald-500/20 text-emerald-400" : "bg-slate-600/40 text-slate-300"}`}>
+                    {c.status === "pago" ? "Pago" : "Rascunho"}
+                  </span>
+                </td>
+                <td className="px-3 py-2">
+                  <div className="flex gap-1 justify-center flex-wrap">
+                    <button onClick={() => onPrint(c)} className="text-xs px-2 py-1 bg-slate-700 hover:bg-slate-600 rounded">Imprimir</button>
+                    {c.status !== "pago" && (
+                      <>
+                        <button onClick={() => onEdit(c)} className="text-xs px-2 py-1 bg-blue-600/40 hover:bg-blue-600/60 rounded">Editar</button>
+                        <button onClick={() => onFechar(c)} className="text-xs px-2 py-1 bg-emerald-600/40 hover:bg-emerald-600/60 rounded">Fechar</button>
+                        <button onClick={() => onDelete(c)} className="text-xs px-2 py-1 bg-red-600/30 hover:bg-red-600/50 rounded">Excluir</button>
+                      </>
+                    )}
+                    {c.status === "pago" && (
+                      <button onClick={() => onReabrir(c)} className="text-xs px-2 py-1 bg-amber-600/30 hover:bg-amber-600/50 rounded">Reabrir</button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── Form de Vale ───────────────────────────────────────────────────────────
+function ValeForm({ initial, employees, onSave, onClose }) {
+  const [form, setForm] = useState(() => initial || {
+    employeeId: employees[0]?.id || "",
+    data: new Date().toISOString().split("T")[0],
+    valor: "",
+    motivo: "",
+    status: "pendente",
+  });
+  const submit = () => {
+    if (!form.employeeId) return alert("Selecione um funcionário");
+    if (!form.data) return alert("Informe a data");
+    if (!Number(form.valor) || Number(form.valor) <= 0) return alert("Valor deve ser maior que zero");
+    onSave(form);
+  };
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="bg-slate-800 rounded-lg max-w-md w-full p-6">
+        <h2 className="text-xl font-bold text-white mb-4">{initial ? "Editar Vale" : "Novo Vale"}</h2>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Funcionário</label>
+            <select value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
+              className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm">
+              <option value="">— selecione —</option>
+              {employees.map((e) => <option key={e.id} value={e.id}>{e.nome}</option>)}
+            </select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm text-slate-300 mb-1">Data</label>
+              <input type="date" value={form.data} onChange={(e) => setForm({ ...form, data: e.target.value })}
+                className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm" />
+            </div>
+            <div>
+              <label className="block text-sm text-slate-300 mb-1">Valor (R$)</label>
+              <input type="number" step="0.01" min="0" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })}
+                className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Motivo</label>
+            <input value={form.motivo} onChange={(e) => setForm({ ...form, motivo: e.target.value })}
+              placeholder="Adiantamento, emergência médica, etc"
+              className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Status</label>
+            <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}
+              className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm">
+              <option value="pendente">Pendente (será descontado no próximo contracheque)</option>
+              <option value="descontado">Descontado</option>
+            </select>
+          </div>
+        </div>
+        <div className="flex justify-end gap-2 mt-6">
+          <button onClick={onClose} className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded text-sm">Cancelar</button>
+          <button onClick={submit} className="px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded text-sm font-medium">Salvar</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Form de Contracheque (com cálculo automático) ──────────────────────────
+function ContrachequeForm({ initial, employees, vales, onSave, onClose }) {
+  const [form, setForm] = useState(() => {
+    if (initial) return { ...initial, adicionais: initial.adicionais || [], descontos: initial.descontos || [] };
+    return {
+      employeeId: employees[0]?.id || "",
+      mesRef: new Date().toISOString().slice(0, 7), // YYYY-MM
+      salarioBase: "",
+      adicionais: [],
+      descontos: [],
+      dependentes: 0,
+    };
+  });
+
+  const emp = employees.find((e) => e.id === form.employeeId);
+
+  // Quando muda funcionário, sugere salário base do cadastro (se houver) e
+  // carrega vales pendentes daquele funcionário como descontos automáticos.
+  useEffect(() => {
+    if (!emp || initial) return;
+    const valesPendentes = (vales || []).filter((v) => v.employeeId === emp.id && v.status === "pendente");
+    setForm((prev) => ({
+      ...prev,
+      salarioBase: prev.salarioBase || emp.salarioBase || "",
+      descontos: valesPendentes.length > 0
+        ? valesPendentes.map((v) => ({
+            tipo: "vale",
+            descricao: `Vale ${new Date(v.data + "T00:00:00").toLocaleDateString("pt-BR")} — ${v.motivo || "adiantamento"}`,
+            valor: Number(v.valor) || 0,
+            valeId: v.id,
+          }))
+        : prev.descontos,
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.employeeId]);
+
+  const addAdicional = () => setForm({ ...form, adicionais: [...form.adicionais, { descricao: "", valor: "" }] });
+  const updAdicional = (i, key, val) => {
+    const next = [...form.adicionais];
+    next[i] = { ...next[i], [key]: val };
+    setForm({ ...form, adicionais: next });
+  };
+  const rmAdicional = (i) => setForm({ ...form, adicionais: form.adicionais.filter((_, idx) => idx !== i) });
+
+  const addDesc = () => setForm({ ...form, descontos: [...form.descontos, { tipo: "outro", descricao: "", valor: "" }] });
+  const updDesc = (i, key, val) => {
+    const next = [...form.descontos];
+    next[i] = { ...next[i], [key]: val };
+    setForm({ ...form, descontos: next });
+  };
+  const rmDesc = (i) => setForm({ ...form, descontos: form.descontos.filter((_, idx) => idx !== i) });
+
+  // Cálculos em tempo real
+  const totalAdic = (form.adicionais || []).reduce((s, a) => s + (Number(a.valor) || 0), 0);
+  const totalProventos = (Number(form.salarioBase) || 0) + totalAdic;
+  const inss = calcINSS(totalProventos);
+  const irrf = calcIRRF(totalProventos, inss, form.dependentes);
+  const totalOutrosDesc = (form.descontos || []).reduce((s, d) => s + (Number(d.valor) || 0), 0);
+  const totalDescontos = inss + irrf + totalOutrosDesc;
+  const liquido = totalProventos - totalDescontos;
+  const fgts = calcFGTS(totalProventos);
+
+  const submit = () => {
+    if (!form.employeeId) return alert("Selecione um funcionário");
+    if (!form.mesRef) return alert("Informe o mês de referência");
+    if (!Number(form.salarioBase) || Number(form.salarioBase) <= 0) return alert("Informe o salário base");
+    onSave({
+      ...form,
+      inss, irrf, totalProventos, totalDescontos, liquido,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+      <div className="bg-slate-800 rounded-lg max-w-3xl w-full max-h-[90vh] overflow-y-auto p-6">
+        <h2 className="text-xl font-bold text-white mb-4">{initial ? "Editar Contracheque" : "Gerar Contracheque"}</h2>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Funcionário</label>
+            <select value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })}
+              className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm">
+              <option value="">— selecione —</option>
+              {employees.map((e) => <option key={e.id} value={e.id}>{e.nome}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Competência (mês/ano)</label>
+            <input type="month" value={form.mesRef} onChange={(e) => setForm({ ...form, mesRef: e.target.value })}
+              className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Salário base (R$)</label>
+            <input type="number" step="0.01" min="0" value={form.salarioBase} onChange={(e) => setForm({ ...form, salarioBase: e.target.value })}
+              className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm" />
+          </div>
+          <div>
+            <label className="block text-sm text-slate-300 mb-1">Dependentes (para IRRF)</label>
+            <input type="number" min="0" value={form.dependentes} onChange={(e) => setForm({ ...form, dependentes: Number(e.target.value) || 0 })}
+              className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm" />
+          </div>
+        </div>
+
+        {/* Adicionais */}
+        <div className="mb-4">
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-sm font-semibold text-emerald-400">Adicionais / Proventos</h3>
+            <button onClick={addAdicional} className="text-xs px-2 py-1 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 rounded">+ Adicionar</button>
+          </div>
+          {form.adicionais.map((a, i) => (
+            <div key={i} className="flex gap-2 mb-1">
+              <input value={a.descricao} onChange={(e) => updAdicional(i, "descricao", e.target.value)}
+                placeholder="Ex: Horas extras, comissão"
+                className="flex-1 px-2 py-1 bg-slate-700 text-white rounded text-sm" />
+              <input type="number" step="0.01" min="0" value={a.valor} onChange={(e) => updAdicional(i, "valor", e.target.value)}
+                placeholder="R$"
+                className="w-28 px-2 py-1 bg-slate-700 text-white rounded text-sm" />
+              <button onClick={() => rmAdicional(i)} className="px-2 text-red-400 hover:text-red-300">×</button>
+            </div>
+          ))}
+          {form.adicionais.length === 0 && <div className="text-xs text-slate-500">Nenhum adicional</div>}
+        </div>
+
+        {/* Descontos */}
+        <div className="mb-4">
+          <div className="flex justify-between items-center mb-2">
+            <h3 className="text-sm font-semibold text-red-400">Descontos adicionais</h3>
+            <button onClick={addDesc} className="text-xs px-2 py-1 bg-red-600/30 hover:bg-red-600/50 text-red-300 rounded">+ Adicionar</button>
+          </div>
+          <p className="text-xs text-slate-500 mb-2">INSS e IRRF são calculados automaticamente. Vales pendentes do funcionário aparecem aqui.</p>
+          {form.descontos.map((d, i) => (
+            <div key={i} className="flex gap-2 mb-1 items-center">
+              <input value={d.descricao} onChange={(e) => updDesc(i, "descricao", e.target.value)}
+                placeholder="Descrição"
+                className="flex-1 px-2 py-1 bg-slate-700 text-white rounded text-sm" />
+              <input type="number" step="0.01" min="0" value={d.valor} onChange={(e) => updDesc(i, "valor", e.target.value)}
+                placeholder="R$"
+                className="w-28 px-2 py-1 bg-slate-700 text-white rounded text-sm" />
+              {d.tipo === "vale" && <span className="text-xs text-amber-400 px-1">Vale</span>}
+              <button onClick={() => rmDesc(i)} className="px-2 text-red-400 hover:text-red-300">×</button>
+            </div>
+          ))}
+          {form.descontos.length === 0 && <div className="text-xs text-slate-500">Nenhum desconto adicional</div>}
+        </div>
+
+        {/* Resumo do cálculo */}
+        <div className="bg-slate-900/60 rounded p-3 text-sm space-y-1 mb-4">
+          <div className="flex justify-between"><span className="text-slate-400">Total proventos:</span><span className="text-emerald-400 font-mono">{_fmtBRL(totalProventos)}</span></div>
+          <div className="flex justify-between"><span className="text-slate-400">INSS:</span><span className="text-red-400 font-mono">- {_fmtBRL(inss)}</span></div>
+          <div className="flex justify-between"><span className="text-slate-400">IRRF:</span><span className="text-red-400 font-mono">- {_fmtBRL(irrf)}</span></div>
+          <div className="flex justify-between"><span className="text-slate-400">Outros descontos:</span><span className="text-red-400 font-mono">- {_fmtBRL(totalOutrosDesc)}</span></div>
+          <div className="border-t border-slate-700 pt-1 mt-1 flex justify-between"><span className="text-white font-semibold">Líquido a receber:</span><span className="text-emerald-300 font-mono font-bold text-base">{_fmtBRL(liquido)}</span></div>
+          <div className="flex justify-between text-xs text-slate-500"><span>FGTS depositado pela empresa (8%):</span><span className="font-mono">{_fmtBRL(fgts)}</span></div>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <button onClick={onClose} className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded text-sm">Cancelar</button>
+          <button onClick={submit} className="px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded text-sm font-medium">Salvar Rascunho</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── IA / ATENDIMENTO WhatsApp ──────────────────────────────────────────────
 // Módulo que exibe as conversas geradas pelo agente N8N+Evolution e permite
 // ao admin/atendente acompanhar em tempo real, intervir manualmente, encerrar
@@ -12198,6 +12969,7 @@ export default function App() {
       { id: "financeiro", label: "Financeiro", iconName: "financeiro", module: "financeiro" },
       { id: "cadastro", label: "Cadastros", iconName: "cadastros", module: "clientes" },
       { id: "ia", label: "IA / Atendimento", iconName: "agenda", module: "ia" },
+      { id: "folha", label: "Folha de Pagamento", iconName: "financeiro", module: "folha" },
       { id: "config", label: "Configurações", iconName: "config", module: "config" },
     ];
 
@@ -12746,6 +13518,9 @@ export default function App() {
             )}
             {activeModule === "ia" && (
               <IAAtendimentoModule user={user} addToast={addToast} />
+            )}
+            {activeModule === "folha" && (
+              <FolhaModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} />
             )}
             {activeModule === "config" && (
               <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} theme={theme} setTheme={setTheme} />
