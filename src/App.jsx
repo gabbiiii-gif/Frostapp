@@ -183,6 +183,22 @@ const PAYMENT_METHODS = [
   "Transferência",
 ];
 
+// ─── CARGOS de funcionários ──────────────────────────────────────────────────
+// Lista canônica usada no cadastro e nos relatórios. Ao adicionar cargo novo,
+// considere também atualizar a derivação de `tipo` em saveEmployee (técnico/
+// gerente/administrativo controla quais módulos o user vê).
+const CARGOS_FUNCIONARIO = [
+  "Técnico em Refrigeração",
+  "Técnico de Central",
+  "Ajudante",
+  "Motorista",
+  "Administrativo",
+  "Gerente",
+];
+// Cargos que são considerados "técnicos" para gating de UI/relatórios
+const CARGOS_TECNICOS = ["Técnico em Refrigeração", "Técnico de Central", "Técnico", "Ajudante"];
+const CARGOS_GERENCIA = ["Gerente"];
+
 // ─── TIPOS DE EQUIPAMENTO — OS ──────────────────────────────────────────────
 // Cada tipo define quais campos técnicos aparecem no formulário de OS.
 // Usado para refrigeração comercial, climatização e linha branca.
@@ -7786,10 +7802,13 @@ function CadastroModule({ user, addToast, reloadData }) {
   };
 
   // Funcionário agora tem endereço completo (rua, número, bairro, cidade, estado, CEP)
+  // descontaINSS/IRRF e dependentes alimentam o cálculo automático do contracheque
+  // (módulo Folha de Pagamento). MEI/autônomo costuma vir com ambos false.
   const emptyEmployeeForm = {
     nome: "", cpf: "", rg: "", telefone: "", email: "",
-    cargo: "Técnico", salario: "", dataAdmissao: toISODate(new Date()), status: "ativo",
+    cargo: "Técnico em Refrigeração", salario: "", dataAdmissao: toISODate(new Date()), status: "ativo",
     rua: "", numero: "", bairro: "", cidade: "", estado: "", cep: "",
+    descontaINSS: true, descontaIRRF: true, dependentes: 0,
   };
 
   const [clientForm, setClientForm] = useState(emptyClientForm);
@@ -8021,7 +8040,7 @@ function CadastroModule({ user, addToast, reloadData }) {
       rg: row.rg || "",
       telefone: row.telefone || "",
       email: row.email || "",
-      cargo: row.cargo || "Técnico",
+      cargo: row.cargo || "Técnico em Refrigeração",
       salario: row.salario || "",
       dataAdmissao: row.dataAdmissao || toISODate(new Date()),
       status: row.status || "ativo",
@@ -8031,6 +8050,10 @@ function CadastroModule({ user, addToast, reloadData }) {
       cidade: row.endereco?.cidade || "",
       estado: row.endereco?.estado || "",
       cep: row.endereco?.cep || "",
+      // Flags fiscais — preserva default true em registros antigos (sem o campo)
+      descontaINSS: row.descontaINSS !== false,
+      descontaIRRF: row.descontaIRRF !== false,
+      dependentes: row.dependentes || 0,
     });
     setModalOpen(true);
   }, []);
@@ -8056,8 +8079,18 @@ function CadastroModule({ user, addToast, reloadData }) {
       telefone: employeeForm.telefone,
       email: employeeForm.email.trim(),
       cargo: employeeForm.cargo,
-      tipo: employeeForm.cargo === "Técnico" ? "tecnico" : employeeForm.cargo === "Gerente" ? "gerente" : "administrativo",
+      // Deriva tipo a partir do cargo — controla quais módulos o user vê e
+      // se entra no relatório de produtividade do técnico.
+      tipo: CARGOS_TECNICOS.includes(employeeForm.cargo) ? "tecnico"
+          : CARGOS_GERENCIA.includes(employeeForm.cargo) ? "gerente"
+          : "administrativo",
       salario: parseFloat(String(employeeForm.salario).replace(",", ".")) || 0,
+      // Flags fiscais — controlam se o contracheque desconta INSS/IRRF deste
+      // funcionário. CLT desconta os dois (true/true). MEI/autônomo/PJ pode
+      // ter ambos false. Default true pra manter comportamento de folha CLT.
+      descontaINSS: employeeForm.descontaINSS !== false,
+      descontaIRRF: employeeForm.descontaIRRF !== false,
+      dependentes: Number(employeeForm.dependentes) || 0,
       dataAdmissao: employeeForm.dataAdmissao,
       status: employeeForm.status,
       especialidades: [],
@@ -9100,9 +9133,9 @@ function CadastroModule({ user, addToast, reloadData }) {
                   onChange={(e) => setEmployeeForm({ ...employeeForm, cargo: e.target.value })}
                   className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
                 >
-                  <option value="Técnico">Técnico</option>
-                  <option value="Administrativo">Administrativo</option>
-                  <option value="Gerente">Gerente</option>
+                  {CARGOS_FUNCIONARIO.map((c) => (
+                    <option key={c} value={c}>{c}</option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -9139,6 +9172,32 @@ function CadastroModule({ user, addToast, reloadData }) {
                   <option value="inativo">Inativo</option>
                 </select>
               </div>
+            </div>
+
+            {/* Configuração fiscal — controla o cálculo automático do contracheque */}
+            <div className="border-t border-gray-700 pt-4">
+              <h4 className="text-sm font-medium text-gray-300 mb-3">Configuração Fiscal (Folha de Pagamento)</h4>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <label className="flex items-center gap-2 bg-gray-700/50 rounded-lg px-3 py-2.5 cursor-pointer hover:bg-gray-700">
+                  <input type="checkbox" checked={employeeForm.descontaINSS !== false}
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, descontaINSS: e.target.checked })}
+                    className="w-4 h-4 accent-blue-500" />
+                  <span className="text-sm text-white">Descontar INSS</span>
+                </label>
+                <label className="flex items-center gap-2 bg-gray-700/50 rounded-lg px-3 py-2.5 cursor-pointer hover:bg-gray-700">
+                  <input type="checkbox" checked={employeeForm.descontaIRRF !== false}
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, descontaIRRF: e.target.checked })}
+                    className="w-4 h-4 accent-blue-500" />
+                  <span className="text-sm text-white">Descontar IRRF</span>
+                </label>
+                <div>
+                  <label className="block text-sm text-gray-300 mb-1">Dependentes (IRRF)</label>
+                  <input type="number" min="0" value={employeeForm.dependentes || 0}
+                    onChange={(e) => setEmployeeForm({ ...employeeForm, dependentes: Number(e.target.value) || 0 })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-blue-500" />
+                </div>
+              </div>
+              <p className="text-xs text-gray-400 mt-2">Desmarque INSS/IRRF para autônomo, MEI ou PJ. CLT mantém ambos marcados.</p>
             </div>
 
             {/* Endereço residencial do funcionário — mesmo padrão usado no cadastro de cliente */}
@@ -11348,6 +11407,10 @@ function FolhaModule({ user, addToast, employees, reloadData }) {
       adicionais: (data.adicionais || []).filter((a) => Number(a.valor) > 0),
       descontos: (data.descontos || []).filter((d) => Number(d.valor) > 0),
       dependentes: Number(data.dependentes) || 0,
+      // Flags fiscais — salvas no contracheque pra reproduzir o cálculo histórico
+      // mesmo se o funcionário for editado depois (auditoria preserva contexto).
+      descontaINSS: data.descontaINSS !== false,
+      descontaIRRF: data.descontaIRRF !== false,
       inss: Number(data.inss) || 0,
       irrf: Number(data.irrf) || 0,
       totalProventos: Number(data.totalProventos) || 0,
@@ -11668,7 +11731,13 @@ function ValeForm({ initial, employees, onSave, onClose }) {
 // ─── Form de Contracheque (com cálculo automático) ──────────────────────────
 function ContrachequeForm({ initial, employees, vales, onSave, onClose }) {
   const [form, setForm] = useState(() => {
-    if (initial) return { ...initial, adicionais: initial.adicionais || [], descontos: initial.descontos || [] };
+    if (initial) return {
+      ...initial,
+      adicionais: initial.adicionais || [],
+      descontos: initial.descontos || [],
+      descontaINSS: initial.descontaINSS !== false,
+      descontaIRRF: initial.descontaIRRF !== false,
+    };
     return {
       employeeId: employees[0]?.id || "",
       mesRef: new Date().toISOString().slice(0, 7), // YYYY-MM
@@ -11676,19 +11745,25 @@ function ContrachequeForm({ initial, employees, vales, onSave, onClose }) {
       adicionais: [],
       descontos: [],
       dependentes: 0,
+      // Defaults: descontar INSS e IRRF (CLT). Para MEI/autônomo, desligar.
+      descontaINSS: true,
+      descontaIRRF: true,
     };
   });
 
   const emp = employees.find((e) => e.id === form.employeeId);
 
-  // Quando muda funcionário, sugere salário base do cadastro (se houver) e
-  // carrega vales pendentes daquele funcionário como descontos automáticos.
+  // Quando muda funcionário, sugere salário base, dependentes e flags fiscais
+  // a partir do cadastro do funcionário. Vales pendentes viram desconto automático.
   useEffect(() => {
     if (!emp || initial) return;
     const valesPendentes = (vales || []).filter((v) => v.employeeId === emp.id && v.status === "pendente");
     setForm((prev) => ({
       ...prev,
-      salarioBase: prev.salarioBase || emp.salarioBase || "",
+      salarioBase: prev.salarioBase || emp.salario || emp.salarioBase || "",
+      dependentes: prev.dependentes || emp.dependentes || 0,
+      descontaINSS: emp.descontaINSS !== false,
+      descontaIRRF: emp.descontaIRRF !== false,
       descontos: valesPendentes.length > 0
         ? valesPendentes.map((v) => ({
             tipo: "vale",
@@ -11717,11 +11792,11 @@ function ContrachequeForm({ initial, employees, vales, onSave, onClose }) {
   };
   const rmDesc = (i) => setForm({ ...form, descontos: form.descontos.filter((_, idx) => idx !== i) });
 
-  // Cálculos em tempo real
+  // Cálculos em tempo real — INSS/IRRF zerados se flag desligado (autônomo/MEI/PJ)
   const totalAdic = (form.adicionais || []).reduce((s, a) => s + (Number(a.valor) || 0), 0);
   const totalProventos = (Number(form.salarioBase) || 0) + totalAdic;
-  const inss = calcINSS(totalProventos);
-  const irrf = calcIRRF(totalProventos, inss, form.dependentes);
+  const inss = form.descontaINSS ? calcINSS(totalProventos) : 0;
+  const irrf = form.descontaIRRF ? calcIRRF(totalProventos, inss, form.dependentes) : 0;
   const totalOutrosDesc = (form.descontos || []).reduce((s, d) => s + (Number(d.valor) || 0), 0);
   const totalDescontos = inss + irrf + totalOutrosDesc;
   const liquido = totalProventos - totalDescontos;
@@ -11734,6 +11809,8 @@ function ContrachequeForm({ initial, employees, vales, onSave, onClose }) {
     onSave({
       ...form,
       inss, irrf, totalProventos, totalDescontos, liquido,
+      descontaINSS: !!form.descontaINSS,
+      descontaIRRF: !!form.descontaIRRF,
     });
   };
 
@@ -11766,6 +11843,29 @@ function ContrachequeForm({ initial, employees, vales, onSave, onClose }) {
             <input type="number" min="0" value={form.dependentes} onChange={(e) => setForm({ ...form, dependentes: Number(e.target.value) || 0 })}
               className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm" />
           </div>
+        </div>
+
+        {/* Toggles fiscais — puxam default do funcionário, mas podem ser sobrescritos */}
+        <div className="bg-slate-900/40 rounded p-3 mb-4">
+          <div className="text-xs uppercase text-slate-400 mb-2">Descontos previdenciários / fiscais</div>
+          <div className="flex flex-wrap gap-4">
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={!!form.descontaINSS}
+                onChange={(e) => setForm({ ...form, descontaINSS: e.target.checked })}
+                className="w-4 h-4 accent-red-500" />
+              <span className="text-sm text-white">Descontar INSS {form.descontaINSS && totalProventos > 0 ? <span className="text-red-400 font-mono ml-1">(-{_fmtBRL(inss)})</span> : null}</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={!!form.descontaIRRF}
+                onChange={(e) => setForm({ ...form, descontaIRRF: e.target.checked })}
+                className="w-4 h-4 accent-red-500" />
+              <span className="text-sm text-white">Descontar IRRF {form.descontaIRRF && totalProventos > 0 ? <span className="text-red-400 font-mono ml-1">(-{_fmtBRL(irrf)})</span> : null}</span>
+            </label>
+          </div>
+          <p className="text-xs text-slate-500 mt-2">
+            Default vem do cadastro do funcionário ({emp?.nome ? `"${emp.nome}"` : "selecione um"}).
+            Desmarque para autônomo, MEI ou PJ.
+          </p>
         </div>
 
         {/* Adicionais */}
