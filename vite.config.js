@@ -27,9 +27,15 @@ export default defineConfig({
     tailwindcss(),
     cspPlugin(),
 
-    // ─── PWA: transforma o app em instalável no Android/iOS ───────────────────
+    // ─── PWA: transforma o app em instalável no Android/iOS + Push API ──────
+    // Strategy: injectManifest — usa nosso src/sw.js custom (que tem o
+    // handler de push notifications). Antes era generateSW; mudou pra
+    // permitir Web Push (Fase 5 do sistema de notificações).
     VitePWA({
       registerType: 'autoUpdate',
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
       includeAssets: ['icon-192.png', 'icon-512.png'],
       manifest: {
         name: 'FrostERP',
@@ -55,17 +61,16 @@ export default defineConfig({
           },
         ],
       },
-      workbox: {
+      injectManifest: {
         // Cacheia todos os assets do build para funcionamento offline
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
-        runtimeCaching: [
-          {
-            // Cache de fontes do Google
-            urlPattern: /^https:\/\/fonts\.(googleapis|gstatic)\.com/,
-            handler: 'CacheFirst',
-            options: { cacheName: 'google-fonts', expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 } },
-          },
-        ],
+        // Aumenta limite — o App.jsx bundled passa de 2MB em dev
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+      },
+      devOptions: {
+        // Permite testar service worker em dev mode também
+        enabled: true,
+        type: 'module',
       },
     }),
   ],

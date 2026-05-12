@@ -11,7 +11,7 @@ import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
-import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage } from "./platform.js";
+import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
 
 // ─── ErrorBoundary por módulo ────────────────────────────────────────────────
 // Sem isto, qualquer crash em um módulo (Recharts com dado malformado, OS legada
@@ -13183,17 +13183,87 @@ export default function App() {
   }, [notificationsWithAI, addToast]);
 
   // Pede permissão de notificação ao logar (1x por sessão, lazy).
+  // Se concedida e estiver no browser (não APK), registra Push subscription
+  // → admin recebe push mesmo com browser fechado.
   useEffect(() => {
     if (!user) return;
     let cancelled = false;
     (async () => {
       const ok = await requestNotifPermission();
-      if (!cancelled && ok) {
-        console.log("[notif] permissão concedida");
+      if (cancelled || !ok) return;
+      console.log("[notif] permissão concedida");
+      // Web Push: só faz sentido fora do APK nativo (Capacitor já tem LocalNotif)
+      if (!isNative() && supabase) {
+        const member = getCurrentMember();
+        if (member?.company_id) {
+          const r = await subscribeWebPush(supabase, member.company_id);
+          if (r.ok) console.log("[push] subscribed");
+          else console.warn("[push] subscribe falhou:", r.error);
+        }
       }
     })();
     return () => { cancelled = true; };
   }, [user]);
+
+  // ─── Server push: dispara via Edge Function quando eventos importantes ────
+  // Ações que envolvem UM usuário disparando → notificar OUTROS (que podem
+  // estar com browser fechado). O server push é o canal que entrega nesse caso.
+  //
+  // Eventos cobertos automaticamente (via change detection):
+  //  - aiPendingCount > 0 (nova conversa WhatsApp pedindo atendimento humano)
+  //  - novas OS aguardando_finalizacao (técnico finalizou → admin precisa revisar)
+  //
+  // Dedup: usa erp:pushSent (set de event_ids) pra evitar reenvio.
+  const [pushSentLog] = useState(() => new Set(DB.get("erp:pushSent") || []));
+  const lastPushRef = useRef(0);
+  useEffect(() => {
+    if (!user || !supabase) return;
+    // Throttle: no máximo 1 burst de pushes a cada 30s (evita spam por re-render)
+    if (Date.now() - lastPushRef.current < 30000) return;
+    const member = getCurrentMember();
+    if (!member?.company_id) return;
+    const eventos = [];
+    // OS finalizada por técnico aguardando admin
+    (data.services || []).forEach((os) => {
+      if (os.status === "aguardando_finalizacao") {
+        const key = `os-aprovar-${os.id}-${os.tecnico?.saida || ""}`;
+        if (!pushSentLog.has(key)) eventos.push({
+          key,
+          title: "✋ OS aguardando aprovação",
+          body: `${os.numero} — ${os.clienteNome} — finalizada por ${os.tecnicoNome || "técnico"}`,
+          url: "/#processos",
+          target_roles: ["admin", "gerente"],
+        });
+      }
+    });
+    // Nova conversa WhatsApp pendente
+    if (aiPendingCount > 0) {
+      const key = `ai-pending-${aiPendingCount}`;
+      if (!pushSentLog.has(key)) eventos.push({
+        key,
+        title: "🤖 WhatsApp aguardando humano",
+        body: `${aiPendingCount} conversa${aiPendingCount > 1 ? "s" : ""} pedindo atendimento`,
+        url: "/#ia",
+        target_roles: ["admin", "gerente"],
+      });
+    }
+    if (eventos.length === 0) return;
+    lastPushRef.current = Date.now();
+    (async () => {
+      for (const e of eventos) {
+        const { key, ...payload } = e;
+        const r = await sendServerPush(supabase, payload);
+        if (r.ok) {
+          pushSentLog.add(key);
+          console.log(`[push] enviado: ${key} (${r.sent || 0} subs)`);
+        } else {
+          console.warn(`[push] falhou ${key}:`, r.error);
+        }
+      }
+      DB.set("erp:pushSent", Array.from(pushSentLog));
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data.services, aiPendingCount, user]);
 
   // Click na Notification do browser → navega pro módulo correspondente.
   useEffect(() => {

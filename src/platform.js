@@ -351,6 +351,101 @@ function hashCode(str) {
   return h;
 }
 
+// ─── WEB PUSH — subscription + envio via Edge Function ──────────────────────
+// Chave VAPID pública (deve casar com a usada pela Edge Function send-push).
+// Gerada com crypto.subtle ECDSA P-256, mantida fixa pra não invalidar
+// subscriptions existentes. Privada vive APENAS no servidor.
+export const VAPID_PUBLIC_KEY = 'BAvUSfK0596soYUbI3PVnsnXfn4N0LASEX_RvTkBhmiktDBb3WPq4u7W4PBP9zzjYjpGKMF5D1qliD3ka6rMnu4';
+
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+function bufToBase64(buffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+}
+
+// Registra subscription Push e persiste no Supabase. Idempotente: se já há
+// subscription pra esse browser, retorna a existente.
+// `supabase` é o cliente Supabase. `companyId` é a empresa do user logado.
+export async function subscribeWebPush(supabase, companyId) {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+    return { ok: false, error: 'unsupported' };
+  }
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+    return { ok: false, error: 'no_permission' };
+  }
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+    // Extrai keys p256dh + auth no formato base64url-padded
+    const p256dh = bufToBase64(sub.getKey('p256dh'));
+    const auth = bufToBase64(sub.getKey('auth'));
+    if (supabase && companyId) {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        await supabase.from('push_subscriptions').upsert({
+          user_id: user.id,
+          company_id: companyId,
+          endpoint: sub.endpoint,
+          p256dh,
+          auth,
+          user_agent: navigator.userAgent,
+          updated_at: new Date().toISOString(),
+        }, { onConflict: 'user_id,endpoint' });
+      }
+    }
+    return { ok: true, subscription: sub };
+  } catch (e) {
+    console.warn('[push] subscribe falhou:', e?.message || e);
+    return { ok: false, error: e?.message || String(e) };
+  }
+}
+
+export async function unsubscribeWebPush(supabase) {
+  if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return false;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.getSubscription();
+    if (!sub) return true;
+    const endpoint = sub.endpoint;
+    await sub.unsubscribe();
+    if (supabase) {
+      await supabase.from('push_subscriptions').delete().eq('endpoint', endpoint);
+    }
+    return true;
+  } catch { return false; }
+}
+
+// Dispara push pra todos da empresa (admin/gerente) via Edge Function send-push.
+// `target_roles` filtra destinatários (ex: ['admin','gerente']).
+// Silent fail se Edge Function não estiver disponível.
+export async function sendServerPush(supabase, { title, body, url, target_roles, target_user_ids }) {
+  if (!supabase) return { ok: false, error: 'no_supabase' };
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) return { ok: false, error: 'no_session' };
+    const { data, error } = await supabase.functions.invoke('send-push', {
+      body: { title, body, url, target_roles, target_user_ids },
+    });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, ...data };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
+
 // ─── WHATSAPP — disparo via Evolution API (lembrete cliente) ──────────────────
 // Reaproveita config do agente IA (ai_agent_config no Supabase).
 // Não bloqueia se Evolution não estiver configurada (silent fail).
