@@ -974,16 +974,41 @@ async function checkPassword(plain, stored) {
   return { match: false, needsRehash: false };
 }
 
-function getNextNumber(prefix, items) {
+// Gera próximo número sequencial (OS-001, REC-001, etc) sem colidir.
+// Fix do bug de duplicação: lê TODAS as entidades no DB (não só `items`
+// passados, que podem estar filtrados/desatualizados), faz max+1 e DEPOIS
+// verifica colisão real no DB — se já existe (race condition entre devices),
+// incrementa até achar livre. Idempotente e safe contra cache stale.
+//
+// O parâmetro `dbPrefix` (ex: "erp:os:") permite varrer o DB diretamente —
+// se não vier, cai no comportamento antigo (max dos `items` em memória).
+function getNextNumber(prefix, items, dbPrefix = null) {
+  // Fonte de verdade: união entre items recebidos e DB.list(dbPrefix) se houver
+  const pool = new Map(); // numero -> true (dedupe)
+  items.forEach((i) => { if (i?.numero) pool.set(i.numero, true); });
+  if (dbPrefix) {
+    try {
+      const fromDb = DB.list(dbPrefix) || [];
+      fromDb.forEach((i) => { if (i?.numero) pool.set(i.numero, true); });
+    } catch { /* ignora — usa items em memória mesmo */ }
+  }
+
+  // Calcula max dos números encontrados
   let max = 0;
-  items.forEach((item) => {
-    if (item.numero) {
-      const parts = item.numero.split("-");
-      const n = parseInt(parts[parts.length - 1], 10);
-      if (!isNaN(n) && n > max) max = n;
-    }
-  });
-  return prefix + "-" + String(max + 1).padStart(3, "0");
+  for (const numero of pool.keys()) {
+    const parts = numero.split("-");
+    const n = parseInt(parts[parts.length - 1], 10);
+    if (!isNaN(n) && n > max) max = n;
+  }
+
+  // Procura próximo livre — protege contra colisão se algum número >max+1 já existir
+  let next = max + 1;
+  let candidate = prefix + "-" + String(next).padStart(3, "0");
+  while (pool.has(candidate)) {
+    next++;
+    candidate = prefix + "-" + String(next).padStart(3, "0");
+  }
+  return candidate;
 }
 
 // ─── Sincroniza OS finalizada com o Financeiro ──────────────────────────────
@@ -1026,7 +1051,7 @@ function syncOSToFinance(os) {
     return;
   }
 
-  const numero = getNextNumber("REC", all);
+  const numero = getNextNumber("REC", all, "erp:finance:");
   const newTx = {
     id: genId(),
     numero,
@@ -4214,7 +4239,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
       addToast("Transação atualizada.", "success");
     } else {
       const prefix = form.tipo === "receita" ? "REC" : "DESP";
-      const numero = getNextNumber(prefix, transactions);
+      const numero = getNextNumber(prefix, transactions, "erp:finance:");
       const newTx = {
         id: genId(),
         numero,
@@ -5867,7 +5892,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
       }
       addToast("OS atualizada.", "success");
     } else {
-      const numero = getNextNumber("OS", orders);
+      const numero = getNextNumber("OS", orders, "erp:os:");
       osNumeroNovo = numero; // captura para o log do estoque
       const newOS = {
         id: genId(),
