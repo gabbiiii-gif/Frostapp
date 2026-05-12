@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, listMastersRemote, upsertMasterRemote, deleteMasterRemote } from "./supabase.js";
+import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, listMastersRemote, upsertMasterRemote, deleteMasterRemote } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -142,9 +142,9 @@ const STATUS_MAP = {
 // Matriz de permissões por role — inclui módulo financeiro
 const ROLE_PERMISSIONS = {
   admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config"],
+  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia"],
   tecnico: ["dashboard", "os", "agenda"],
-  atendente: ["dashboard", "clientes", "os", "agenda"],
+  atendente: ["dashboard", "clientes", "os", "agenda", "ia"],
 };
 
 // ─── CATEGORIAS E FORMAS DE PAGAMENTO DO FINANCEIRO ─────────────────────────
@@ -1035,6 +1035,7 @@ const ALL_MODULES = [
   { id: "processos", label: "Ordens de Serviço" },
   { id: "agenda", label: "Agenda" },
   { id: "cadastro", label: "Cadastros" },
+  { id: "ia", label: "IA / Atendimento" },
   { id: "config", label: "Configurações (admin)" },
 ];
 
@@ -11057,6 +11058,318 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
   );
 }
 
+// ─── IA / ATENDIMENTO WhatsApp ──────────────────────────────────────────────
+// Módulo que exibe as conversas geradas pelo agente N8N+Evolution e permite
+// ao admin/atendente acompanhar em tempo real, intervir manualmente, encerrar
+// a conversa e ver qual OS foi gerada. Lê das tabelas Supabase ai_conversations
+// e ai_messages (criadas via docs/ai-agent/01-supabase-schema.sql).
+//
+// Realtime: usa supabase.channel para escutar INSERT em ai_messages — não
+// precisa de polling. Fora do scope do kv_store/DB layer (são tabelas nativas).
+function IAAtendimentoModule({ user, addToast }) {
+  const [conversations, setConversations] = useState([]);
+  const [selectedId, setSelectedId] = useState(null);
+  const [messages, setMessages] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [draft, setDraft] = useState("");
+  const [sending, setSending] = useState(false);
+  const [config, setConfig] = useState(null);
+  const [showConfig, setShowConfig] = useState(false);
+  const member = getCurrentMember();
+  const companyId = member?.company_id;
+  const isAdmin = user?.role === "admin";
+
+  // Carrega lista de conversas da empresa, ordenadas por última mensagem
+  const loadConversations = useCallback(async () => {
+    if (!supabase || !companyId) { setLoading(false); return; }
+    const { data, error } = await supabase
+      .from("ai_conversations")
+      .select("*")
+      .eq("company_id", companyId)
+      .order("last_message_at", { ascending: false })
+      .limit(200);
+    if (error) { console.warn("Conversas:", error.message); addToast?.("Erro ao carregar conversas", "error"); }
+    setConversations(data || []);
+    setLoading(false);
+  }, [companyId, addToast]);
+
+  // Carrega histórico de mensagens da conversa selecionada
+  const loadMessages = useCallback(async (convId) => {
+    if (!supabase || !convId) { setMessages([]); return; }
+    const { data, error } = await supabase
+      .from("ai_messages")
+      .select("*")
+      .eq("conversation_id", convId)
+      .order("created_at", { ascending: true });
+    if (error) { console.warn("Mensagens:", error.message); return; }
+    setMessages(data || []);
+    // Zera unread_count ao abrir
+    await supabase.from("ai_conversations").update({ unread_count: 0 }).eq("id", convId);
+  }, []);
+
+  // Carrega config do agente (prompt, instância evolution, etc)
+  const loadConfig = useCallback(async () => {
+    if (!supabase || !companyId) return;
+    const { data } = await supabase.from("ai_agent_config").select("*").eq("company_id", companyId).maybeSingle();
+    setConfig(data || { company_id: companyId, enabled: false, evolution_instance: "", evolution_url: "", system_prompt: "", out_of_hours_message: "" });
+  }, [companyId]);
+
+  useEffect(() => { loadConversations(); loadConfig(); }, [loadConversations, loadConfig]);
+  useEffect(() => { if (selectedId) loadMessages(selectedId); }, [selectedId, loadMessages]);
+
+  // Realtime: escuta novas mensagens da empresa e atualiza UI ao vivo.
+  // Recarrega a lista (para reordenar) e, se a mensagem for da conversa aberta, anexa.
+  useEffect(() => {
+    if (!supabase || !companyId) return;
+    const ch = supabase
+      .channel(`ai_msgs_${companyId}`)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "ai_messages", filter: `company_id=eq.${companyId}` },
+        (payload) => {
+          const msg = payload.new;
+          loadConversations();
+          if (msg.conversation_id === selectedId) {
+            setMessages((prev) => [...prev, msg]);
+          }
+        })
+      .on("postgres_changes", { event: "*", schema: "public", table: "ai_conversations", filter: `company_id=eq.${companyId}` },
+        () => loadConversations())
+      .subscribe();
+    return () => { supabase.removeChannel(ch); };
+  }, [companyId, selectedId, loadConversations]);
+
+  const selected = conversations.find((c) => c.id === selectedId) || null;
+
+  // Envia mensagem manual (admin) via Evolution API + grava no banco
+  const sendManual = async () => {
+    if (!draft.trim() || !selected || !config?.evolution_url || !config?.evolution_instance) {
+      addToast?.("Configure a Evolution API antes de enviar", "warning");
+      return;
+    }
+    setSending(true);
+    try {
+      // Envia pro WhatsApp
+      const resp = await fetch(`${config.evolution_url.replace(/\/$/, "")}/message/sendText/${config.evolution_instance}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: config.metadata?.evolution_apikey || "" },
+        body: JSON.stringify({ number: selected.customer_phone, text: draft }),
+      });
+      if (!resp.ok) throw new Error("Falha Evolution API");
+      // Grava no histórico como admin
+      await supabase.from("ai_messages").insert({
+        conversation_id: selected.id,
+        company_id: companyId,
+        role: "admin",
+        content: draft,
+        metadata: { sent_by: user?.nome || user?.email },
+      });
+      setDraft("");
+    } catch (err) {
+      addToast?.(`Erro ao enviar: ${err.message}`, "error");
+    } finally {
+      setSending(false);
+    }
+  };
+
+  // Encerra conversa (status=closed)
+  const closeConversation = async () => {
+    if (!selected) return;
+    if (!window.confirm("Encerrar esta conversa? O cliente não receberá mais respostas da IA.")) return;
+    await supabase.from("ai_conversations").update({ status: "closed" }).eq("id", selected.id);
+    addToast?.("Conversa encerrada", "success");
+  };
+
+  // Devolve para a IA (status=active) — útil após admin intervir e quer reativar bot
+  const reactivateAI = async () => {
+    if (!selected) return;
+    await supabase.from("ai_conversations").update({ status: "active", ai_handoff_reason: null }).eq("id", selected.id);
+    addToast?.("IA reativada para essa conversa", "success");
+  };
+
+  // Salva config do agente
+  const saveConfig = async () => {
+    if (!supabase || !companyId) return;
+    const { error } = await supabase.from("ai_agent_config").upsert({ ...config, company_id: companyId, updated_at: new Date().toISOString() });
+    if (error) { addToast?.(`Erro: ${error.message}`, "error"); return; }
+    addToast?.("Configuração salva", "success");
+    setShowConfig(false);
+  };
+
+  if (!supabase) {
+    return (
+      <div className="p-6 text-center text-slate-400">
+        <p>Supabase não configurado. O módulo de IA exige conexão com o banco.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">IA / Atendimento WhatsApp</h1>
+          <p className="text-sm text-slate-400">Conversas geradas pelo agente automático</p>
+        </div>
+        {isAdmin && (
+          <button onClick={() => setShowConfig(true)} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm">
+            Configurações do Agente
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 min-h-0">
+        {/* Lista de conversas */}
+        <div className="bg-slate-800 rounded-lg overflow-hidden flex flex-col">
+          <div className="px-3 py-2 border-b border-slate-700 text-xs uppercase text-slate-400 font-semibold">
+            Conversas ({conversations.length})
+          </div>
+          <div className="overflow-y-auto flex-1">
+            {loading && <div className="p-4 text-slate-500 text-sm">Carregando...</div>}
+            {!loading && conversations.length === 0 && (
+              <div className="p-4 text-slate-500 text-sm">Nenhuma conversa ainda. Quando o cliente mandar WhatsApp, vai aparecer aqui.</div>
+            )}
+            {conversations.map((c) => (
+              <button key={c.id} onClick={() => setSelectedId(c.id)}
+                className={`w-full text-left px-3 py-3 border-b border-slate-700/50 hover:bg-slate-700/40 ${selectedId === c.id ? "bg-slate-700/60" : ""}`}>
+                <div className="flex items-center justify-between">
+                  <span className="font-medium text-white text-sm truncate">{c.customer_name || c.customer_phone}</span>
+                  {c.unread_count > 0 && (
+                    <span className="bg-blue-500 text-white text-xs px-2 py-0.5 rounded-full">{c.unread_count}</span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between mt-1">
+                  <span className="text-xs text-slate-400">{c.customer_phone}</span>
+                  <span className={`text-xs px-2 py-0.5 rounded ${
+                    c.status === "active" ? "bg-green-500/20 text-green-400" :
+                    c.status === "pending_human" ? "bg-yellow-500/20 text-yellow-400" :
+                    "bg-slate-600/40 text-slate-400"
+                  }`}>
+                    {c.status === "active" ? "IA" : c.status === "pending_human" ? "Aguarda admin" : "Encerrada"}
+                  </span>
+                </div>
+                <div className="text-xs text-slate-500 mt-1">{new Date(c.last_message_at).toLocaleString("pt-BR")}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Painel da conversa selecionada */}
+        <div className="md:col-span-2 bg-slate-800 rounded-lg flex flex-col">
+          {!selected && (
+            <div className="flex-1 flex items-center justify-center text-slate-500">
+              Selecione uma conversa
+            </div>
+          )}
+          {selected && (
+            <>
+              <div className="px-4 py-3 border-b border-slate-700 flex items-center justify-between">
+                <div>
+                  <div className="font-semibold text-white">{selected.customer_name || selected.customer_phone}</div>
+                  <div className="text-xs text-slate-400">{selected.customer_phone}{selected.linked_os_id ? ` · OS #${selected.linked_os_id}` : ""}</div>
+                  {selected.ai_handoff_reason && (
+                    <div className="text-xs text-yellow-400 mt-1">⚠ {selected.ai_handoff_reason}</div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  {selected.status === "active" && (
+                    <button onClick={() => supabase.from("ai_conversations").update({ status: "pending_human" }).eq("id", selected.id)}
+                      className="px-3 py-1 text-xs bg-yellow-500/20 text-yellow-400 hover:bg-yellow-500/30 rounded">
+                      Assumir
+                    </button>
+                  )}
+                  {selected.status === "pending_human" && (
+                    <button onClick={reactivateAI} className="px-3 py-1 text-xs bg-green-500/20 text-green-400 hover:bg-green-500/30 rounded">
+                      Devolver à IA
+                    </button>
+                  )}
+                  {selected.status !== "closed" && (
+                    <button onClick={closeConversation} className="px-3 py-1 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded">
+                      Encerrar
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 space-y-2 min-h-0">
+                {messages.map((m) => (
+                  <div key={m.id} className={`flex ${m.role === "customer" ? "justify-start" : "justify-end"}`}>
+                    <div className={`max-w-[75%] px-3 py-2 rounded-lg text-sm ${
+                      m.role === "customer" ? "bg-slate-700 text-white" :
+                      m.role === "agent" ? "bg-blue-600 text-white" :
+                      m.role === "admin" ? "bg-emerald-600 text-white" :
+                      "bg-slate-600 text-slate-300 italic"
+                    }`}>
+                      <div className="text-xs opacity-70 mb-1">
+                        {m.role === "customer" ? "Cliente" : m.role === "agent" ? "IA" : m.role === "admin" ? "Admin" : "Sistema"}
+                        <span className="ml-2">{new Date(m.created_at).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}</span>
+                      </div>
+                      <div className="whitespace-pre-wrap break-words">{m.content}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {selected.status !== "closed" && (
+                <div className="border-t border-slate-700 p-3 flex gap-2">
+                  <input value={draft} onChange={(e) => setDraft(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && sendManual()}
+                    placeholder="Digite uma mensagem manual..."
+                    className="flex-1 px-3 py-2 bg-slate-700 text-white rounded text-sm" />
+                  <button onClick={sendManual} disabled={sending || !draft.trim()}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded text-sm">
+                    {sending ? "..." : "Enviar"}
+                  </button>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+
+      {/* Modal de configuração */}
+      {showConfig && config && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+          <div className="bg-slate-800 rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6">
+            <h2 className="text-xl font-bold text-white mb-4">Configurações do Agente IA</h2>
+            <div className="space-y-3">
+              <label className="flex items-center gap-2 text-white">
+                <input type="checkbox" checked={!!config.enabled} onChange={(e) => setConfig({ ...config, enabled: e.target.checked })} />
+                Agente ativo (responde mensagens automaticamente)
+              </label>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Nome da instância (Evolution API)</label>
+                <input value={config.evolution_instance || ""} onChange={(e) => setConfig({ ...config, evolution_instance: e.target.value })}
+                  placeholder="frost-empresa1" className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">URL pública da Evolution API</label>
+                <input value={config.evolution_url || ""} onChange={(e) => setConfig({ ...config, evolution_url: e.target.value })}
+                  placeholder="https://evolution.seudominio.com" className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Prompt do sistema</label>
+                <textarea value={config.system_prompt || ""} onChange={(e) => setConfig({ ...config, system_prompt: e.target.value })}
+                  rows={10} className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm font-mono" />
+              </div>
+              <div>
+                <label className="block text-sm text-slate-300 mb-1">Mensagem fora do horário</label>
+                <textarea value={config.out_of_hours_message || ""} onChange={(e) => setConfig({ ...config, out_of_hours_message: e.target.value })}
+                  rows={2} className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm" />
+              </div>
+              <p className="text-xs text-slate-400">
+                Ver guia completo em <code>docs/ai-agent/03-setup-guide.md</code>
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <button onClick={() => setShowConfig(false)} className="px-4 py-2 bg-slate-600 hover:bg-slate-500 text-white rounded text-sm">Cancelar</button>
+              <button onClick={saveConfig} className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded text-sm">Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── TÉCNICO MOBILE APP ─────────────────────────────────────────────────────
 // Shell totalmente separado renderizado quando o usuário logado tem role="tecnico".
 // Não usa sidebar — UI mobile-first focada exclusivamente nas demandas do técnico.
@@ -11884,6 +12197,7 @@ export default function App() {
       { id: "agenda", label: "Agenda", iconName: "agenda", module: "agenda" },
       { id: "financeiro", label: "Financeiro", iconName: "financeiro", module: "financeiro" },
       { id: "cadastro", label: "Cadastros", iconName: "cadastros", module: "clientes" },
+      { id: "ia", label: "IA / Atendimento", iconName: "agenda", module: "ia" },
       { id: "config", label: "Configurações", iconName: "config", module: "config" },
     ];
 
@@ -12429,6 +12743,9 @@ export default function App() {
             )}
             {activeModule === "cadastro" && (
               <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
+            )}
+            {activeModule === "ia" && (
+              <IAAtendimentoModule user={user} addToast={addToast} />
             )}
             {activeModule === "config" && (
               <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} theme={theme} setTheme={setTheme} />

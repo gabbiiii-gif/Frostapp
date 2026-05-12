@@ -1,0 +1,23 @@
+# Caddy reverse proxy → HTTPS automático via Let's Encrypt.
+# O domínio é lido da env EVOLUTION_DOMAIN (definida no .env do docker-compose).
+
+{$EVOLUTION_DOMAIN} {
+    encode gzip zstd
+    reverse_proxy evolution:8080
+
+    log {
+        output stdout
+        format console
+        level INFO
+    }
+
+    header {
+        # Hardening básico
+        Strict-Transport-Security "max-age=31536000;"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        # Remove header padrão do Caddy
+        -Server
+    }
+}

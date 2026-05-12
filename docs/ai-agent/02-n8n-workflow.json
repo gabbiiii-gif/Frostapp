@@ -1,0 +1,300 @@
+{
+  "name": "FrostERP — Atendimento WhatsApp IA",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "frost-whatsapp",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "1",
+      "name": "Webhook Evolution",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 300],
+      "webhookId": "frost-whatsapp"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "ev1",
+              "leftValue": "={{ $json.body.event }}",
+              "rightValue": "messages.upsert",
+              "operator": { "type": "string", "operation": "equals" }
+            },
+            {
+              "id": "fm1",
+              "leftValue": "={{ $json.body.data.key.fromMe }}",
+              "rightValue": "false",
+              "operator": { "type": "boolean", "operation": "false", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "2",
+      "name": "Filtra msg recebida",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [420, 300]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "p1",
+              "name": "phone",
+              "value": "={{ $json.body.data.key.remoteJid.split('@')[0] }}",
+              "type": "string"
+            },
+            {
+              "id": "p2",
+              "name": "name",
+              "value": "={{ $json.body.data.pushName || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "p3",
+              "name": "text",
+              "value": "={{ $json.body.data.message?.conversation || $json.body.data.message?.extendedTextMessage?.text || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "p4",
+              "name": "instance",
+              "value": "={{ $json.body.instance }}",
+              "type": "string"
+            },
+            {
+              "id": "p5",
+              "name": "company_id",
+              "value": "={{ $json.body.company_id || 'cmp_default' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "3",
+      "name": "Extrai campos",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [640, 240]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into ai_conversations (company_id, customer_phone, customer_name)\nvalues ('{{ $json.company_id }}', '{{ $json.phone }}', '{{ $json.name }}')\non conflict (company_id, customer_phone)\ndo update set customer_name = coalesce(excluded.customer_name, ai_conversations.customer_name),\n              last_message_at = now()\nreturning id, status, linked_client_id;"
+      },
+      "id": "4",
+      "name": "Upsert conversa",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [860, 240],
+      "credentials": { "postgres": { "id": "SUPABASE_POSTGRES_CRED_ID", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into ai_messages (conversation_id, company_id, role, content)\nvalues ('{{ $('Upsert conversa').item.json.id }}', '{{ $('Extrai campos').item.json.company_id }}', 'customer', $$ {{ $('Extrai campos').item.json.text }} $$);"
+      },
+      "id": "5",
+      "name": "Grava msg cliente",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1080, 240],
+      "credentials": { "postgres": { "id": "SUPABASE_POSTGRES_CRED_ID", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "s1",
+              "leftValue": "={{ $('Upsert conversa').item.json.status }}",
+              "rightValue": "active",
+              "operator": { "type": "string", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "6",
+      "name": "Conversa ativa?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1300, 240]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Extrai campos').item.json.text }}",
+        "options": {
+          "systemMessage": "Você é o assistente virtual de uma empresa de assistência técnica em refrigeração e climatização (FrostERP).\n\nAtenda em português brasileiro, seja cordial, objetivo e profissional.\n\nQuando o cliente solicitar um serviço, colete em ordem:\n1. Nome completo\n2. Endereço (rua, número, bairro, cidade)\n3. Equipamento (tipo, marca e modelo)\n4. Descrição do problema\n\nApós coletar TODOS os dados, use a ferramenta \"create_os\" para registrar a Ordem de Serviço. Confirme ao cliente.\n\nSe pedirem status de OS existente, use \"get_recent_os\" com o telefone.\n\nSe a pergunta for muito técnica ou o cliente estiver insatisfeito, use \"handoff_to_human\".\n\nNunca prometa prazos. Nunca informe preços fixos — diga que será orçado na vistoria pelo técnico."
+        }
+      },
+      "id": "7",
+      "name": "AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [1520, 180]
+    },
+    {
+      "parameters": {
+        "model": { "__rl": true, "value": "gpt-4o-mini", "mode": "list" },
+        "options": {}
+      },
+      "id": "8",
+      "name": "OpenAI Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.2,
+      "position": [1420, 380],
+      "credentials": { "openAiApi": { "id": "OPENAI_CRED_ID", "name": "OpenAI" } }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Upsert conversa').item.json.id }}",
+        "tableName": "ai_messages_memory",
+        "contextWindowLength": 20
+      },
+      "id": "9",
+      "name": "Postgres Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [1540, 380],
+      "credentials": { "postgres": { "id": "SUPABASE_POSTGRES_CRED_ID", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "name": "create_os",
+        "description": "Registra uma nova Ordem de Serviço no FrostERP. Use APENAS quando tiver TODOS os dados: nome do cliente, endereço completo, equipamento (tipo, marca, modelo) e descrição do problema.",
+        "workflowId": { "__rl": true, "mode": "id", "value": "" },
+        "fields": {
+          "values": [
+            { "name": "customer_name", "type": "stringValue" },
+            { "name": "address", "type": "stringValue" },
+            { "name": "equipment_type", "type": "stringValue" },
+            { "name": "equipment_brand", "type": "stringValue" },
+            { "name": "equipment_model", "type": "stringValue" },
+            { "name": "problem", "type": "stringValue" }
+          ]
+        }
+      },
+      "id": "10",
+      "name": "Tool: create_os",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.3,
+      "position": [1660, 380]
+    },
+    {
+      "parameters": {
+        "name": "get_recent_os",
+        "description": "Busca as últimas Ordens de Serviço do cliente pelo telefone. Use quando o cliente perguntar sobre uma OS existente.",
+        "operation": "executeQuery",
+        "query": "select v.value->>'numero' as numero, v.value->>'status' as status, v.value->>'descricaoProblema' as problema from kv_store v where v.company_id = '{{ $('Extrai campos').item.json.company_id }}' and v.key like 'erp:os:%' and v.value->>'clienteTelefone' = '{{ $('Extrai campos').item.json.phone }}' order by v.value->>'createdAt' desc limit 5;"
+      },
+      "id": "11",
+      "name": "Tool: get_recent_os",
+      "type": "@n8n/n8n-nodes-langchain.toolPostgres",
+      "typeVersion": 1.3,
+      "position": [1780, 380],
+      "credentials": { "postgres": { "id": "SUPABASE_POSTGRES_CRED_ID", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "name": "handoff_to_human",
+        "description": "Transfere a conversa para atendimento humano. Use quando a pergunta for muito técnica, fora de escopo, ou o cliente parecer insatisfeito. Informe o motivo no parâmetro 'reason'.",
+        "operation": "executeQuery",
+        "query": "update ai_conversations set status = 'pending_human', ai_handoff_reason = $$ {{ $fromAI('reason') }} $$ where id = '{{ $('Upsert conversa').item.json.id }}' returning id;"
+      },
+      "id": "12",
+      "name": "Tool: handoff_to_human",
+      "type": "@n8n/n8n-nodes-langchain.toolPostgres",
+      "typeVersion": 1.3,
+      "position": [1900, 380],
+      "credentials": { "postgres": { "id": "SUPABASE_POSTGRES_CRED_ID", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "insert into ai_messages (conversation_id, company_id, role, content, metadata)\nvalues ('{{ $('Upsert conversa').item.json.id }}', '{{ $('Extrai campos').item.json.company_id }}', 'agent', $$ {{ $json.output }} $$, '{\"model\":\"gpt-4o-mini\"}'::jsonb);"
+      },
+      "id": "13",
+      "name": "Grava resposta IA",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1820, 120],
+      "credentials": { "postgres": { "id": "SUPABASE_POSTGRES_CRED_ID", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://SEU_EVOLUTION_HOST/message/sendText/{{ $('Extrai campos').item.json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "apikey", "value": "SUBSTITUA_PELA_API_KEY_EVOLUTION" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"number\": \"{{ $('Extrai campos').item.json.phone }}\",\n  \"text\": {{ JSON.stringify($('AI Agent').item.json.output) }}\n}",
+        "options": {}
+      },
+      "id": "14",
+      "name": "Envia WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2040, 120]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\"ok\":true}",
+        "options": {}
+      },
+      "id": "15",
+      "name": "Responde Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2260, 240]
+    }
+  ],
+  "connections": {
+    "Webhook Evolution": { "main": [[{ "node": "Filtra msg recebida", "type": "main", "index": 0 }]] },
+    "Filtra msg recebida": {
+      "main": [
+        [{ "node": "Extrai campos", "type": "main", "index": 0 }],
+        [{ "node": "Responde Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "Extrai campos": { "main": [[{ "node": "Upsert conversa", "type": "main", "index": 0 }]] },
+    "Upsert conversa": { "main": [[{ "node": "Grava msg cliente", "type": "main", "index": 0 }]] },
+    "Grava msg cliente": { "main": [[{ "node": "Conversa ativa?", "type": "main", "index": 0 }]] },
+    "Conversa ativa?": {
+      "main": [
+        [{ "node": "AI Agent", "type": "main", "index": 0 }],
+        [{ "node": "Responde Webhook", "type": "main", "index": 0 }]
+      ]
+    },
+    "OpenAI Chat Model": { "ai_languageModel": [[{ "node": "AI Agent", "type": "ai_languageModel", "index": 0 }]] },
+    "Postgres Chat Memory": { "ai_memory": [[{ "node": "AI Agent", "type": "ai_memory", "index": 0 }]] },
+    "Tool: create_os": { "ai_tool": [[{ "node": "AI Agent", "type": "ai_tool", "index": 0 }]] },
+    "Tool: get_recent_os": { "ai_tool": [[{ "node": "AI Agent", "type": "ai_tool", "index": 0 }]] },
+    "Tool: handoff_to_human": { "ai_tool": [[{ "node": "AI Agent", "type": "ai_tool", "index": 0 }]] },
+    "AI Agent": { "main": [[{ "node": "Grava resposta IA", "type": "main", "index": 0 }]] },
+    "Grava resposta IA": { "main": [[{ "node": "Envia WhatsApp", "type": "main", "index": 0 }]] },
+    "Envia WhatsApp": { "main": [[{ "node": "Responde Webhook", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": false,
+  "tags": [{ "name": "frosterp" }, { "name": "whatsapp" }, { "name": "ia" }]
+}
