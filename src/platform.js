@@ -276,8 +276,8 @@ export async function showNotification({ title, body, tag, icon, url }) {
   try {
     const n = new Notification(title || 'FrostERP', {
       body: body || '',
-      icon: icon || '/icon-192x192.png',
-      badge: '/icon-192x192.png',
+      icon: icon || '/icon-192.png',
+      badge: '/icon-192.png',
       tag: tag || undefined,
       renotify: false,
     });

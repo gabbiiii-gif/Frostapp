@@ -149,39 +149,70 @@ export async function ensureMemberLoaded() {
 
 // ─── Hydrate: Supabase é a fonte de verdade ──────────────────────────────────
 // Só é eficaz após login (RLS bloqueia anon).
+//
+// IMPORTANTE: o REST API do Supabase trunca em 1000 rows por default. Para
+// empresas com muitas OS/clientes/transações, isso causa perda de dados:
+// keys reais no banco "desaparecem" no app e o passo de cleanup abaixo
+// APAGAVA do localStorage tudo que não veio. Paginação resolve.
 export async function hydrateFromSupabase() {
   if (!supabase) return;
   const companyId = getCompanyId();
   if (!companyId) return; // sem auth → nada a sincronizar
   try {
-    const { data, error } = await supabase
-      .from('kv_store')
-      .select('key, value')
-      .eq('company_id', companyId);
-    if (error) {
-      console.warn('Supabase hydrate error:', error.message);
-      return;
+    // ─── Pagina via .range() em batches de 1000 até esgotar ─────────────────
+    const PAGE = 1000;
+    let allRows = [];
+    let from = 0;
+    let pagesFetched = 0;
+    let pageError = null;
+    // Limite de segurança — 50 páginas = 50k rows. Se passar disso, algo está errado.
+    while (pagesFetched < 50) {
+      const { data: page, error } = await supabase
+        .from('kv_store')
+        .select('key, value')
+        .eq('company_id', companyId)
+        .order('key', { ascending: true })
+        .range(from, from + PAGE - 1);
+      if (error) { pageError = error; break; }
+      if (!page || page.length === 0) break;
+      allRows = allRows.concat(page);
+      pagesFetched++;
+      if (page.length < PAGE) break; // última página
+      from += PAGE;
     }
-    const remoteKeys = new Set((data || []).map(row => row.key));
+    if (pageError) {
+      console.warn('Supabase hydrate error:', pageError.message);
+      // Se pelo menos uma página veio, segue com o que tem. Se nenhuma, aborta
+      // sem apagar local (evita perda de dados em falha de rede).
+      if (allRows.length === 0) return;
+    }
+    const completou = !pageError; // só faz cleanup de keys locais se paginação foi 100% bem-sucedida
+    const remoteKeys = new Set(allRows.map(row => row.key));
+
+    // Apaga local apenas se tivemos certeza que pegamos TUDO remoto.
+    // Senão poderíamos apagar local de keys que existem remoto mas não vieram.
     const keysToRemove = [];
-    for (let i = 0; i < window.storage.length; i++) {
-      const key = window.storage.key(i);
-      if (!key || !key.startsWith('erp:')) continue;
-      if (isSensitive(key)) continue;
-      if (key === 'erp:seeded' || key === 'erp:lastBackup') continue;
-      if (!remoteKeys.has(key)) keysToRemove.push(key);
+    if (completou) {
+      for (let i = 0; i < window.storage.length; i++) {
+        const key = window.storage.key(i);
+        if (!key || !key.startsWith('erp:')) continue;
+        if (isSensitive(key)) continue;
+        if (key === 'erp:seeded' || key === 'erp:lastBackup') continue;
+        if (!remoteKeys.has(key)) keysToRemove.push(key);
+      }
+      keysToRemove.forEach(key => window.storage.removeItem(key));
     }
-    keysToRemove.forEach(key => window.storage.removeItem(key));
-    if (data && data.length > 0) {
+
+    if (allRows.length > 0) {
       // Pula chaves sensiveis ao escrever no local: ex master:user:* nao
       // pode ser sobrescrito pelo Supabase (so existe local, e pra evitar
       // que uma versao stripada do servidor apague o password do device).
-      data.forEach((row) => {
+      allRows.forEach((row) => {
         if (isSensitive(row.key)) return;
         window.storage.setItem(row.key, JSON.stringify(row.value));
       });
     }
-    console.log(`Sync completo: ${(data || []).length} chaves do Supabase, ${keysToRemove.length} removidas localmente`);
+    console.log(`Sync completo: ${allRows.length} chaves do Supabase em ${pagesFetched} página(s), ${keysToRemove.length} removidas localmente${completou ? '' : ' [INCOMPLETO — cleanup pulado por segurança]'}`);
   } catch (err) {
     console.warn('Supabase connection failed, using local data:', err.message);
   }
