@@ -12988,30 +12988,192 @@ export default function App() {
     };
   }, [user, addToast]);
 
-  // ─── Compute Notifications ───
-  // OS pendentes há mais de 2 dias — sinaliza atenção no sino da barra superior
+  // ─── Notificações — engine de detecção multi-evento ─────────────────────────
+  // Cobre 5 tipos de evento; cada notif tem id estável pra dispensar persistir
+  // entre reloads. Visibilidade por role (técnico só vê dele; admin vê tudo).
+  // dispensadas ficam em erp:notifDismissed (set de ids) — também sincroniza Supabase.
+  const [dismissedNotifs, setDismissedNotifs] = useState(() => new Set(DB.get("erp:notifDismissed") || []));
+  const dismissNotif = useCallback((id) => {
+    setDismissedNotifs((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      DB.set("erp:notifDismissed", Array.from(next));
+      return next;
+    });
+  }, []);
+  const clearDismissed = useCallback(() => {
+    setDismissedNotifs(new Set());
+    DB.set("erp:notifDismissed", []);
+  }, []);
+
   const computedNotifications = useMemo(() => {
+    if (!user) return [];
     const alerts = [];
-    const dueDate = new Date();
-    dueDate.setDate(dueDate.getDate() - 2);
-    data.services
-      .filter((os) => os.status === "pendente" || os.status === "aguardando")
-      .forEach((os) => {
-        if (new Date(os.dataAbertura) < dueDate) {
+    const now = new Date();
+    const todayStr = toISODate(now);
+    const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+    const tomorrowStr = toISODate(tomorrow);
+    const in3Days = new Date(now); in3Days.setDate(in3Days.getDate() + 3);
+    const dueDate = new Date(now); dueDate.setDate(dueDate.getDate() - 2);
+    const isAdmin = user.role === "admin" || user.role === "gerente";
+    const isTecnico = user.role === "tecnico";
+
+    // ─── 1. Agendamento próximo (técnico vê os dele; admin vê todos) ──────────
+    (data.services || []).forEach((os) => {
+      if (os.status === "finalizado" || os.status === "cancelado") return;
+      const dataAg = os.dataAgendada || os.dataPrevista;
+      if (!dataAg) return;
+      // Só notifica se o técnico for o assigned (ou se for admin/gerente)
+      const isMyOS = isAdmin || (isTecnico && os.tecnicoId === user.id);
+      if (!isMyOS) return;
+      if (dataAg === tomorrowStr) {
+        alerts.push({
+          id: "os-amanha-" + os.id,
+          type: "info",
+          icon: "📅",
+          message: `Amanhã: OS ${os.numero} — ${os.clienteNome}${os.horaAgendada ? ` às ${os.horaAgendada}` : ""}`,
+          module: "processos",
+        });
+      } else if (dataAg === todayStr) {
+        alerts.push({
+          id: "os-hoje-" + os.id,
+          type: "warning",
+          icon: "⏰",
+          message: `HOJE: OS ${os.numero} — ${os.clienteNome}${os.horaAgendada ? ` às ${os.horaAgendada}` : ""}`,
+          module: "processos",
+        });
+      }
+    });
+
+    // ─── 2. OS aguardando finalização pelo admin (só admin/gerente) ──────────
+    if (isAdmin) {
+      (data.services || []).forEach((os) => {
+        if (os.status === "aguardando_finalizacao") {
           alerts.push({
-            id: "os-" + os.id,
+            id: "os-aprovar-" + os.id,
             type: "warning",
-            message: `OS ${os.numero} sem movimentação há 2+ dias — ${os.clienteNome}`,
+            icon: "✋",
+            message: `OS ${os.numero} aguardando sua aprovação — finalizada pelo técnico`,
             module: "processos",
           });
         }
       });
-    return alerts;
-  }, [data]);
+    }
+
+    // ─── 3. Contas a vencer em até 3 dias (só admin/gerente) ─────────────────
+    if (isAdmin) {
+      const transactions = DB.list("erp:finance:") || [];
+      transactions.forEach((tx) => {
+        if (!tx || tx.pago === true || tx.status === "pago" || tx.pagoEm) return;
+        const venc = tx.vencimento || tx.dataVencimento;
+        if (!venc) return;
+        const vencDate = new Date(venc + "T00:00:00");
+        if (vencDate <= in3Days && vencDate >= now) {
+          const dias = Math.ceil((vencDate - now) / (1000 * 60 * 60 * 24));
+          alerts.push({
+            id: "fin-venc-" + tx.id,
+            type: dias <= 1 ? "danger" : "warning",
+            icon: "💰",
+            message: `${tx.tipo === "receita" ? "A receber" : "A pagar"} em ${dias === 0 ? "hoje" : dias === 1 ? "amanhã" : `${dias} dias`}: ${_fmtBRL(tx.valor)} — ${tx.descricao || tx.categoria}`,
+            module: "financeiro",
+          });
+        } else if (vencDate < now) {
+          alerts.push({
+            id: "fin-atras-" + tx.id,
+            type: "danger",
+            icon: "🔴",
+            message: `EM ATRASO: ${_fmtBRL(tx.valor)} — ${tx.descricao || tx.categoria}`,
+            module: "financeiro",
+          });
+        }
+      });
+    }
+
+    // ─── 4. Cliente/conversa novo via IA (só admin/gerente) ──────────────────
+    if (isAdmin && supabase) {
+      // Lê o cache do localStorage (sync via Supabase Realtime já popula)
+      // Estratégia leve: lê ai_conversations escopo do localStorage — se o
+      // módulo IA estiver aberto ele já lista; aqui só conta as pending_human.
+      // Como ai_conversations não passa pelo kv_store, não temos cache local
+      // aqui — vamos delegar a contagem pra um efeito separado abaixo.
+      // (Placeholder — preenchido pelo aiPendingCount abaixo)
+    }
+
+    // ─── 5. OS pendentes sem movimentação há 2+ dias (só admin/gerente) ──────
+    if (isAdmin) {
+      (data.services || []).forEach((os) => {
+        if (os.status === "pendente" || os.status === "aguardando") {
+          if (new Date(os.dataAbertura) < dueDate) {
+            alerts.push({
+              id: "os-parada-" + os.id,
+              type: "info",
+              icon: "💤",
+              message: `OS ${os.numero} sem movimentação há 2+ dias — ${os.clienteNome}`,
+              module: "processos",
+            });
+          }
+        }
+      });
+    }
+
+    // Filtra dispensadas
+    return alerts.filter((a) => !dismissedNotifs.has(a.id));
+  }, [data, user, dismissedNotifs]);
+
+  // ─── Notificação da IA: count de conversas pending_human (escuta Realtime) ─
+  const [aiPendingCount, setAiPendingCount] = useState(0);
+  useEffect(() => {
+    if (!supabase || !user || (user.role !== "admin" && user.role !== "gerente")) return;
+    const member = getCurrentMember();
+    if (!member?.company_id) return;
+    let cancelled = false;
+    const refresh = async () => {
+      const { count } = await supabase
+        .from("ai_conversations")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", member.company_id)
+        .eq("status", "pending_human");
+      if (!cancelled) setAiPendingCount(count || 0);
+    };
+    refresh();
+    const ch = supabase
+      .channel(`ai_notif_${member.company_id}`)
+      .on("postgres_changes", { event: "*", schema: "public", table: "ai_conversations", filter: `company_id=eq.${member.company_id}` }, refresh)
+      .subscribe();
+    return () => { cancelled = true; supabase.removeChannel(ch); };
+  }, [user]);
+
+  // Anexa notificação da IA quando há conversas aguardando
+  const notificationsWithAI = useMemo(() => {
+    if (!aiPendingCount || dismissedNotifs.has("ai-pending")) return computedNotifications;
+    return [
+      {
+        id: "ai-pending",
+        type: "warning",
+        icon: "🤖",
+        message: `${aiPendingCount} conversa${aiPendingCount > 1 ? "s" : ""} de WhatsApp aguardando atendimento humano`,
+        module: "ia",
+      },
+      ...computedNotifications,
+    ];
+  }, [computedNotifications, aiPendingCount, dismissedNotifs]);
+
+  // Dispara toast quando NOVA notificação aparece (não na primeira carga)
+  const prevNotifIdsRef = useRef(null);
+  useEffect(() => {
+    if (prevNotifIdsRef.current === null) {
+      // primeira carga — não dispara toast pra não spam
+      prevNotifIdsRef.current = new Set(notificationsWithAI.map((n) => n.id));
+      return;
+    }
+    const newOnes = notificationsWithAI.filter((n) => !prevNotifIdsRef.current.has(n.id));
+    newOnes.forEach((n) => addToast(n.message, n.type === "danger" ? "error" : n.type === "warning" ? "warning" : "info"));
+    prevNotifIdsRef.current = new Set(notificationsWithAI.map((n) => n.id));
+  }, [notificationsWithAI, addToast]);
 
   useEffect(() => {
-    setNotifications(computedNotifications);
-  }, [computedNotifications]);
+    setNotifications(notificationsWithAI);
+  }, [notificationsWithAI]);
 
   // ─── Global Search ───
   useEffect(() => {
@@ -13521,25 +13683,35 @@ export default function App() {
 
               {/* Notifications Dropdown */}
               {showNotifications && (
-                <div className="absolute right-0 top-full mt-2 w-80 bg-gray-800 border border-gray-700 rounded-xl shadow-2xl z-50 max-h-[400px] overflow-y-auto animate-slideDown">
-                  <div className="px-4 py-3 border-b border-gray-700">
+                <div className="absolute right-0 top-full mt-2 w-96 bg-gray-800 border border-gray-700 rounded-xl shadow-2xl z-50 max-h-[500px] overflow-y-auto animate-slideDown">
+                  <div className="px-4 py-3 border-b border-gray-700 flex items-center justify-between sticky top-0 bg-gray-800">
                     <h4 className="text-white font-medium text-sm">Notificações ({notifications.length})</h4>
+                    {dismissedNotifs.size > 0 && (
+                      <button onClick={(e) => { e.stopPropagation(); clearDismissed(); }}
+                        className="text-xs text-blue-400 hover:text-blue-300">
+                        Mostrar dispensadas ({dismissedNotifs.size})
+                      </button>
+                    )}
                   </div>
                   {notifications.length === 0 ? (
-                    <div className="px-4 py-8 text-center text-gray-400 text-sm">Nenhuma notificação.</div>
+                    <div className="px-4 py-8 text-center text-gray-400 text-sm">
+                      <div className="text-3xl mb-2">🔔</div>
+                      Tudo em dia! Sem notificações.
+                    </div>
                   ) : (
                     notifications.map((n) => (
-                      <button
-                        key={n.id}
-                        onClick={() => {
-                          setActiveModule(n.module);
-                          setShowNotifications(false);
-                        }}
-                        className="w-full px-4 py-3 flex items-start gap-3 hover:bg-gray-700/50 transition text-left border-b border-gray-700/50"
-                      >
-                        <span className={`mt-0.5 w-2 h-2 rounded-full flex-shrink-0 ${n.type === "error" ? "bg-red-500" : n.type === "warning" ? "bg-yellow-500" : "bg-blue-500"}`} />
-                        <p className="text-sm text-gray-300">{n.message}</p>
-                      </button>
+                      <div key={n.id} className={`flex items-start gap-3 px-4 py-3 hover:bg-gray-700/50 transition border-b border-gray-700/50 border-l-2 ${n.type === "danger" ? "border-l-red-500" : n.type === "warning" ? "border-l-yellow-500" : "border-l-blue-500"}`}>
+                        <span className="text-xl flex-shrink-0">{n.icon || (n.type === "danger" ? "🔴" : n.type === "warning" ? "⚠️" : "ℹ️")}</span>
+                        <button onClick={() => { setActiveModule(n.module); setShowNotifications(false); }}
+                          className="flex-1 text-left">
+                          <p className="text-sm text-gray-200 leading-snug">{n.message}</p>
+                        </button>
+                        <button onClick={(e) => { e.stopPropagation(); dismissNotif(n.id); }}
+                          title="Dispensar"
+                          className="text-gray-500 hover:text-gray-300 px-1 flex-shrink-0">
+                          ×
+                        </button>
+                      </div>
                     ))
                   )}
                 </div>
