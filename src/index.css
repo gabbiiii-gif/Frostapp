@@ -183,6 +183,14 @@ body[data-theme="light"] .bg-red-500 { background-color: #ef4444 !important; }
 body[data-theme="light"] .bg-cyan-500 { background-color: #06b6d4 !important; }
 body[data-theme="light"] .bg-gray-500 { background-color: #94a3b8 !important; }
 
+/* WCAG: text-white sobre fundos claros (yellow/cyan/orange/green/gray claros) fica
+   abaixo de 4.5:1. Força texto escuro nesses badges no light mode para legibilidade. */
+body[data-theme="light"] .bg-yellow-500.text-white,
+body[data-theme="light"] .bg-cyan-500.text-white,
+body[data-theme="light"] .bg-orange-500.text-white,
+body[data-theme="light"] .bg-green-500.text-white,
+body[data-theme="light"] .bg-gray-500.text-white { color: #0f172a !important; }
+
 /* Light mode: hover claros nas linhas/cards (em vez de cinza escuro Tailwind) */
 body[data-theme="light"] .hover\:bg-gray-700:hover,
 body[data-theme="light"] .hover\:bg-gray-700\/50:hover { background-color: #f1f5f9 !important; }

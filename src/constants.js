@@ -34,10 +34,26 @@ export const STATUS_MAP = {
 // Matriz de permissões por role — inclui módulo financeiro
 export const ROLE_PERMISSIONS = {
   admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config"],
+  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha"],
   tecnico: ["dashboard", "os", "agenda"],
-  atendente: ["dashboard", "clientes", "os", "agenda"],
+  atendente: ["dashboard", "clientes", "os", "agenda", "ia"],
 };
+
+// ─── CARGOS de funcionários ──────────────────────────────────────────────────
+// Lista canônica usada no cadastro e nos relatórios. Ao adicionar cargo novo,
+// considere também atualizar a derivação de `tipo` em saveEmployee (técnico/
+// gerente/administrativo controla quais módulos o user vê).
+export const CARGOS_FUNCIONARIO = [
+  "Técnico em Refrigeração",
+  "Técnico de Central",
+  "Ajudante",
+  "Motorista",
+  "Administrativo",
+  "Gerente",
+];
+// Cargos considerados "técnicos" para gating de UI/relatórios
+export const CARGOS_TECNICOS = ["Técnico em Refrigeração", "Técnico de Central", "Técnico", "Ajudante"];
+export const CARGOS_GERENCIA = ["Gerente"];
 
 // Categorias separadas em receita (entradas) e despesa (saídas) para evitar
 // confusão no relatório — o usuário só vê as categorias relevantes ao tipo

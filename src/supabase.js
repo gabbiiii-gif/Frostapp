@@ -1,3 +1,9 @@
+// ATENÇÃO: este módulo usa `window.storage` (não é API nativa do browser).
+// É um polyfill instalado em App.jsx (~linhas 328-349): aponta para localStorage
+// quando disponível, ou para um Map em memória quando localStorage falha
+// (modo privado, sandbox, cota cheia). App.jsx precisa ter rodado antes deste
+// módulo acessar window.storage — o que é garantido pela ordem de imports do bundle.
+
 import { createClient } from '@supabase/supabase-js';
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -302,48 +308,112 @@ export async function adminCreateUser({ email, password, role, nome, avatar, leg
   return { ok: true, ...body };
 }
 
-// ─── Master users: sync via tabela dedicada (sem company_id) ────────────────
-// Master tier e separado do kv_store por design (master nao pertence a empresa).
-// Hash PBKDF2 100k iter aceitavel pra MVP exposto via SELECT anon (RLS).
-// Permite cadastrar master no PC e logar no APK com mesmas creds.
-export async function listMastersRemote() {
-  if (!supabase) return [];
-  try {
-    const { data, error } = await supabase.from('master_users').select('*');
-    if (error) { console.warn('listMastersRemote:', error.message); return []; }
-    return (data || []).map(row => ({
-      id: row.id,
-      email: row.email,
-      nome: row.nome,
-      password: row.password,
-      role: row.role || 'master',
-      sessionTokenHash: row.session_token_hash || null,
-      createdAt: row.created_at,
-    }));
-  } catch (e) { console.warn('listMastersRemote falhou:', e.message); return []; }
+// ─── Master users: sync via RPCs SECURITY DEFINER ───────────────────────────
+// Acesso direto a master_users foi bloqueado para anon (RLS lockdown Phase 1).
+// Toda interacao passa por RPCs com superficie reduzida:
+//   - master_count(): conta masters (decide FirstMasterSetup vs MasterLogin)
+//   - master_lookup_by_email(email): UMA linha para o flow de login
+//   - master_list_authenticated(token_hash): lista geral pos-login
+//   - master_upsert(...): permitido se nao ha master OU caller tem token valido
+//   - master_set_session(...): renova session_token apos checkPassword OK
+//   - master_delete_authenticated(...): exige token de master logado
+// Caller_token_hash deve ser o sessionTokenHash do master JA autenticado.
+
+function _mapMasterRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    email: row.email,
+    nome: row.nome,
+    password: row.password,
+    role: row.role || 'master',
+    sessionTokenHash: row.session_token_hash || null,
+    createdAt: row.created_at,
+  };
 }
 
-export async function upsertMasterRemote(master) {
+export async function masterCountRemote() {
+  if (!supabase) return 0;
+  try {
+    const { data, error } = await supabase.rpc('master_count');
+    if (error) { console.warn('masterCountRemote:', error.message); return 0; }
+    return Number(data) || 0;
+  } catch (e) { console.warn('masterCountRemote falhou:', e.message); return 0; }
+}
+
+export async function lookupMasterByEmail(email) {
+  if (!supabase || !email) return null;
+  try {
+    const { data, error } = await supabase.rpc('master_lookup_by_email', { p_email: email });
+    if (error) { console.warn('lookupMasterByEmail:', error.message); return null; }
+    const row = Array.isArray(data) ? data[0] : data;
+    return _mapMasterRow(row);
+  } catch (e) { console.warn('lookupMasterByEmail falhou:', e.message); return null; }
+}
+
+// Substitui o antigo `listMastersRemote()`. Devolve lista SOMENTE se o caller
+// apresentar um session_token_hash que bate com algum master existente.
+// Sem token (ou token invalido), volta [] em silencio — UI continua usando cache local.
+export async function listMastersAuthenticated(callerTokenHash) {
+  if (!supabase || !callerTokenHash) return [];
+  try {
+    const { data, error } = await supabase.rpc('master_list_authenticated', {
+      p_session_token_hash: callerTokenHash,
+    });
+    if (error) { console.warn('listMastersAuthenticated:', error.message); return []; }
+    return (data || []).map(_mapMasterRow).filter(Boolean);
+  } catch (e) { console.warn('listMastersAuthenticated falhou:', e.message); return []; }
+}
+
+// Backwards-compat: chamadas antigas a listMastersRemote() agora retornam []
+// (acesso anon bloqueado). Mantido pra nao quebrar imports legados — call sites
+// foram atualizados pra usar lookupMasterByEmail/listMastersAuthenticated.
+export async function listMastersRemote() {
+  return [];
+}
+
+// callerTokenHash: sessionTokenHash de um master JA autenticado. Para o caso
+// especial do FirstMasterSetup (zero masters cadastrados), pode ser null —
+// a propria RPC permite a primeira escrita quando o count e zero.
+export async function upsertMasterRemote(master, callerTokenHash = null) {
   if (!supabase || !master?.id) return false;
   try {
-    const { error } = await supabase.from('master_users').upsert({
-      id: master.id,
-      email: (master.email || '').trim().toLowerCase(),
-      nome: master.nome,
-      password: master.password,
-      role: master.role || 'master',
-      session_token_hash: master.sessionTokenHash || null,
-      updated_at: new Date().toISOString(),
-    }, { onConflict: 'id' });
+    const { error } = await supabase.rpc('master_upsert', {
+      p_id: master.id,
+      p_email: (master.email || '').trim().toLowerCase(),
+      p_nome: master.nome || '',
+      p_password: master.password || '',
+      p_role: master.role || 'master',
+      p_session_token_hash: master.sessionTokenHash || null,
+      p_caller_token_hash: callerTokenHash,
+    });
     if (error) { console.warn('upsertMasterRemote:', error.message); return false; }
     return true;
   } catch (e) { console.warn('upsertMasterRemote falhou:', e.message); return false; }
 }
 
-export async function deleteMasterRemote(id) {
+// Renova session_token_hash apos checkPassword OK no client.
+// Passa o hash atual de password como prova de autenticidade.
+export async function setMasterSessionRemote(id, currentPasswordHash, newSessionTokenHash) {
   if (!supabase || !id) return false;
   try {
-    const { error } = await supabase.from('master_users').delete().eq('id', id);
+    const { error } = await supabase.rpc('master_set_session', {
+      p_id: id,
+      p_current_password_hash: currentPasswordHash,
+      p_new_session_token_hash: newSessionTokenHash,
+    });
+    if (error) { console.warn('setMasterSessionRemote:', error.message); return false; }
+    return true;
+  } catch (e) { console.warn('setMasterSessionRemote falhou:', e.message); return false; }
+}
+
+export async function deleteMasterRemote(id, callerTokenHash) {
+  if (!supabase || !id) return false;
+  try {
+    const { error } = await supabase.rpc('master_delete_authenticated', {
+      p_id: id,
+      p_caller_token_hash: callerTokenHash,
+    });
     if (error) { console.warn('deleteMasterRemote:', error.message); return false; }
     return true;
   } catch (e) { console.warn('deleteMasterRemote falhou:', e.message); return false; }

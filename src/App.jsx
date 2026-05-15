@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, listMastersRemote, upsertMasterRemote, deleteMasterRemote } from "./supabase.js";
+import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -95,175 +95,32 @@ function ModuleSwitcher({ moduleKey, children }) {
 import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
 import { FrostIcon } from "./FrostIcons.jsx";
 import AnimatedLogo from "./AnimatedLogo.jsx";
-// Catálogo padrão de serviços (Refrigeração/Climatização) — semeado uma vez
-// por dispositivo via seedServiceCatalog() para popular erp:service: ao iniciar.
-import SERVICE_CATALOG_SEED from "./services-seed.json";
-// Catálogo padrão de produtos (peças/insumos) — semeado via seedProductCatalog().
-// Cada item entra no estoque com saldo inicial de 10 unidades.
-import PRODUCT_CATALOG_SEED from "./products-seed.json";
+// Catálogos de seed (serviços + produtos) são carregados sob demanda via dynamic
+// import dentro das funções de seed — evita inflar o bundle inicial com ~96KB
+// de JSON que só roda no primeiro boot do dispositivo.
 // Catálogo de equipamentos (marca/modelo/capacidade) usado no picker da OS:
 // quando o usuário escolhe o tipo, o select de modelo é populado e a
 // capacidade preenchida automaticamente ao selecionar um item.
 import EQUIPMENT_CATALOG_RAW from "./equipment-catalog.json";
 
-// Detecta se a URL aponta para um arquivo de vídeo (preview do tecnico)
-const VIDEO_EXT_RE = /\.(mp4|mov|webm|m4v|avi|mkv|ogv|3gp)(\?|$)/i;
-const isVideoUrl = (url) => typeof url === "string" && VIDEO_EXT_RE.test(url);
-
-// ─── CONSTANTS ──────────────────────────────────────────────────────────────────
-
-// Paleta compartilhada por gráficos e badges
-const COLORS = ["#3b82f6", "#06b6d4", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"];
-
-// Mapeamento global de status — usado pelo StatusBadge em OS, Agenda, Cadastros e Financeiro
-const STATUS_MAP = {
-  ativo: { label: "Ativo", color: "bg-green-500" },
-  inativo: { label: "Inativo", color: "bg-gray-500" },
-  concluido: { label: "Concluído", color: "bg-green-500" },
-  pendente: { label: "Pendente", color: "bg-yellow-500" },
-  em_andamento: { label: "Em Andamento", color: "bg-blue-500" },
-  cancelado: { label: "Cancelado", color: "bg-red-500" },
-  agendado: { label: "Agendado", color: "bg-cyan-500" },
-  confirmado: { label: "Confirmado", color: "bg-blue-500" },
-  // ─── Status do fluxo da OS (alinhados ao STATUS_FLOW de ProcessModule) ──
-  aguardando: { label: "Aguardando", color: "bg-yellow-500" },
-  em_deslocamento: { label: "Em Deslocamento", color: "bg-cyan-500" },
-  em_execucao: { label: "Em Execução", color: "bg-blue-500" },
-  finalizado: { label: "Finalizado", color: "bg-green-500" },
-  // ─── Novos status do fluxo Tech App → ERP ───────────────────────────────
-  // Técnico chegou no local e iniciou o serviço
-  em_servico: { label: "Em Serviço", color: "bg-blue-600" },
-  // Técnico terminou e enviou relatório — aguarda revisão admin/gerente para fechar OS
-  aguardando_finalizacao: { label: "Aguardando Finalização", color: "bg-orange-500" },
-  pago: { label: "Pago", color: "bg-green-500" },
-  atrasado: { label: "Atrasado", color: "bg-red-500" },
-};
-
-// Matriz de permissões por role — inclui módulo financeiro
-const ROLE_PERMISSIONS = {
-  admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha"],
-  tecnico: ["dashboard", "os", "agenda"],
-  atendente: ["dashboard", "clientes", "os", "agenda", "ia"],
-};
-
-// ─── CATEGORIAS E FORMAS DE PAGAMENTO DO FINANCEIRO ─────────────────────────
-// Categorias separadas em receita (entradas) e despesa (saídas) para
-// evitar confusão no relatório — o usuário só vê as categorias relevantes
-// ao tipo selecionado.
-const CATEGORIES_RECEITA = [
-  "Instalação",
-  "Manutenção",
-  "Troca de Peças",
-  "Solda",
-  "Venda de Equipamento",
-  "Venda de Peça",
-  "Contrato de Manutenção",
-  "Outros",
-];
-
-const CATEGORIES_DESPESA = [
-  "Peça/Material",
-  "Combustível",
-  "Aluguel",
-  "Salário",
-  "Imposto",
-  "Ferramentas",
-  "Veículo",
-  "Marketing",
-  "Outros",
-];
-
-const PAYMENT_METHODS = [
-  "PIX",
-  "Cartão de Crédito",
-  "Cartão de Débito",
-  "Boleto",
-  "Dinheiro",
-  "Transferência",
-];
-
-// ─── CARGOS de funcionários ──────────────────────────────────────────────────
-// Lista canônica usada no cadastro e nos relatórios. Ao adicionar cargo novo,
-// considere também atualizar a derivação de `tipo` em saveEmployee (técnico/
-// gerente/administrativo controla quais módulos o user vê).
-const CARGOS_FUNCIONARIO = [
-  "Técnico em Refrigeração",
-  "Técnico de Central",
-  "Ajudante",
-  "Motorista",
-  "Administrativo",
-  "Gerente",
-];
-// Cargos que são considerados "técnicos" para gating de UI/relatórios
-const CARGOS_TECNICOS = ["Técnico em Refrigeração", "Técnico de Central", "Técnico", "Ajudante"];
-const CARGOS_GERENCIA = ["Gerente"];
-
-// ─── TIPOS DE EQUIPAMENTO — OS ──────────────────────────────────────────────
-// Cada tipo define quais campos técnicos aparecem no formulário de OS.
-// Usado para refrigeração comercial, climatização e linha branca.
-const EQUIPMENT_TYPES = {
-  central: {
-    label: "Central de Ar (Split/Janela)",
-    capacityLabel: "Capacidade (BTUs)",
-    capacityPlaceholder: "Ex: 12000",
-    capacityKey: "equipamentoBTUs",
-  },
-  geladeira: {
-    label: "Geladeira / Freezer",
-    capacityLabel: "Capacidade (Litros)",
-    capacityPlaceholder: "Ex: 450",
-    capacityKey: "equipamentoLitros",
-  },
-  lavadora: {
-    label: "Máquina de Lavar",
-    capacityLabel: "Capacidade (Kg)",
-    capacityPlaceholder: "Ex: 12",
-    capacityKey: "equipamentoKg",
-  },
-  centrifuga: {
-    label: "Centrífuga",
-    capacityLabel: "Capacidade (Kg)",
-    capacityPlaceholder: "Ex: 8",
-    capacityKey: "equipamentoKg",
-  },
-  expositor: {
-    label: "Expositor / Vitrine Refrigerada",
-    capacityLabel: "Capacidade (Litros)",
-    capacityPlaceholder: "Ex: 800",
-    capacityKey: "equipamentoLitros",
-  },
-  bebedouro_industrial: {
-    label: "Bebedouro Industrial",
-    capacityLabel: "Capacidade (Litros/h)",
-    capacityPlaceholder: "Ex: 100",
-    capacityKey: "equipamentoLitros",
-  },
-  bebedouro_mesa: {
-    label: "Bebedouro / Gelágua Mesa",
-    capacityLabel: "Modelo",
-    capacityPlaceholder: "Ex: Mesa 20L",
-    capacityKey: "equipamentoModeloExtra",
-  },
-  bebedouro_coluna: {
-    label: "Bebedouro / Gelágua Coluna",
-    capacityLabel: "Modelo",
-    capacityPlaceholder: "Ex: Coluna 20L",
-    capacityKey: "equipamentoModeloExtra",
-  },
-  camara_fria: {
-    label: "Câmara Fria",
-    capacityLabel: "Volume (m³)",
-    capacityPlaceholder: "Ex: 20",
-    capacityKey: "equipamentoVolumeM3",
-  },
-  outro: {
-    label: "Outro",
-    capacityLabel: "Especificação",
-    capacityPlaceholder: "Descreva",
-    capacityKey: "equipamentoEspecificacao",
-  },
-};
+// ─── CONSTANTS ──────────────────────────────────────────────────────────────
+// Definições foram extraidas para ./constants.js (fonte única). Reimporta aqui
+// para uso direto no JSX e para callers que ja referenciam estes nomes.
+import {
+  VIDEO_EXT_RE,
+  isVideoUrl,
+  COLORS,
+  STATUS_MAP,
+  ROLE_PERMISSIONS,
+  CATEGORIES_RECEITA,
+  CATEGORIES_DESPESA,
+  PAYMENT_METHODS,
+  CARGOS_FUNCIONARIO,
+  CARGOS_TECNICOS,
+  CARGOS_GERENCIA,
+  EQUIPMENT_TYPES,
+  SERVICE_TYPES_OS,
+} from "./constants.js";
 
 // ─── Índice do catálogo de equipamentos por tipo interno ────────────────────
 // Para cada tipo interno (central, geladeira, ...) montamos a lista de modelos
@@ -308,17 +165,6 @@ const EQUIPMENT_CATALOG_BY_KEY = (() => {
   }
   return out;
 })();
-
-// ─── TIPOS DE SERVIÇO — OS ───────────────────────────────────────────────────
-// Lista usada no dropdown de serviços da OS e da Agenda.
-// Removidos: Higienização, Reparo. Adicionados: Troca de Peças, Solda.
-const SERVICE_TYPES_OS = [
-  "Instalação",
-  "Manutenção",
-  "Troca de Peças",
-  "Solda",
-  "Desinstalação",
-];
 
 // ─── DB LAYER ───────────────────────────────────────────────────────────────────
 
@@ -1130,7 +976,9 @@ function purgeAllUsers() {
 // Os registros entram sem companyId — o filtro de tenant trata records sem
 // companyId como "globais", visíveis a todas as empresas, o que é desejável
 // para um catálogo padrão. Empresas que quiserem podem editar/desativar.
-function seedServiceCatalog() {
+async function seedServiceCatalog() {
+  // Dynamic import — JSON sai do bundle inicial e só carrega no primeiro boot
+  const { default: SERVICE_CATALOG_SEED } = await import("./services-seed.json");
   if (!Array.isArray(SERVICE_CATALOG_SEED) || SERVICE_CATALOG_SEED.length === 0) return;
 
   const existing = DB.listAll("erp:service:");
@@ -1173,7 +1021,9 @@ function seedServiceCatalog() {
 //
 // Idempotente: pula SKUs já cadastrados, então pode rodar a cada boot.
 // Registros entram sem companyId (catálogo global).
-function seedProductCatalog() {
+async function seedProductCatalog() {
+  // Dynamic import — JSON sai do bundle inicial e só carrega no primeiro boot
+  const { default: PRODUCT_CATALOG_SEED } = await import("./products-seed.json");
   if (!Array.isArray(PRODUCT_CATALOG_SEED) || PRODUCT_CATALOG_SEED.length === 0) return;
 
   const existingProducts = DB.listAll("erp:product:");
@@ -3039,24 +2889,28 @@ function MasterLoginScreen({ onLogin, onCancel, theme, setTheme }) {
     const normalized = email.trim().toLowerCase();
     setLoading(true);
     try {
-      // Hidrata masters remotos antes — garante que master cadastrado em outro
-      // device esteja visivel pra login. Local fallback se Supabase offline.
+      // Lookup remoto por email via RPC (anon SELECT * em master_users foi
+      // bloqueado no Phase 1 lockdown). Devolve UMA linha quando o email casa.
+      // Fallback local: se Supabase offline, varre o cache em window.storage.
+      let candidate = null;
       try {
-        const remoteMasters = await listMastersRemote();
-        remoteMasters.forEach(m => {
-          window.storage.setItem(MASTER_PREFIX + m.id, JSON.stringify(m));
-        });
-      } catch { /* offline — usa local */ }
-      // Lista direto (não filtra por company — master não tem company)
-      const masters = DB.listAll(MASTER_PREFIX);
+        candidate = await lookupMasterByEmail(normalized);
+      } catch { /* offline — cai no fallback local */ }
+      if (candidate) {
+        // Sincroniza cache local com a versao remota antes de validar senha
+        window.storage.setItem(MASTER_PREFIX + candidate.id, JSON.stringify(candidate));
+      }
+      const masters = candidate ? [candidate] : DB.listAll(MASTER_PREFIX);
       let found = null;
       for (const m of masters) {
         if ((m.email || "").trim().toLowerCase() === normalized) {
           const result = await checkPassword(password, m.password);
           if (result.match) {
             if (result.needsRehash) {
+              // Rehash local — sync remoto desse rehash exigiria RPC dedicado
+              // (precisaria provar credencial). Local OK; remoto pega no
+              // proximo upsert autenticado.
               m.password = await hashPassword(password);
-              try { await upsertMasterRemote(m); } catch { /* ignora */ }
             }
             window.storage.setItem(MASTER_PREFIX + m.id, JSON.stringify(m));
             found = m; break;
@@ -12864,35 +12718,52 @@ export default function App() {
       // Multi-tenant: garante company padrão e tagga registros legados
       ensureCompanyMigration();
       // Catálogo padrão de serviços (idempotente — pula códigos já cadastrados)
-      seedServiceCatalog();
+      // JSON é carregado via dynamic import — fica fora do bundle inicial.
+      await seedServiceCatalog();
       // Catálogo padrão de produtos + estoque inicial 10 (idempotente)
-      seedProductCatalog();
+      await seedProductCatalog();
       loadAllData();
       setLoading(false);
       // Master mode: verifica se já existe master cadastrado
       if (masterMode) {
-        // Hidrata masters do Supabase (cross-device sync) antes de decidir
-        // se mostra FirstMasterSetup ou MasterLoginScreen.
+        // Phase 1 lockdown: nao podemos mais listar masters anonimamente.
+        // Se ha sessao master salva, tentamos hidratar usando o token como
+        // prova de autenticidade. Caso contrario, consultamos so a contagem
+        // pra decidir entre FirstMasterSetup e MasterLoginScreen.
         let remoteMasters = [];
+        let storedSessionTokenHash = null;
         try {
-          remoteMasters = await listMastersRemote();
-          remoteMasters.forEach(m => {
-            window.storage.setItem(MASTER_PREFIX + m.id, JSON.stringify(m));
-          });
-        } catch { /* offline — usa local */ }
-        // Migracao: masters cadastrados antes da feature de sync ainda só
-        // existem local. Faz upload pra ficarem disponiveis em outros devices.
-        try {
-          const remoteIds = new Set(remoteMasters.map(m => m.id));
-          const localMasters = DB.listAll(MASTER_PREFIX);
-          for (const m of localMasters) {
-            if (m.id && !remoteIds.has(m.id)) {
-              await upsertMasterRemote(m);
-            }
+          const raw = sessionStorage.getItem("frost_master_session");
+          if (raw) {
+            const sess = JSON.parse(raw);
+            const cached = sess?.id ? DB.get(MASTER_PREFIX + sess.id) : null;
+            storedSessionTokenHash = cached?.sessionTokenHash || null;
           }
-        } catch { /* ignora — nao bloqueia boot */ }
-        const masters = DB.listAll(MASTER_PREFIX);
-        if (masters.length === 0) setNeedsFirstMaster(true);
+        } catch { /* ignora */ }
+        if (storedSessionTokenHash) {
+          try {
+            remoteMasters = await listMastersAuthenticated(storedSessionTokenHash);
+            remoteMasters.forEach(m => {
+              window.storage.setItem(MASTER_PREFIX + m.id, JSON.stringify(m));
+            });
+          } catch { /* offline — usa local */ }
+          // Migracao: sobe masters locais ausentes no remoto (caller_token presente).
+          try {
+            const remoteIds = new Set(remoteMasters.map(m => m.id));
+            const localMasters = DB.listAll(MASTER_PREFIX);
+            for (const m of localMasters) {
+              if (m.id && !remoteIds.has(m.id)) {
+                await upsertMasterRemote(m, storedSessionTokenHash);
+              }
+            }
+          } catch { /* ignora — nao bloqueia boot */ }
+        }
+        // Decisao FirstMasterSetup: olha remoto (count) primeiro, fallback local.
+        let masterExists = DB.listAll(MASTER_PREFIX).length > 0;
+        if (!masterExists) {
+          try { masterExists = (await masterCountRemote()) > 0; } catch { /* usa local */ }
+        }
+        if (!masterExists) setNeedsFirstMaster(true);
         // Restaura sessão master se houver
         try {
           const raw = sessionStorage.getItem("frost_master_session");
