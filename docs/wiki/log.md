@@ -71,3 +71,9 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
   - decisions/006-master-tier-multi-tenant.md — dívida técnica documentada (XSS escala cross-tenant)
 - index atualizado: 7 entradas em Conceitos, 1 em Fluxos, 6 em Decisões
 - descobertas inline: PIX hardcoded em document-generators (THIAGO/Sicredi); _h XSS guard exigido em todo template literal; verifyTotp não tem throttling (lacuna); MasterApp bypassa DB.set por design (companyId null em sessão master)
+
+## [2026-05-18] ingest | Agente IA WhatsApp v2 + Pos-Venda
+- source: docs/superpowers/specs/2026-05-18-ia-whatsapp-v2-design.md
+- new pages: modules/pos-venda.md, modules/ia-atendimento.md, flows/whatsapp-ia-os.md, concepts/evolution-multitenant.md, decisions/007-ia-os-aprovacao-humana.md
+- touched: index.md (2 Modulos, 1 Conceito, 1 Fluxo, 1 Decisao, 1 Fonte)
+- contexto: v2 = audio Whisper + imagem vision + Storage ai-media + propose_os/aprovacao humana + multi-empresa por evolution_instance
