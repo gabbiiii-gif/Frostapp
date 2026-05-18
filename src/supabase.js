@@ -160,10 +160,14 @@ export async function ensureMemberLoaded() {
 // empresas com muitas OS/clientes/transações, isso causa perda de dados:
 // keys reais no banco "desaparecem" no app e o passo de cleanup abaixo
 // APAGAVA do localStorage tudo que não veio. Paginação resolve.
+// Retorna true SOMENTE se o hydrate remoto rodou de fato (Supabase ativo +
+// sessão/companyId + pelo menos uma página lida). O init usa esse retorno como
+// gate: sem hydrate real, NÃO semear catálogo (cache local vazio duplicaria o
+// catálogo remoto a cada boot sem sessão).
 export async function hydrateFromSupabase() {
-  if (!supabase) return;
+  if (!supabase) return false;
   const companyId = getCompanyId();
-  if (!companyId) return; // sem auth → nada a sincronizar
+  if (!companyId) return false; // sem auth → nada a sincronizar
   try {
     // ─── Pagina via .range() em batches de 1000 até esgotar ─────────────────
     const PAGE = 1000;
@@ -190,7 +194,7 @@ export async function hydrateFromSupabase() {
       console.warn('Supabase hydrate error:', pageError.message);
       // Se pelo menos uma página veio, segue com o que tem. Se nenhuma, aborta
       // sem apagar local (evita perda de dados em falha de rede).
-      if (allRows.length === 0) return;
+      if (allRows.length === 0) return false;
     }
     const completou = !pageError; // só faz cleanup de keys locais se paginação foi 100% bem-sucedida
     const remoteKeys = new Set(allRows.map(row => row.key));
@@ -219,8 +223,10 @@ export async function hydrateFromSupabase() {
       });
     }
     console.log(`Sync completo: ${allRows.length} chaves do Supabase em ${pagesFetched} página(s), ${keysToRemove.length} removidas localmente${completou ? '' : ' [INCOMPLETO — cleanup pulado por segurança]'}`);
+    return true;
   } catch (err) {
     console.warn('Supabase connection failed, using local data:', err.message);
+    return false;
   }
 }
 

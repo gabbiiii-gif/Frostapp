@@ -1086,6 +1086,10 @@ function purgeAllUsers() {
 // companyId como "globais", visíveis a todas as empresas, o que é desejável
 // para um catálogo padrão. Empresas que quiserem podem editar/desativar.
 async function seedServiceCatalog() {
+  // Flag persistente sincronizada: catálogo é global (sem companyId), semeado
+  // UMA vez na vida. Após o primeiro seed, a flag viaja via Supabase e todo
+  // device/boot a vê → nunca re-semeia (causa raiz da multiplicação anterior).
+  if (DB.get("erp:catalogSeeded_v1")) return;
   // Dynamic import — JSON sai do bundle inicial e só carrega no primeiro boot
   const { default: SERVICE_CATALOG_SEED } = await import("./services-seed.json");
   if (!Array.isArray(SERVICE_CATALOG_SEED) || SERVICE_CATALOG_SEED.length === 0) return;
@@ -1131,6 +1135,8 @@ async function seedServiceCatalog() {
 // Idempotente: pula SKUs já cadastrados, então pode rodar a cada boot.
 // Registros entram sem companyId (catálogo global).
 async function seedProductCatalog() {
+  // Mesmo guard do seedServiceCatalog — catálogo global semeado uma única vez.
+  if (DB.get("erp:catalogSeeded_v1")) return;
   // Dynamic import — JSON sai do bundle inicial e só carrega no primeiro boot
   const { default: PRODUCT_CATALOG_SEED } = await import("./products-seed.json");
   if (!Array.isArray(PRODUCT_CATALOG_SEED) || PRODUCT_CATALOG_SEED.length === 0) return;
@@ -12849,16 +12855,25 @@ export default function App() {
 
     // Real init — restaura sessão Supabase (se houver), só então hidrata.
     // RLS bloqueia leitura sem auth, então sem session hydrate é no-op (e isso é OK).
-    ensureMemberLoaded().then(() => hydrateFromSupabase()).then(async () => {
+    ensureMemberLoaded().then(() => hydrateFromSupabase()).then(async (hydrated) => {
       // Inicialização: popula dados demo se for o primeiro acesso (sem usuários)
       await seedDatabase();
       // Multi-tenant: garante company padrão e tagga registros legados
       ensureCompanyMigration();
-      // Catálogo padrão de serviços (idempotente — pula códigos já cadastrados)
-      // JSON é carregado via dynamic import — fica fora do bundle inicial.
-      await seedServiceCatalog();
-      // Catálogo padrão de produtos + estoque inicial 10 (idempotente)
-      await seedProductCatalog();
+      // Catálogo global só pode ser semeado quando NÃO há Supabase (app local
+      // puro) OU quando o hydrate remoto rodou de fato (sessão válida). Boot sem
+      // sessão tinha cache local vazio e re-semeava o catálogo a cada acesso,
+      // duplicando produtos/serviços no Supabase (966 produtos p/ 129 reais).
+      const podeSemearCatalogo = !supabase || hydrated === true;
+      if (podeSemearCatalogo) {
+        // JSON via dynamic import — fora do bundle inicial. Os seeds têm guard
+        // interno pela flag erp:catalogSeeded_v1 (rede de segurança final).
+        await seedServiceCatalog();
+        await seedProductCatalog();
+        // Marca o catálogo como semeado. Key erp:* → sincroniza pro Supabase e
+        // hydrata em todo device, travando qualquer novo seed para sempre.
+        if (!DB.get("erp:catalogSeeded_v1")) DB.set("erp:catalogSeeded_v1", true);
+      }
       loadAllData();
       setLoading(false);
       // Master mode: verifica se já existe master cadastrado
