@@ -272,6 +272,27 @@
       "typeVersion": 2.5,
       "position": [740, 360],
       "credentials": { "postgres": { "id": "SUPABASE_POSTGRES_CRED_ID", "name": "Supabase Postgres" } }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "typeValidation": "strict" },
+          "conditions": [
+            {
+              "id": "c16b",
+              "leftValue": "={{ $('Resolve empresa').item.json.company_id }}",
+              "rightValue": "",
+              "operator": { "type": "string", "operation": "exists", "singleValue": true }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "16b",
+      "name": "Empresa encontrada?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [840, 360]
     }
   ],
   "connections": {
@@ -283,7 +304,13 @@
       ]
     },
     "Extrai campos": { "main": [[{ "node": "Resolve empresa", "type": "main", "index": 0 }]] },
-    "Resolve empresa": { "main": [[{ "node": "Upsert conversa", "type": "main", "index": 0 }]] },
+    "Resolve empresa": { "main": [[{ "node": "Empresa encontrada?", "type": "main", "index": 0 }]] },
+    "Empresa encontrada?": {
+      "main": [
+        [{ "node": "Upsert conversa", "type": "main", "index": 0 }],
+        [{ "node": "Responde Webhook", "type": "main", "index": 0 }]
+      ]
+    },
     "Upsert conversa": { "main": [[{ "node": "Grava msg cliente", "type": "main", "index": 0 }]] },
     "Grava msg cliente": { "main": [[{ "node": "Conversa ativa?", "type": "main", "index": 0 }]] },
     "Conversa ativa?": {
