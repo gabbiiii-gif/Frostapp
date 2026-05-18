@@ -13,6 +13,7 @@ import {
   toISODate,
   daysFromNow,
   monthsAgo,
+  validateOSProposal,
 } from './utils.js';
 
 describe('genId', () => {
@@ -202,5 +203,28 @@ describe('daysFromNow / monthsAgo', () => {
 
   it('monthsAgo(12) volta um ano', () => {
     expect(monthsAgo(12)).toBe('2025-05-06');
+  });
+});
+
+describe("validateOSProposal", () => {
+  const base = {
+    customer_name: "Maria", address: "Rua A, 10, Centro, SP",
+    equipment_type: "Geladeira", equipment_brand: "Brastemp",
+    equipment_model: "BRM44", problem: "não gela", phone: "5511999998888",
+  };
+  it("aceita payload completo e normaliza telefone", () => {
+    const r = validateOSProposal({ ...base, phone: "+55 (11) 99999-8888" });
+    expect(r.valid).toBe(true);
+    expect(r.payload.phone).toBe("5511999998888");
+    expect(r.payload.media_urls).toEqual([]);
+  });
+  it("rejeita quando falta campo obrigatório", () => {
+    const r = validateOSProposal({ ...base, problem: "" });
+    expect(r.valid).toBe(false);
+    expect(r.missing).toContain("problem");
+  });
+  it("preserva media_urls existentes", () => {
+    const r = validateOSProposal({ ...base, media_urls: ["http://x/a.jpg"] });
+    expect(r.payload.media_urls).toEqual(["http://x/a.jpg"]);
   });
 });

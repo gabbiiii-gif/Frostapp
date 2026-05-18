@@ -139,3 +139,23 @@ export function monthsAgo(n) {
   d.setMonth(d.getMonth() - n);
   return toISODate(d);
 }
+
+// Valida e normaliza o payload de uma proposta de OS vinda do agente IA.
+// Retorna { valid, missing[], payload } — payload com telefone só dígitos e
+// media_urls sempre array. Helper puro: testado em utils.test.js.
+export function validateOSProposal(input) {
+  const required = ["customer_name", "address", "equipment_type", "equipment_brand", "equipment_model", "problem", "phone"];
+  const src = input || {};
+  const missing = required.filter((k) => !String(src[k] ?? "").trim());
+  const payload = {
+    customer_name: String(src.customer_name ?? "").trim(),
+    address: String(src.address ?? "").trim(),
+    equipment_type: String(src.equipment_type ?? "").trim(),
+    equipment_brand: String(src.equipment_brand ?? "").trim(),
+    equipment_model: String(src.equipment_model ?? "").trim(),
+    problem: String(src.problem ?? "").trim(),
+    phone: String(src.phone ?? "").replace(/\D/g, ""),
+    media_urls: Array.isArray(src.media_urls) ? src.media_urls.filter(Boolean) : [],
+  };
+  return { valid: missing.length === 0, missing, payload };
+}
