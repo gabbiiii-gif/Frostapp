@@ -2,6 +2,9 @@
   "installCommand": "npm install",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "crons": [
+    { "path": "/api/pos-venda-cron", "schedule": "*/15 * * * *" }
+  ],
   "rewrites": [
     { "source": "/api/calendar.ics", "destination": "/api/calendar" },
     { "source": "/calendar.ics", "destination": "/api/calendar" }
