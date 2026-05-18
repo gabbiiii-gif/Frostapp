@@ -1041,6 +1041,46 @@ async function scheduleOSPosVenda(os) {
   }
 }
 
+// Cria uma OS a partir de uma proposta aprovada do agente IA.
+// Caminho pelo DB layer (DB.set) — mantém audit trail, escopo por empresa,
+// sync Supabase e dispara o pós-venda. Espelha o newOS do ProcessModule
+// (getNextNumber("OS", ...)). Fotos do cliente entram em `fotos`.
+function createOSFromProposal(p) {
+  const orders = DB.list("erp:os:");
+  const numero = getNextNumber("OS", orders, "erp:os:");
+  const newOS = {
+    id: genId(),
+    numero,
+    clienteId: null,
+    clienteNome: p.customer_name || "—",
+    endereco: p.address || "",
+    servicos: [],
+    pecas: [],
+    tipo: "Atendimento via IA WhatsApp",
+    descricao: p.problem || "",
+    equipamentoTipo: p.equipment_type || "",
+    equipamentoModelo: [p.equipment_brand, p.equipment_model].filter(Boolean).join(" "),
+    equipamentoCapacidade: "",
+    equipamentoBTUs: "",
+    tecnicoId: "",
+    tecnicoNome: "—",
+    status: "aguardando",
+    dataAbertura: new Date().toISOString(),
+    dataAgendada: null,
+    horaAgendada: "",
+    dataConclusao: null,
+    observacoes: `Telefone WhatsApp: ${p.phone || ""}`,
+    valor: 0,
+    itensUtilizados: [],
+    fotos: Array.isArray(p.media_urls) ? p.media_urls : [],
+    origem: "ia_whatsapp",
+    createdAt: new Date().toISOString(),
+  };
+  DB.set("erp:os:" + newOS.id, newOS);
+  scheduleOSPosVenda(newOS);
+  return newOS;
+}
+
 // Lista de módulos disponíveis para autorização manual no gerenciamento de usuários
 // Mantida em sincronia com navItems do App (remoções de sessões devem ocorrer aqui também)
 const ALL_MODULES = [
