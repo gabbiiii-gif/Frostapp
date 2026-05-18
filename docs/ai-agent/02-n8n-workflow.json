@@ -363,7 +363,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "=https://SEU_PROJETO.supabase.co/storage/v1/object/ai-media/{{ $('Resolve empresa').item.json.company_id }}/{{ $('Extrai campos').item.json.phone }}/{{ $now.toMillis() }}.{{ $('Tipo de mídia').item.json.ext || 'bin' }}",
+        "url": "=https://SEU_PROJETO.supabase.co/storage/v1/object/ai-media/{{ $('Resolve empresa').item.json.company_id }}/{{ $('Extrai campos').item.json.phone }}/{{ $now.toMillis() }}.{{ $('Webhook Evolution').item.json.body.data.message.imageMessage ? 'jpg' : ($('Webhook Evolution').item.json.body.data.message.audioMessage ? 'ogg' : 'bin') }}",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
