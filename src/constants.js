@@ -34,9 +34,9 @@ export const STATUS_MAP = {
 // Matriz de permissões por role — inclui módulo financeiro
 export const ROLE_PERMISSIONS = {
   admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha"],
+  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha", "pos-venda"],
   tecnico: ["dashboard", "os", "agenda"],
-  atendente: ["dashboard", "clientes", "os", "agenda", "ia"],
+  atendente: ["dashboard", "clientes", "os", "agenda", "ia", "pos-venda"],
 };
 
 // ─── CARGOS de funcionários ──────────────────────────────────────────────────

@@ -95,6 +95,7 @@ function ModuleSwitcher({ moduleKey, children }) {
 import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
 import { FrostIcon } from "./FrostIcons.jsx";
 import AnimatedLogo from "./AnimatedLogo.jsx";
+import PosVendaModule from "./modules/PosVendaModule.jsx";
 // Catálogos de seed (serviços + produtos) são carregados sob demanda via dynamic
 // import dentro das funções de seed — evita inflar o bundle inicial com ~96KB
 // de JSON que só roda no primeiro boot do dispositivo.
@@ -915,6 +916,113 @@ function syncOSToFinance(os) {
   DB.set("erp:finance:" + newTx.id, newTx);
 }
 
+// ─── Agenda mensagens de Pós-Venda ao finalizar OS ──────────────────────────
+// O pacote original previa um trigger SQL em `ordens_servico`, mas o FrostERP
+// guarda OS como JSON no kv_store — não existe tabela relacional pra disparar
+// trigger. Então o agendamento é feito aqui, client-side, quando a OS entra
+// em "finalizado" (changeStatus e aprovação do admin no review).
+//
+// Idempotente: consulta mensagens já existentes do os_id e só insere os tipos
+// que faltam (índice único parcial (os_id,tipo) é a rede de segurança final).
+// Fire-and-forget: nunca bloqueia o fluxo de finalização da OS.
+async function scheduleOSPosVenda(os) {
+  try {
+    if (!supabase || !os?.id || !os.clienteId) return;
+
+    // Config: tenta override do cliente, cai na global
+    let config = null;
+    {
+      const { data: cfgCli } = await supabase
+        .from("pos_venda_config").select("*")
+        .eq("cliente_id", os.clienteId).eq("ativo", true).maybeSingle();
+      if (cfgCli) config = cfgCli;
+    }
+    if (!config) {
+      const { data: cfgGlobal } = await supabase
+        .from("pos_venda_config").select("*")
+        .is("cliente_id", null).maybeSingle();
+      config = cfgGlobal;
+    }
+    if (!config) return; // sem config nenhuma, não agenda
+
+    // Opt-out do cliente → não agenda
+    const { data: optout } = await supabase
+      .from("pos_venda_optout").select("cliente_id")
+      .eq("cliente_id", os.clienteId).maybeSingle();
+    if (optout) return;
+
+    // Já existe agendamento pra essa OS? (idempotência)
+    const { data: existentes } = await supabase
+      .from("pos_venda_mensagens").select("tipo").eq("os_id", os.id);
+    const jaTem = new Set((existentes || []).map((r) => r.tipo));
+
+    // Telefone snapshot do cliente (kv_store)
+    const cliente = DB.get("erp:client:" + os.clienteId);
+    const telefone = cliente?.telefone || "";
+    const clienteNome = os.clienteNome || cliente?.nome || "Cliente";
+
+    // Templates default por tipo
+    const { data: tpls } = await supabase
+      .from("pos_venda_templates").select("tipo, conteudo")
+      .eq("is_default", true).eq("ativo", true);
+    const tplByTipo = {};
+    (tpls || []).forEach((t) => { tplByTipo[t.tipo] = t.conteudo; });
+
+    const finalizadoEm = os.dataConclusao ? new Date(os.dataConclusao) : new Date();
+    const dias = Number(config.dias_proxima_visita) || 90;
+    const proximaVisita = new Date(finalizadoEm);
+    proximaVisita.setDate(proximaVisita.getDate() + dias);
+
+    const rows = [];
+
+    // NPS — 24h após finalização
+    if (config.enviar_nps && !jaTem.has("nps")) {
+      const agendada = new Date(finalizadoEm);
+      agendada.setHours(agendada.getHours() + 24);
+      rows.push({
+        os_id: os.id,
+        cliente_id: os.clienteId,
+        cliente_nome: clienteNome,
+        os_numero: os.numero || null,
+        tipo: "nps",
+        status: "pendente",
+        conteudo: tplByTipo.nps ||
+          "Olá! Como foi nosso atendimento? De 0 a 10, qual nota você dá?",
+        telefone,
+        agendada_para: agendada.toISOString(),
+      });
+    }
+
+    // Lembrete de próxima visita — 3 dias antes da data calculada
+    if (config.enviar_lembrete && !jaTem.has("lembrete_visita")) {
+      const agendada = new Date(proximaVisita);
+      agendada.setDate(agendada.getDate() - 3);
+      const [h, m] = String(config.horario_envio || "09:00").split(":");
+      agendada.setHours(Number(h) || 9, Number(m) || 0, 0, 0);
+      rows.push({
+        os_id: os.id,
+        cliente_id: os.clienteId,
+        cliente_nome: clienteNome,
+        os_numero: os.numero || null,
+        tipo: "lembrete_visita",
+        status: "pendente",
+        conteudo: tplByTipo.lembrete_visita ||
+          "Oi! Já fazem alguns meses do seu último serviço. Que tal agendar uma manutenção preventiva?",
+        telefone,
+        agendada_para: agendada.toISOString(),
+      });
+    }
+
+    if (rows.length === 0) return;
+    const { error } = await supabase.from("pos_venda_mensagens").insert(rows);
+    if (error && !/duplicate key|unique/i.test(error.message || "")) {
+      console.warn("[pos-venda] agendamento falhou:", error.message);
+    }
+  } catch (e) {
+    console.warn("[pos-venda] scheduleOSPosVenda erro:", e?.message || e);
+  }
+}
+
 // Lista de módulos disponíveis para autorização manual no gerenciamento de usuários
 // Mantida em sincronia com navItems do App (remoções de sessões devem ocorrer aqui também)
 const ALL_MODULES = [
@@ -923,6 +1031,7 @@ const ALL_MODULES = [
   { id: "agenda", label: "Agenda" },
   { id: "cadastro", label: "Cadastros" },
   { id: "ia", label: "IA / Atendimento" },
+  { id: "pos-venda", label: "Pós-Venda" },
   { id: "folha", label: "Folha de Pagamento" },
   { id: "config", label: "Configurações (admin)" },
 ];
@@ -5894,6 +6003,8 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
     // OS finalizada gera receita no Financeiro automaticamente
     if (newStatus === "finalizado") {
       syncOSToFinance(updated);
+      // Agenda NPS + lembrete de pós-venda (fire-and-forget, não bloqueia UI)
+      scheduleOSPosVenda(updated);
     }
     addToast(`OS ${os.numero} → ${STATUS_LABELS_OS[newStatus]}`, "success");
     loadOrders();
@@ -6862,6 +6973,8 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                   DB.set("erp:os:" + updated.id, updated);
                   // Cria transação de receita pendente no Financeiro
                   syncOSToFinance(updated);
+                  // Agenda NPS + lembrete de pós-venda
+                  scheduleOSPosVenda(updated);
                   loadOrders();
                   setReviewing(null);
                   addToast(`OS ${reviewing.numero} finalizada`, "success");
@@ -13333,6 +13446,7 @@ export default function App() {
       { id: "financeiro", label: "Financeiro", iconName: "financeiro", module: "financeiro" },
       { id: "cadastro", label: "Cadastros", iconName: "cadastros", module: "clientes" },
       { id: "ia", label: "IA / Atendimento", iconName: "agenda", module: "ia" },
+      { id: "pos-venda", label: "Pós-Venda", iconName: "agenda", module: "pos-venda" },
       { id: "folha", label: "Folha de Pagamento", iconName: "financeiro", module: "folha" },
       { id: "config", label: "Configurações", iconName: "config", module: "config" },
     ];
@@ -13892,6 +14006,9 @@ export default function App() {
             )}
             {activeModule === "ia" && (
               <IAAtendimentoModule user={user} addToast={addToast} />
+            )}
+            {activeModule === "pos-venda" && (
+              <PosVendaModule supabase={supabase} />
             )}
             {activeModule === "folha" && (
               <FolhaModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} />
