@@ -130,7 +130,7 @@
         "promptType": "define",
         "text": "={{ $('Texto efetivo').item.json.text }}",
         "options": {
-          "systemMessage": "Você é o assistente virtual de uma empresa de assistência técnica em refrigeração e climatização (FrostERP).\n\nAtenda em português brasileiro, seja cordial, objetivo e profissional.\n\nQuando o cliente solicitar um serviço, colete em ordem:\n1. Nome completo\n2. Endereço (rua, número, bairro, cidade)\n3. Equipamento (tipo, marca e modelo)\n4. Descrição do problema\n\nApós coletar TODOS os dados, use a ferramenta \"create_os\" para registrar a Ordem de Serviço. Confirme ao cliente.\n\nSe pedirem status de OS existente, use \"get_recent_os\" com o telefone.\n\nSe a pergunta for muito técnica ou o cliente estiver insatisfeito, use \"handoff_to_human\".\n\nNunca prometa prazos. Nunca informe preços fixos — diga que será orçado na vistoria pelo técnico."
+          "systemMessage": "Você é o assistente virtual de uma empresa de assistência técnica em refrigeração e climatização (FrostERP).\n\nAtenda em português brasileiro, seja cordial, objetivo e profissional.\n\nQuando o cliente solicitar um serviço, colete em ordem:\n1. Nome completo\n2. Endereço (rua, número, bairro, cidade)\n3. Equipamento (tipo, marca e modelo)\n4. Descrição do problema\n\nApós coletar TODOS os dados, use a ferramenta propose_os para registrar a solicitação. Informe que o pedido foi registrado e que um atendente fará a análise e retornará em breve. Nunca afirme que a OS já está criada ou agendada.\n\nSe pedirem status de OS existente, use \"get_recent_os\" com o telefone.\n\nSe a pergunta for muito técnica ou o cliente estiver insatisfeito, use \"handoff_to_human\".\n\nNunca prometa prazos. Nunca informe preços fixos — diga que será orçado na vistoria pelo técnico."
         }
       },
       "id": "7",
@@ -167,25 +167,17 @@
     },
     {
       "parameters": {
-        "name": "create_os",
-        "description": "Registra uma nova Ordem de Serviço no FrostERP. Use APENAS quando tiver TODOS os dados: nome do cliente, endereço completo, equipamento (tipo, marca, modelo) e descrição do problema.",
-        "workflowId": { "__rl": true, "mode": "id", "value": "" },
-        "fields": {
-          "values": [
-            { "name": "customer_name", "type": "stringValue" },
-            { "name": "address", "type": "stringValue" },
-            { "name": "equipment_type", "type": "stringValue" },
-            { "name": "equipment_brand", "type": "stringValue" },
-            { "name": "equipment_model", "type": "stringValue" },
-            { "name": "problem", "type": "stringValue" }
-          ]
-        }
+        "name": "propose_os",
+        "description": "Registra uma PROPOSTA de Ordem de Serviço para aprovação humana. Use quando tiver nome, endereço, equipamento (tipo, marca, modelo) e descrição do problema. NÃO afirme que a OS foi criada — diga ao cliente que o pedido foi registrado e será analisado por um atendente, que retornará em breve.",
+        "operation": "executeQuery",
+        "query": "insert into ai_os_proposals (company_id, conversation_id, payload) values ('{{ $('Resolve empresa').item.json.company_id }}', '{{ $('Upsert conversa').item.json.id }}', json_build_object('customer_name', $$ {{ $fromAI('customer_name') }} $$, 'address', $$ {{ $fromAI('address') }} $$, 'equipment_type', $$ {{ $fromAI('equipment_type') }} $$, 'equipment_brand', $$ {{ $fromAI('equipment_brand') }} $$, 'equipment_model', $$ {{ $fromAI('equipment_model') }} $$, 'problem', $$ {{ $fromAI('problem') }} $$, 'phone', '{{ $('Extrai campos').item.json.phone }}', 'media_urls', case when '{{ $('Texto efetivo').item.json.media_url }}' = '' then '[]'::jsonb else jsonb_build_array('{{ $('Texto efetivo').item.json.media_url }}') end)::jsonb) returning id;"
       },
       "id": "10",
-      "name": "Tool: create_os",
-      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "name": "propose_os",
+      "type": "@n8n/n8n-nodes-langchain.toolPostgres",
       "typeVersion": 1.3,
-      "position": [1660, 380]
+      "position": [1660, 380],
+      "credentials": { "postgres": { "id": "SUPABASE_POSTGRES_CRED_ID", "name": "Supabase Postgres" } }
     },
     {
       "parameters": {
@@ -546,7 +538,7 @@
     },
     "OpenAI Chat Model": { "ai_languageModel": [[{ "node": "AI Agent", "type": "ai_languageModel", "index": 0 }]] },
     "Postgres Chat Memory": { "ai_memory": [[{ "node": "AI Agent", "type": "ai_memory", "index": 0 }]] },
-    "Tool: create_os": { "ai_tool": [[{ "node": "AI Agent", "type": "ai_tool", "index": 0 }]] },
+    "propose_os": { "ai_tool": [[{ "node": "AI Agent", "type": "ai_tool", "index": 0 }]] },
     "Tool: get_recent_os": { "ai_tool": [[{ "node": "AI Agent", "type": "ai_tool", "index": 0 }]] },
     "Tool: handoff_to_human": { "ai_tool": [[{ "node": "AI Agent", "type": "ai_tool", "index": 0 }]] },
     "AI Agent": { "main": [[{ "node": "Grava resposta IA", "type": "main", "index": 0 }]] },
