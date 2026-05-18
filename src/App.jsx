@@ -876,22 +876,40 @@ function syncOSToFinance(os) {
   if (valor <= 0) return; // sem valor, nada a registrar no Financeiro
 
   const all = DB.list("erp:finance:");
-  const existing = all.find((t) => t.osId === os.id);
+  // Todos os lançamentos já ligados a esta OS. Em condição normal é 0 ou 1,
+  // mas race entre eventos (changeStatus + aprovação admin + edição) ou cache
+  // local stale (logo após hydrate / multi-device) podia criar 2+ REC para a
+  // mesma OS. Tratamos a lista inteira para ser idempotente e auto-curável.
+  const matches = all.filter((t) => t && t.osId === os.id);
 
   // Categoria: tipo da OS se bater com a lista de receita; senão "Outros"
   const categoria = CATEGORIES_RECEITA.includes(os.tipo) ? os.tipo : "Outros";
   const dataIso = os.dataConclusao || new Date().toISOString();
   const descricao = `OS ${os.numero || os.id} — ${os.clienteNome || "Cliente"}${os.tipo ? " — " + os.tipo : ""}`;
 
-  if (existing) {
+  if (matches.length > 0) {
+    // Primário: prioriza o REC já "pago" (estado financeiro real, não pode
+    // sumir), senão o mais antigo (menor número REC). O resto é duplicata.
+    matches.sort((a, b) => {
+      const ap = a.status === "pago" ? 0 : 1;
+      const bp = b.status === "pago" ? 0 : 1;
+      if (ap !== bp) return ap - bp;
+      return String(a.numero || "").localeCompare(String(b.numero || ""));
+    });
+    const primary = matches[0];
+    // Self-heal: remove qualquer duplicata remanescente. Garante no máximo 1
+    // REC por OS mesmo que uma race anterior tenha vazado outro.
+    for (let i = 1; i < matches.length; i++) {
+      DB.delete("erp:finance:" + matches[i].id);
+    }
     // Mantém status — admin pode ter marcado como "pago" manualmente.
     // Atualiza apenas dados informativos para refletir a OS atual.
     const updated = {
-      ...existing,
+      ...primary,
       descricao,
       valor,
       categoria,
-      data: existing.status === "pago" ? existing.data : dataIso,
+      data: primary.status === "pago" ? primary.data : dataIso,
       updatedAt: new Date().toISOString(),
     };
     DB.set("erp:finance:" + updated.id, updated);
