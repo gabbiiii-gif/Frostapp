@@ -69,12 +69,6 @@
               "name": "instance",
               "value": "={{ $json.body.instance }}",
               "type": "string"
-            },
-            {
-              "id": "p5",
-              "name": "company_id",
-              "value": "={{ $json.body.company_id || 'cmp_default' }}",
-              "type": "string"
             }
           ]
         },
@@ -89,7 +83,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "insert into ai_conversations (company_id, customer_phone, customer_name)\nvalues ('{{ $json.company_id }}', '{{ $json.phone }}', '{{ $json.name }}')\non conflict (company_id, customer_phone)\ndo update set customer_name = coalesce(excluded.customer_name, ai_conversations.customer_name),\n              last_message_at = now()\nreturning id, status, linked_client_id;"
+        "query": "insert into ai_conversations (company_id, customer_phone, customer_name)\nvalues ('{{ $('Resolve empresa').item.json.company_id }}', '{{ $('Extrai campos').item.json.phone }}', '{{ $('Extrai campos').item.json.name }}')\non conflict (company_id, customer_phone)\ndo update set customer_name = coalesce(excluded.customer_name, ai_conversations.customer_name),\n              last_message_at = now()\nreturning id, status, linked_client_id;"
       },
       "id": "4",
       "name": "Upsert conversa",
@@ -101,7 +95,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "insert into ai_messages (conversation_id, company_id, role, content)\nvalues ('{{ $('Upsert conversa').item.json.id }}', '{{ $('Extrai campos').item.json.company_id }}', 'customer', $$ {{ $('Extrai campos').item.json.text }} $$);"
+        "query": "insert into ai_messages (conversation_id, company_id, role, content)\nvalues ('{{ $('Upsert conversa').item.json.id }}', '{{ $('Resolve empresa').item.json.company_id }}', 'customer', $$ {{ $('Extrai campos').item.json.text }} $$);"
       },
       "id": "5",
       "name": "Grava msg cliente",
@@ -198,7 +192,7 @@
         "name": "get_recent_os",
         "description": "Busca as últimas Ordens de Serviço do cliente pelo telefone. Use quando o cliente perguntar sobre uma OS existente.",
         "operation": "executeQuery",
-        "query": "select v.value->>'numero' as numero, v.value->>'status' as status, v.value->>'descricaoProblema' as problema from kv_store v where v.company_id = '{{ $('Extrai campos').item.json.company_id }}' and v.key like 'erp:os:%' and v.value->>'clienteTelefone' = '{{ $('Extrai campos').item.json.phone }}' order by v.value->>'createdAt' desc limit 5;"
+        "query": "select v.value->>'numero' as numero, v.value->>'status' as status, v.value->>'descricaoProblema' as problema from kv_store v where v.company_id = '{{ $('Resolve empresa').item.json.company_id }}' and v.key like 'erp:os:%' and v.value->>'clienteTelefone' = '{{ $('Extrai campos').item.json.phone }}' order by v.value->>'createdAt' desc limit 5;"
       },
       "id": "11",
       "name": "Tool: get_recent_os",
@@ -224,7 +218,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "insert into ai_messages (conversation_id, company_id, role, content, metadata)\nvalues ('{{ $('Upsert conversa').item.json.id }}', '{{ $('Extrai campos').item.json.company_id }}', 'agent', $$ {{ $json.output }} $$, '{\"model\":\"gpt-4o-mini\"}'::jsonb);"
+        "query": "insert into ai_messages (conversation_id, company_id, role, content, metadata)\nvalues ('{{ $('Upsert conversa').item.json.id }}', '{{ $('Resolve empresa').item.json.company_id }}', 'agent', $$ {{ $json.output }} $$, '{\"model\":\"gpt-4o-mini\"}'::jsonb);"
       },
       "id": "13",
       "name": "Grava resposta IA",
@@ -266,6 +260,18 @@
       "type": "n8n-nodes-base.respondToWebhook",
       "typeVersion": 1.1,
       "position": [2260, 240]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select company_id from ai_agent_config where evolution_instance = '{{ $('Extrai campos').item.json.instance }}' and enabled = true limit 1;"
+      },
+      "id": "16",
+      "name": "Resolve empresa",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [740, 360],
+      "credentials": { "postgres": { "id": "SUPABASE_POSTGRES_CRED_ID", "name": "Supabase Postgres" } }
     }
   ],
   "connections": {
@@ -276,7 +282,8 @@
         [{ "node": "Responde Webhook", "type": "main", "index": 0 }]
       ]
     },
-    "Extrai campos": { "main": [[{ "node": "Upsert conversa", "type": "main", "index": 0 }]] },
+    "Extrai campos": { "main": [[{ "node": "Resolve empresa", "type": "main", "index": 0 }]] },
+    "Resolve empresa": { "main": [[{ "node": "Upsert conversa", "type": "main", "index": 0 }]] },
     "Upsert conversa": { "main": [[{ "node": "Grava msg cliente", "type": "main", "index": 0 }]] },
     "Grava msg cliente": { "main": [[{ "node": "Conversa ativa?", "type": "main", "index": 0 }]] },
     "Conversa ativa?": {
