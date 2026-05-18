@@ -332,6 +332,32 @@ function _mapMasterRow(row) {
   };
 }
 
+// Phase 2: login master 100% server-side via Edge Function.
+// O hash PBKDF2 nunca chega ao cliente. Retorna:
+//   { ok:true, sessionToken, master:{ id,email,nome,role,sessionTokenHash,createdAt } }
+//   { ok:false, status, error }  // 401 invalid, 409 legacy_format_use_local, ...
+// status 409 => formato legado (DJB2/base64): caller deve cair no fluxo local
+// (lookupMasterByEmail + checkPassword) que faz re-hash automatico.
+export async function masterLoginViaEdge(email, password) {
+  if (!supabase) return { ok: false, status: 0, error: 'no_supabase' };
+  try {
+    const { data, error } = await supabase.functions.invoke('master-login', {
+      body: { email: (email || '').trim().toLowerCase(), password },
+    });
+    if (error) {
+      // FunctionsHttpError expõe o status; 401/409 são respostas válidas do fluxo
+      const status = error?.context?.status || 0;
+      let parsed = null;
+      try { parsed = await error.context?.json?.(); } catch { /* sem corpo */ }
+      return { ok: false, status, error: parsed?.error || error.message };
+    }
+    if (data?.ok) return data;
+    return { ok: false, status: 401, error: data?.error || 'invalid_credentials' };
+  } catch (e) {
+    return { ok: false, status: 0, error: e.message };
+  }
+}
+
 export async function masterCountRemote() {
   if (!supabase) return 0;
   try {

@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated } from "./supabase.js";
+import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -2889,15 +2889,40 @@ function MasterLoginScreen({ onLogin, onCancel, theme, setTheme }) {
     const normalized = email.trim().toLowerCase();
     setLoading(true);
     try {
-      // Lookup remoto por email via RPC (anon SELECT * em master_users foi
-      // bloqueado no Phase 1 lockdown). Devolve UMA linha quando o email casa.
-      // Fallback local: se Supabase offline, varre o cache em window.storage.
+      // ─── Phase 2: login server-side via Edge Function master-login ─────────
+      // PBKDF2 e validado no servidor; o hash nunca chega ao cliente. Em caso
+      // de sucesso, a function ja persistiu session_token_hash no banco e
+      // devolve o registro master (sem password) + sessionToken.
+      const edge = await masterLoginViaEdge(normalized, password);
+      if (edge.ok && edge.master) {
+        const m = {
+          id: edge.master.id,
+          email: edge.master.email,
+          nome: edge.master.nome,
+          role: edge.master.role || "master",
+          sessionTokenHash: edge.master.sessionTokenHash || null,
+          createdAt: edge.master.createdAt,
+          // password NUNCA mais e cacheado local — server e a fonte de verdade.
+        };
+        window.storage.setItem(MASTER_PREFIX + m.id, JSON.stringify(m));
+        if (edge.sessionToken) {
+          try { sessionStorage.setItem("frost_master_token", edge.sessionToken); } catch { /* ignora */ }
+        }
+        onLogin(m);
+        return;
+      }
+      // 401 = credencial invalida (resposta definitiva do servidor)
+      if (edge.status === 401) {
+        setError("Email ou senha incorretos.");
+        return;
+      }
+      // 409 (formato legado DJB2/base64) OU rede indisponivel (status 0):
+      // cai no fluxo local que ainda faz re-hash automatico.
       let candidate = null;
       try {
         candidate = await lookupMasterByEmail(normalized);
-      } catch { /* offline — cai no fallback local */ }
+      } catch { /* offline — cai no cache local */ }
       if (candidate) {
-        // Sincroniza cache local com a versao remota antes de validar senha
         window.storage.setItem(MASTER_PREFIX + candidate.id, JSON.stringify(candidate));
       }
       const masters = candidate ? [candidate] : DB.listAll(MASTER_PREFIX);
@@ -2907,9 +2932,8 @@ function MasterLoginScreen({ onLogin, onCancel, theme, setTheme }) {
           const result = await checkPassword(password, m.password);
           if (result.match) {
             if (result.needsRehash) {
-              // Rehash local — sync remoto desse rehash exigiria RPC dedicado
-              // (precisaria provar credencial). Local OK; remoto pega no
-              // proximo upsert autenticado.
+              // Rehash local — o proximo login server-side ja valida o
+              // formato PBKDF2 novo. Aqui so atualiza o cache local.
               m.password = await hashPassword(password);
             }
             window.storage.setItem(MASTER_PREFIX + m.id, JSON.stringify(m));
