@@ -72,10 +72,28 @@ Nunca prometa prazos específicos sem confirmação. Nunca discuta preços fixos
   updated_at           timestamptz default now()
 );
 
+-- ─── 3b. Propostas de OS (gate de aprovação humana) ──────────────────────────
+create table if not exists public.ai_os_proposals (
+  id               uuid primary key default gen_random_uuid(),
+  company_id       text not null references public.companies(id) on delete cascade,
+  conversation_id  uuid not null references public.ai_conversations(id) on delete cascade,
+  payload          jsonb not null,   -- {customer_name,address,equipment_type,equipment_brand,equipment_model,problem,phone,media_urls[]}
+  status           text not null default 'pending_approval'
+                     check (status in ('pending_approval','approved','rejected')),
+  created_os_id    text,
+  decided_by       text,
+  created_at       timestamptz not null default now(),
+  decided_at       timestamptz
+);
+
+create index if not exists ai_os_prop_company_idx
+  on public.ai_os_proposals(company_id, status, created_at desc);
+
 -- ─── 4. RLS — Row Level Security (escopo por empresa) ────────────────────────
 alter table public.ai_conversations enable row level security;
 alter table public.ai_messages enable row level security;
 alter table public.ai_agent_config enable row level security;
+alter table public.ai_os_proposals enable row level security;
 
 -- Políticas: usuário só vê o que pertence à empresa dele (via company_members).
 -- IMPORTANTE: o N8N usará a SERVICE_ROLE key, que faz BYPASS de RLS — não precisa de policy específica.
@@ -110,6 +128,16 @@ create policy "cfg_company_scope" on public.ai_agent_config
     company_id in (select cm.company_id from public.company_members cm where cm.user_id = auth.uid())
   );
 
+drop policy if exists "prop_company_scope" on public.ai_os_proposals;
+create policy "prop_company_scope" on public.ai_os_proposals
+  for all
+  using (
+    company_id in (select cm.company_id from public.company_members cm where cm.user_id = auth.uid())
+  )
+  with check (
+    company_id in (select cm.company_id from public.company_members cm where cm.user_id = auth.uid())
+  );
+
 -- ─── 5. Realtime — publica tabelas para o app escutar via subscribe() ────────
 do $$
 begin
@@ -124,6 +152,12 @@ begin
     where pubname = 'supabase_realtime' and tablename = 'ai_messages'
   ) then
     alter publication supabase_realtime add table public.ai_messages;
+  end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime' and tablename = 'ai_os_proposals'
+  ) then
+    alter publication supabase_realtime add table public.ai_os_proposals;
   end if;
 end $$;
 
