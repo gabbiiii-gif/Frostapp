@@ -10,6 +10,7 @@ import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, del
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
+import { validateOSProposal } from "./utils.js";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
 
@@ -12026,6 +12027,8 @@ function IAAtendimentoModule({ user, addToast }) {
   const [sending, setSending] = useState(false);
   const [config, setConfig] = useState(null);
   const [showConfig, setShowConfig] = useState(false);
+  const [proposals, setProposals] = useState([]);
+  const [showProposals, setShowProposals] = useState(false);
   const member = getCurrentMember();
   const companyId = member?.company_id;
   const isAdmin = user?.role === "admin";
@@ -12065,7 +12068,19 @@ function IAAtendimentoModule({ user, addToast }) {
     setConfig(data || { company_id: companyId, enabled: false, evolution_instance: "", evolution_url: "", system_prompt: "", out_of_hours_message: "" });
   }, [companyId]);
 
-  useEffect(() => { loadConversations(); loadConfig(); }, [loadConversations, loadConfig]);
+  // Carrega propostas de OS pendentes de aprovação geradas pela IA
+  const loadProposals = useCallback(async () => {
+    if (!supabase || !companyId) return;
+    const { data } = await supabase
+      .from("ai_os_proposals")
+      .select("*")
+      .eq("company_id", companyId)
+      .eq("status", "pending_approval")
+      .order("created_at", { ascending: true });
+    setProposals(data || []);
+  }, [companyId]);
+
+  useEffect(() => { loadConversations(); loadConfig(); loadProposals(); }, [loadConversations, loadConfig, loadProposals]);
   useEffect(() => { if (selectedId) loadMessages(selectedId); }, [selectedId, loadMessages]);
 
   // Realtime: escuta novas mensagens da empresa e atualiza UI ao vivo.
@@ -12084,9 +12099,18 @@ function IAAtendimentoModule({ user, addToast }) {
         })
       .on("postgres_changes", { event: "*", schema: "public", table: "ai_conversations", filter: `company_id=eq.${companyId}` },
         () => loadConversations())
+      // Nova proposta de OS gerada pela IA → recarrega lista e dispara push para a equipe
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "ai_os_proposals", filter: `company_id=eq.${companyId}` },
+        (payload) => {
+          loadProposals();
+          sendServerPush(supabase, {
+            title: "Nova proposta de OS",
+            body: `${payload.new?.payload?.customer_name || "Cliente"} — aguardando aprovação`,
+          }).catch(() => {});
+        })
       .subscribe();
     return () => { supabase.removeChannel(ch); };
-  }, [companyId, selectedId, loadConversations]);
+  }, [companyId, selectedId, loadConversations, loadProposals]);
 
   const selected = conversations.find((c) => c.id === selectedId) || null;
 
@@ -12145,6 +12169,31 @@ function IAAtendimentoModule({ user, addToast }) {
     setShowConfig(false);
   };
 
+  // Aprova uma proposta: valida payload, cria a OS via camada DB e marca como aprovada
+  const approveProposal = async (prop) => {
+    const v = validateOSProposal(prop.payload);
+    if (!v.valid) { addToast?.("Proposta incompleta: " + v.missing.join(", "), "error"); return; }
+    const os = createOSFromProposal(v.payload);
+    await supabase.from("ai_os_proposals").update({
+      status: "approved", created_os_id: os.id,
+      decided_by: user?.id || null, decided_at: new Date().toISOString(),
+    }).eq("id", prop.id);
+    if (prop.conversation_id) {
+      await supabase.from("ai_conversations").update({ linked_os_id: os.id }).eq("id", prop.conversation_id);
+    }
+    addToast?.(`OS ${os.numero} criada a partir da proposta.`, "success");
+    loadProposals();
+  };
+
+  // Rejeita uma proposta de OS sem criar ordem de serviço
+  const rejectProposal = async (prop) => {
+    await supabase.from("ai_os_proposals").update({
+      status: "rejected", decided_by: user?.id || null, decided_at: new Date().toISOString(),
+    }).eq("id", prop.id);
+    addToast?.("Proposta rejeitada.", "info");
+    loadProposals();
+  };
+
   if (!supabase) {
     return (
       <div className="p-6 text-center text-slate-400">
@@ -12160,12 +12209,69 @@ function IAAtendimentoModule({ user, addToast }) {
           <h1 className="text-2xl font-bold text-white">IA / Atendimento WhatsApp</h1>
           <p className="text-sm text-slate-400">Conversas geradas pelo agente automático</p>
         </div>
-        {isAdmin && (
-          <button onClick={() => setShowConfig(true)} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm">
-            Configurações do Agente
+        <div className="flex gap-2">
+          <button onClick={() => setShowProposals((s) => !s)}
+            className="relative px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-200 text-sm hover:bg-amber-500/30">
+            Propostas de OS
+            {proposals.length > 0 && (
+              <span className="ml-2 px-1.5 rounded-full bg-amber-500 text-black text-xs">{proposals.length}</span>
+            )}
           </button>
-        )}
+          {isAdmin && (
+            <button onClick={() => setShowConfig(true)} className="px-4 py-2 bg-slate-700 hover:bg-slate-600 text-white rounded-lg text-sm">
+              Configurações do Agente
+            </button>
+          )}
+        </div>
       </div>
+
+      {/* Painel de propostas de OS pendentes — aprovar/rejeitar */}
+      {showProposals && (
+        <div className="bg-slate-800 rounded-lg mb-4 overflow-hidden">
+          <div className="px-3 py-2 border-b border-slate-700 text-xs uppercase text-slate-400 font-semibold">
+            Propostas de OS pendentes ({proposals.length})
+          </div>
+          <div className="p-3 space-y-3 max-h-[50vh] overflow-y-auto">
+            {proposals.length === 0 && (
+              <div className="p-4 text-slate-500 text-sm">Nenhuma proposta aguardando aprovação.</div>
+            )}
+            {proposals.map((prop) => {
+              const p = prop.payload || {};
+              const equip = [p.equipment_type, p.equipment_brand, p.equipment_model].filter(Boolean).join(" ");
+              return (
+                <div key={prop.id} className="bg-slate-700/40 rounded-lg p-4 border border-slate-700">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-white">{p.customer_name || "—"}</div>
+                      <div className="text-xs text-slate-400 mt-0.5">{p.address || "Sem endereço"}</div>
+                      <div className="text-sm text-slate-300 mt-2"><span className="text-slate-500">Equipamento:</span> {equip || "—"}</div>
+                      <div className="text-sm text-slate-300 mt-1"><span className="text-slate-500">Problema:</span> {p.problem || "—"}</div>
+                      <div className="text-xs text-slate-400 mt-1">{p.phone || ""}</div>
+                      {Array.isArray(p.media_urls) && p.media_urls.length > 0 && (
+                        <div className="flex flex-wrap gap-2 mt-3">
+                          {p.media_urls.map((url, i) => (
+                            <img key={i} src={url} alt="anexo" className="w-16 h-16 object-cover rounded border border-slate-600" />
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex flex-col gap-2 shrink-0">
+                      <button onClick={() => approveProposal(prop)}
+                        className="px-3 py-1.5 text-xs bg-green-500/20 text-green-400 hover:bg-green-500/30 rounded">
+                        Aprovar
+                      </button>
+                      <button onClick={() => rejectProposal(prop)}
+                        className="px-3 py-1.5 text-xs bg-red-500/20 text-red-400 hover:bg-red-500/30 rounded">
+                        Rejeitar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 min-h-0">
         {/* Lista de conversas */}
