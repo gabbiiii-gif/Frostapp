@@ -23,7 +23,15 @@ WhatsApp ─► Evolution API ─► N8N (AI Agent) ─► Supabase ─► Frost
 
 1. Abra o **SQL Editor** do projeto Supabase
 2. Cole o conteúdo de `docs/ai-agent/01-supabase-schema.sql`
-3. Execute. Vai criar `ai_conversations`, `ai_messages`, `ai_agent_config` + RLS + Realtime
+3. Execute. Vai criar `ai_conversations`, `ai_messages`, `ai_agent_config`, `ai_os_proposals` + RLS + Realtime
+4. **Crie o bucket de mídia `ai-media` (público)** — armazena os áudios/imagens que o cliente envia pelo WhatsApp e o agente encaminha. Use uma das opções:
+   - **Dashboard**: Storage → **New bucket** → nome `ai-media` → marque **Public** → criar
+   - **SQL** (no mesmo SQL Editor):
+     ```sql
+     insert into storage.buckets (id, name, public)
+     values ('ai-media', 'ai-media', true)
+     on conflict (id) do nothing;
+     ```
 
 ---
 
@@ -133,18 +141,30 @@ Em alguns segundos:
 | Serviço | Custo |
 |---|---|
 | N8N Cloud | $20 (Starter) |
-| OpenAI GPT-4o-mini | ~$3 |
+| OpenAI GPT-4o-mini (texto) | ~$3 |
+| OpenAI GPT-4o (vision, imagens) | variável — maior que gpt-4o-mini; só quando o cliente manda foto |
+| OpenAI Whisper (`whisper-1`, áudios) | ~$0.006/min de áudio |
 | Evolution API (VPS Hetzner CX11) | $4 |
-| Supabase | $0 (Free tier serve) |
-| **Total** | **~$27/mês** |
+| Supabase (inclui Storage `ai-media`) | $0 (Free tier serve) |
+| **Total** | **~$27/mês + uso de vision/whisper** |
 
 Para reduzir: rode N8N self-hosted na mesma VPS da Evolution → economiza $20.
 
 ---
 
-## Próximos passos (opcionais)
+## v2 — Implementado
 
-- **Áudios**: nó adicional que pega `message.audioMessage.url` → transcreve com Whisper → manda pro Agent
-- **Imagens**: idem com `message.imageMessage.url` → GPT-4o vision para diagnóstico visual
-- **Confirmação humana**: antes de criar OS, mandar resumo pro admin no app aprovar (canal Realtime → push notification)
-- **Múltiplas empresas**: criar 1 instância Evolution por empresa, identificar `company_id` pelo `instance` no webhook
+Os 4 itens que antes eram "próximos passos opcionais" já estão implementados nesta versão (ref `docs/superpowers/specs/2026-05-18-ia-whatsapp-v2-design.md`):
+
+- **Áudios**: voz → transcrição com Whisper (`whisper-1`) → Agent
+- **Imagens**: foto → GPT-4o vision para diagnóstico visual
+- **Confirmação humana**: proposta de OS gravada em `ai_os_proposals` (`status=pending_approval`) → aprovação no app antes de virar OS real
+- **Múltiplas empresas**: 1 instância Evolution por empresa, `company_id` resolvido pelo `evolution_instance` no webhook
+
+### Roteiro de teste manual
+
+1. **Multi-empresa**: cadastre 2 registros `ai_agent_config` com `evolution_instance` distintos; envie msg de cada número → confira que cada conversa/proposta recebe o `company_id` correto (e que uma instância não cadastrada é um no-op gracioso).
+2. **Áudio**: envie uma mensagem de voz → confira a transcrição em `ai_messages.content`, o `media_url` preenchido e o arquivo presente no bucket `ai-media`.
+3. **Imagem**: envie uma foto de equipamento → confira a descrição (vision) no fluxo e o `media_url`/arquivo no bucket.
+4. **Proposta + aprovação**: complete os dados pelo WhatsApp → confira a linha em `ai_os_proposals` (status `pending_approval`); no app, módulo IA / Atendimento → aba "Propostas de OS" → **Aprovar** → confira a OS criada (Ordens de Serviço) com as fotos, push recebido, e `ai_os_proposals.status=approved` + `ai_conversations.linked_os_id` setado. Teste **Rejeitar** → status `rejected`.
+5. **Ponto de verificação de risco**: confirme que o endpoint Evolution de mídia (`/chat/getBase64FromMediaMessage`) e o formato de resposta do upload do Supabase Storage batem com a versão `atendai/evolution-api:latest` em uso; ajuste os nós "Baixa mídia Evolution" / "Upload Storage" / "Vision" do workflow se divergir.
