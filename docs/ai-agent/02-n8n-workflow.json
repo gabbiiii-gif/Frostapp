@@ -95,7 +95,7 @@
     {
       "parameters": {
         "operation": "executeQuery",
-        "query": "insert into ai_messages (conversation_id, company_id, role, content)\nvalues ('{{ $('Upsert conversa').item.json.id }}', '{{ $('Resolve empresa').item.json.company_id }}', 'customer', $$ {{ $('Extrai campos').item.json.text }} $$);"
+        "query": "insert into ai_messages (conversation_id, company_id, role, content, media_url)\nvalues ('{{ $('Upsert conversa').item.json.id }}', '{{ $('Resolve empresa').item.json.company_id }}', 'customer', $$ {{ $('Texto efetivo').item.json.text }} $$, '{{ $('Texto efetivo').item.json.media_url }}');"
       },
       "id": "5",
       "name": "Grava msg cliente",
@@ -128,7 +128,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "={{ $('Extrai campos').item.json.text }}",
+        "text": "={{ $('Texto efetivo').item.json.text }}",
         "options": {
           "systemMessage": "Você é o assistente virtual de uma empresa de assistência técnica em refrigeração e climatização (FrostERP).\n\nAtenda em português brasileiro, seja cordial, objetivo e profissional.\n\nQuando o cliente solicitar um serviço, colete em ordem:\n1. Nome completo\n2. Endereço (rua, número, bairro, cidade)\n3. Equipamento (tipo, marca e modelo)\n4. Descrição do problema\n\nApós coletar TODOS os dados, use a ferramenta \"create_os\" para registrar a Ordem de Serviço. Confirme ao cliente.\n\nSe pedirem status de OS existente, use \"get_recent_os\" com o telefone.\n\nSe a pergunta for muito técnica ou o cliente estiver insatisfeito, use \"handoff_to_human\".\n\nNunca prometa prazos. Nunca informe preços fixos — diga que será orçado na vistoria pelo técnico."
         }
@@ -293,6 +293,213 @@
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [840, 360]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "id": "tm_audio",
+                    "leftValue": "={{ $('Webhook Evolution').item.json.body.data.message.audioMessage }}",
+                    "rightValue": "",
+                    "operator": { "type": "object", "operation": "exists", "singleValue": true }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "audio"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "id": "tm_image",
+                    "leftValue": "={{ $('Webhook Evolution').item.json.body.data.message.imageMessage }}",
+                    "rightValue": "",
+                    "operator": { "type": "object", "operation": "exists", "singleValue": true }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "image"
+            }
+          ]
+        },
+        "options": { "fallbackOutput": "extra" }
+      },
+      "id": "17",
+      "name": "Tipo de mídia",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1040, 360]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://SEU_EVOLUTION_HOST/chat/getBase64FromMediaMessage/{{ $('Extrai campos').item.json.instance }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "apikey", "value": "SUBSTITUA_PELA_API_KEY_EVOLUTION" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={ \"message\": { \"key\": {{ JSON.stringify($('Webhook Evolution').item.json.body.data.key) }} }, \"convertToMp4\": false }",
+        "options": { "response": { "response": { "responseFormat": "file", "outputPropertyName": "data" } } }
+      },
+      "id": "18",
+      "name": "Baixa mídia Evolution",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1240, 420]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=https://SEU_PROJETO.supabase.co/storage/v1/object/ai-media/{{ $('Resolve empresa').item.json.company_id }}/{{ $('Extrai campos').item.json.phone }}/{{ $now.toMillis() }}.{{ $('Tipo de mídia').item.json.ext || 'bin' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer SUBSTITUA_PELA_SERVICE_ROLE_KEY" },
+            { "name": "Content-Type", "value": "={{ $binary.data.mimeType || 'application/octet-stream' }}" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "binaryData",
+        "inputDataFieldName": "data",
+        "options": {}
+      },
+      "id": "19",
+      "name": "Upload Storage",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 420]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/audio/transcriptions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer SUBSTITUA_PELA_OPENAI_KEY" }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "model", "value": "whisper-1" },
+            { "name": "language", "value": "pt" },
+            { "parameterType": "formBinaryData", "name": "file", "inputDataFieldName": "data" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "20",
+      "name": "Whisper",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1840, 540]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/chat/completions",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Authorization", "value": "Bearer SUBSTITUA_PELA_OPENAI_KEY" },
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"gpt-4o\",\n  \"messages\": [\n    {\n      \"role\": \"user\",\n      \"content\": [\n        { \"type\": \"text\", \"text\": \"Você é técnico de refrigeração. Descreva objetivamente o equipamento e os defeitos visíveis nesta imagem enviada por um cliente. Seja conciso.\" },\n        { \"type\": \"image_url\", \"image_url\": { \"url\": \"https://SEU_PROJETO.supabase.co/storage/v1/object/public/{{ $('Upload Storage').item.json.Key }}\" } }\n      ]\n    }\n  ]\n}",
+        "options": {}
+      },
+      "id": "21",
+      "name": "Vision",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1840, 380]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "te1",
+              "name": "text",
+              "value": "={{ $('Webhook Evolution').item.json.body.data.message.audioMessage ? $('Whisper').item.json.text : ($('Webhook Evolution').item.json.body.data.message.imageMessage ? '[Imagem do cliente]: ' + $('Vision').item.json.choices[0].message.content : $('Extrai campos').item.json.text) }}",
+              "type": "string"
+            },
+            {
+              "id": "te2",
+              "name": "media_url",
+              "value": "={{ ($('Webhook Evolution').item.json.body.data.message.audioMessage || $('Webhook Evolution').item.json.body.data.message.imageMessage) ? 'https://SEU_PROJETO.supabase.co/storage/v1/object/public/' + $('Upload Storage').item.json.Key : '' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "22",
+      "name": "Texto efetivo",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2060, 360]
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "id": "rm_audio",
+                    "leftValue": "={{ $('Webhook Evolution').item.json.body.data.message.audioMessage }}",
+                    "rightValue": "",
+                    "operator": { "type": "object", "operation": "exists", "singleValue": true }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "audio"
+            },
+            {
+              "conditions": {
+                "options": { "caseSensitive": true, "typeValidation": "loose" },
+                "conditions": [
+                  {
+                    "id": "rm_image",
+                    "leftValue": "={{ $('Webhook Evolution').item.json.body.data.message.imageMessage }}",
+                    "rightValue": "",
+                    "operator": { "type": "object", "operation": "exists", "singleValue": true }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "outputKey": "image"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "23",
+      "name": "Rota mídia",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [1640, 420]
     }
   ],
   "connections": {
@@ -307,10 +514,28 @@
     "Resolve empresa": { "main": [[{ "node": "Empresa encontrada?", "type": "main", "index": 0 }]] },
     "Empresa encontrada?": {
       "main": [
-        [{ "node": "Upsert conversa", "type": "main", "index": 0 }],
+        [{ "node": "Tipo de mídia", "type": "main", "index": 0 }],
         [{ "node": "Responde Webhook", "type": "main", "index": 0 }]
       ]
     },
+    "Tipo de mídia": {
+      "main": [
+        [{ "node": "Baixa mídia Evolution", "type": "main", "index": 0 }],
+        [{ "node": "Baixa mídia Evolution", "type": "main", "index": 0 }],
+        [{ "node": "Texto efetivo", "type": "main", "index": 0 }]
+      ]
+    },
+    "Baixa mídia Evolution": { "main": [[{ "node": "Upload Storage", "type": "main", "index": 0 }]] },
+    "Upload Storage": { "main": [[{ "node": "Rota mídia", "type": "main", "index": 0 }]] },
+    "Rota mídia": {
+      "main": [
+        [{ "node": "Whisper", "type": "main", "index": 0 }],
+        [{ "node": "Vision", "type": "main", "index": 0 }]
+      ]
+    },
+    "Whisper": { "main": [[{ "node": "Texto efetivo", "type": "main", "index": 0 }]] },
+    "Vision": { "main": [[{ "node": "Texto efetivo", "type": "main", "index": 0 }]] },
+    "Texto efetivo": { "main": [[{ "node": "Upsert conversa", "type": "main", "index": 0 }]] },
     "Upsert conversa": { "main": [[{ "node": "Grava msg cliente", "type": "main", "index": 0 }]] },
     "Grava msg cliente": { "main": [[{ "node": "Conversa ativa?", "type": "main", "index": 0 }]] },
     "Conversa ativa?": {
