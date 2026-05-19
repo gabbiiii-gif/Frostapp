@@ -36,6 +36,19 @@ SQL versionado em `docs/ai-agent/04-pos-venda-pg-cron.sql`, rodado uma vez no SQ
 - **Cron Vercel diário** (`0 9 * * *`): passa no Hobby, mas degrada o produto — pós-venda dispararia 1x/dia em vez de 15 min.
 - **Upgrade para Vercel Pro**: custo recorrente para um problema que o Supabase já resolve de graça.
 
+## Implementação (aplicada 2026-05-19, via MCP)
+
+Projeto de prod confirmado = **`frostapp2.0`** (ref `rbwzhglsztmjvwrcydcy`); o antigo `frostApp` (`hewsltabdygpwcfdcczg`) está INACTIVE/pausado (não usar — cron não dispararia).
+
+Para o agendamento ser 100% gerenciável via MCP (sem coordenar env entre pg_cron e a função), a auth deixou de depender só de env:
+
+- Segredo gravado no **Vault** (`vault.secrets` nome `pos_venda_dispatch_key`).
+- RPC `public.pos_venda_dispatch_key()` (security definer, search_path fixo, execute só `service_role`) expõe a chave decifrada à Edge Function.
+- Edge Function v2: `expected = env DISPATCH_KEY ?? rpc()`. Env mantém prioridade (compat com trigger manual `api/pos-venda-cron.js`).
+- pg_cron job `pos-venda-dispatch` (`jobid=1`, `*/15 * * * *`, active) lê o mesmo segredo do Vault no header.
+
+Smoke test pós-deploy: `200 {"skipped":"evolution_nao_configurada","sent":0}` — auth via Vault OK, função saudável, no-op gracioso (Evolution ainda não configurada). SQL idempotente versionado em `docs/ai-agent/04-pos-venda-pg-cron.sql` (sem o segredo real).
+
 ## Consequência
 
-Operador precisa rodar o SQL no Supabase após o deploy (passo manual, documentado no header do `.sql`). Sem isso, a fila `pos_venda_mensagens` acumula sem ser despachada (no-op gracioso, não quebra).
+Setup de prod já aplicado — nenhum passo manual pendente do operador. Re-rodar o `.sql` só é necessário em outro ambiente (substituir `<DISPATCH_KEY>` e a URL do projeto). Enquanto Evolution não estiver configurada, a fila `pos_venda_mensagens` acumula sem despachar (no-op gracioso, não quebra).

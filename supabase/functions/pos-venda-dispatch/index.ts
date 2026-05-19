@@ -1,24 +1,17 @@
 // Edge Function: pos-venda-dispatch
 // ─────────────────────────────────────────────────────────────────────────────
-// Dispatcher do Pos-Venda. Roda em cron (Vercel Cron -> /api/pos-venda-cron ->
-// esta funcao). Envia as mensagens de pos-venda que estao na hora, via
-// Evolution API (mesma infra do modulo IA: ai_agent_config.evolution_url /
-// evolution_instance + secret EVOLUTION_APIKEY).
+// Dispatcher do Pos-Venda. Agendado por Supabase pg_cron (ver
+// docs/ai-agent/04-pos-venda-pg-cron.sql) ou trigger manual via
+// api/pos-venda-cron.js. Envia as mensagens de pos-venda que estao na hora,
+// via Evolution API (ai_agent_config + secret EVOLUTION_APIKEY).
 //
-// Regras:
-//  - So envia se pos_venda_config (global, cliente_id IS NULL) existir e ativo=true.
-//  - Status elegiveis: 'aprovada' sempre; 'pendente' apenas se modo_disparo='auto'.
-//  - agendada_para <= agora.
-//  - Sem Evolution configurada (url/instance/apikey) -> no-op gracioso (nao quebra,
-//    a fila so acumula ate a infra existir).
-//  - Sucesso: status='enviada', enviada_em=now, canal='whatsapp'.
-//  - Falha: tentativas+1, erro_envio set; >=3 tentativas -> status='erro'.
+// Auth: header x-dispatch-key. A chave esperada vem de:
+//   1) env DISPATCH_KEY (se setada) — compat com trigger manual antigo;
+//   2) senao, do Vault via RPC public.pos_venda_dispatch_key() (service_role).
+// Assim o pg_cron e a funcao compartilham o segredo sem coordenar env.
 //
-// Auth: header x-dispatch-key === env DISPATCH_KEY (a funcao e a fronteira;
-// verify_jwt=false porque o caller e um cron, nao um usuario).
-//
-// Env injetadas pelo runtime Supabase: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
-// Env que o operador define: DISPATCH_KEY, EVOLUTION_APIKEY.
+// Env injetadas pelo runtime: SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY.
+// Env opcional do operador: DISPATCH_KEY, EVOLUTION_APIKEY.
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -42,16 +35,22 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
-  // ── Auth: a funcao e a fronteira (chamada por cron) ──────────────────────
-  const expected = Deno.env.get("DISPATCH_KEY");
-  if (!expected || req.headers.get("x-dispatch-key") !== expected) {
-    return json({ error: "unauthorized" }, 401);
-  }
-
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
+
+  // ── Auth: a funcao e a fronteira (chamada por cron) ──────────────────────
+  // Chave esperada: env DISPATCH_KEY tem prioridade; senao, Vault via RPC.
+  let expected: string | null = Deno.env.get("DISPATCH_KEY") ?? null;
+  if (!expected) {
+    const { data: k, error: kErr } = await supabase.rpc("pos_venda_dispatch_key");
+    if (kErr) return json({ error: "key_lookup_failed", detail: kErr.message }, 500);
+    expected = typeof k === "string" && k.length > 0 ? k : null;
+  }
+  if (!expected || req.headers.get("x-dispatch-key") !== expected) {
+    return json({ error: "unauthorized" }, 401);
+  }
 
   // ── Config global do pos-venda ───────────────────────────────────────────
   const { data: config, error: cfgErr } = await supabase
@@ -73,7 +72,6 @@ Deno.serve(async (req) => {
     .maybeSingle();
   const apikey = Deno.env.get("EVOLUTION_APIKEY") || "";
   if (!evo?.evolution_url || !evo?.evolution_instance || !apikey) {
-    // No-op gracioso: infra ainda nao existe. Fila fica intacta.
     return json({ skipped: "evolution_nao_configurada", sent: 0 });
   }
   const base = evo.evolution_url.replace(/\/+$/, "");

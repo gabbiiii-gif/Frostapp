@@ -84,3 +84,12 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - new pages: decisions/008-pos-venda-pg-cron-vs-vercel-cron.md
 - touched: modules/pos-venda.md (componentes + code_refs + frontmatter), index.md (1 Decisao)
 - pendente operador: rodar o .sql no SQL Editor do Supabase prod (substituir <PROJECT_REF>/<DISPATCH_KEY>)
+
+## [2026-05-19] config | Pós-Venda pg_cron aplicado via MCP + auth por Vault
+- gatilho: deploy Vercel verde; usuário rodou SQL no projeto errado (frostApp INACTIVE) → pediu "faça tudo via MCP"
+- prod confirmado: frostapp2.0 (ref rbwzhglsztmjvwrcydcy); frostApp (hewsltabdygpwcfdcczg) INACTIVE/pausado
+- auth mudou: chave via Vault (RPC public.pos_venda_dispatch_key, security definer/service_role) em vez de só env — Edge Function v2 redeployada (expected = env ?? rpc)
+- aplicado via MCP: extensões pg_cron+pg_net, vault secret, RPC, cron.job jobid=1 (*/15, active)
+- smoke test: 200 {"skipped":"evolution_nao_configurada","sent":0} — auth Vault OK
+- touched: supabase/functions/pos-venda-dispatch/index.ts, docs/ai-agent/04-pos-venda-pg-cron.sql, decisions/008, modules/pos-venda.md
+- nenhum passo manual pendente; segredo real só no Vault (não no repo)
