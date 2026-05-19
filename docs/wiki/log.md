@@ -77,3 +77,10 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - new pages: modules/pos-venda.md, modules/ia-atendimento.md, flows/whatsapp-ia-os.md, concepts/evolution-multitenant.md, decisions/007-ia-os-aprovacao-humana.md
 - touched: index.md (2 Modulos, 1 Conceito, 1 Fluxo, 1 Decisao, 1 Fonte)
 - contexto: v2 = audio Whisper + imagem vision + Storage ai-media + propose_os/aprovacao humana + multi-empresa por evolution_instance
+
+## [2026-05-18] ingest | Pós-Venda: Vercel Cron → Supabase pg_cron
+- gatilho: deploy Vercel falhou no merge da v2 — plano Hobby limita Cron Jobs a 1x/dia, `*/15 * * * *` rejeitado
+- ação: removido bloco `crons` do vercel.json; criado docs/ai-agent/04-pos-venda-pg-cron.sql (pg_cron + pg_net chamam pos-venda-dispatch, x-dispatch-key via Vault)
+- new pages: decisions/008-pos-venda-pg-cron-vs-vercel-cron.md
+- touched: modules/pos-venda.md (componentes + code_refs + frontmatter), index.md (1 Decisao)
+- pendente operador: rodar o .sql no SQL Editor do Supabase prod (substituir <PROJECT_REF>/<DISPATCH_KEY>)
