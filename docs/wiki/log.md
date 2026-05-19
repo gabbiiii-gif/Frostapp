@@ -93,3 +93,11 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - smoke test: 200 {"skipped":"evolution_nao_configurada","sent":0} — auth Vault OK
 - touched: supabase/functions/pos-venda-dispatch/index.ts, docs/ai-agent/04-pos-venda-pg-cron.sql, decisions/008, modules/pos-venda.md
 - nenhum passo manual pendente; segredo real só no Vault (não no repo)
+
+## [2026-05-19] config | Hardening de segurança (pentest interno)
+- gatilho: usuário pediu review pentest do próprio app
+- achados: 3 críticos não-auth (master takeover via master_lookup_by_email+master_set_session; tabelas backup públicas sem RLS; storage os-fotos anon upload/delete) + alto (pos_venda sem escopo, os-fotos listagem) + médios
+- aplicado via MCP (migrações sec_*): REVOKE master_* de anon/authenticated; RLS lockdown backups; storage policies só authenticated; pos_venda_* company_id default user_company_id()+policy escopada; set_updated_at search_path
+- residual aceito/follow-up: pg_net em public (não movido p/ não quebrar cron), leaked-pwd protection (manual Auth), os-fotos sem escopo por empresa, XSS print docs não auditado, validar login master via Edge no app
+- new pages: decisions/009-hardening-seguranca-2026-05-19.md; touched: index.md
+- verificação: dispatcher smoke 200 pós-RLS; anon_can_master_lookup=0; policies trocadas confirmadas

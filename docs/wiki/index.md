@@ -42,6 +42,7 @@ Sempre lido primeiro em qualquer query. Mantenha sub-200 linhas.
 - [006 master tier local-only](decisions/006-master-tier-multi-tenant.md) — dívida técnica explícita: TODO migrar pra Edge Function
 - [007 IA OS aprovação humana](decisions/007-ia-os-aprovacao-humana.md) — proposta + gate humano; OS escrita pelo app via DB layer, não n8n/Edge
 - [008 Pós-Venda pg_cron](decisions/008-pos-venda-pg-cron-vs-vercel-cron.md) — Vercel Hobby limita cron a 1x/dia; agendar no Supabase pg_cron
+- [009 Hardening segurança](decisions/009-hardening-seguranca-2026-05-19.md) — pentest interno: master takeover anon, backup público, storage anon — fechados
 
 ## Fontes
 
