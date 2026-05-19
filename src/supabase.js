@@ -373,28 +373,26 @@ export async function masterCountRemote() {
   } catch (e) { console.warn('masterCountRemote falhou:', e.message); return 0; }
 }
 
-export async function lookupMasterByEmail(email) {
-  if (!supabase || !email) return null;
-  try {
-    const { data, error } = await supabase.rpc('master_lookup_by_email', { p_email: email });
-    if (error) { console.warn('lookupMasterByEmail:', error.message); return null; }
-    const row = Array.isArray(data) ? data[0] : data;
-    return _mapMasterRow(row);
-  } catch (e) { console.warn('lookupMasterByEmail falhou:', e.message); return null; }
+// LOCKDOWN DE SEGURANÇA (ADR 009, 2026-05-19): a RPC `master_lookup_by_email`
+// foi REVOGADA de anon/authenticated — ela vazava o hash PBKDF2 + session_token
+// do master para qualquer um com a anon key (takeover não-autenticado). O fluxo
+// de login master agora é 100% server-side via Edge Function `master-login`
+// (masterLoginViaEdge), que valida com service_role e nunca devolve o hash.
+// Esta função vira no-op proposital: retorna null para o caller cair no cache
+// local (window.storage MASTER_PREFIX) quando o Edge não resolve (offline/legado).
+export async function lookupMasterByEmail(_email) {
+  return null;
 }
 
 // Substitui o antigo `listMastersRemote()`. Devolve lista SOMENTE se o caller
 // apresentar um session_token_hash que bate com algum master existente.
 // Sem token (ou token invalido), volta [] em silencio — UI continua usando cache local.
-export async function listMastersAuthenticated(callerTokenHash) {
-  if (!supabase || !callerTokenHash) return [];
-  try {
-    const { data, error } = await supabase.rpc('master_list_authenticated', {
-      p_session_token_hash: callerTokenHash,
-    });
-    if (error) { console.warn('listMastersAuthenticated:', error.message); return []; }
-    return (data || []).map(_mapMasterRow).filter(Boolean);
-  } catch (e) { console.warn('listMastersAuthenticated falhou:', e.message); return []; }
+// LOCKDOWN DE SEGURANÇA (ADR 009): `master_list_authenticated` REVOGADA de
+// anon/authenticated. Sem substituto client-side por design — listar masters
+// não é operação de cliente. Retorna [] (UI usa cache local). Se precisar de
+// gestão de masters server-side, criar Edge Function dedicada (service_role).
+export async function listMastersAuthenticated(_callerTokenHash) {
+  return [];
 }
 
 // Backwards-compat: chamadas antigas a listMastersRemote() agora retornam []
@@ -407,48 +405,33 @@ export async function listMastersRemote() {
 // callerTokenHash: sessionTokenHash de um master JA autenticado. Para o caso
 // especial do FirstMasterSetup (zero masters cadastrados), pode ser null —
 // a propria RPC permite a primeira escrita quando o count e zero.
-export async function upsertMasterRemote(master, callerTokenHash = null) {
-  if (!supabase || !master?.id) return false;
-  try {
-    const { error } = await supabase.rpc('master_upsert', {
-      p_id: master.id,
-      p_email: (master.email || '').trim().toLowerCase(),
-      p_nome: master.nome || '',
-      p_password: master.password || '',
-      p_role: master.role || 'master',
-      p_session_token_hash: master.sessionTokenHash || null,
-      p_caller_token_hash: callerTokenHash,
-    });
-    if (error) { console.warn('upsertMasterRemote:', error.message); return false; }
-    return true;
-  } catch (e) { console.warn('upsertMasterRemote falhou:', e.message); return false; }
+// LOCKDOWN DE SEGURANÇA (ADR 009): `master_upsert` REVOGADA de anon/authenticated
+// — ela permitia criar/sobrescrever qualquer master (escalada para super-admin).
+// Escrita em master_users agora só via service_role (Edge Function).
+// Retorna false: o caller já trata como "local OK, remoto não sincronizou".
+// TODO: mover criação de master (FirstMasterSetup) para uma Edge Function
+// `master-create` para que o registro chegue ao banco e o login via Edge funcione.
+export async function upsertMasterRemote(_master, _callerTokenHash = null) {
+  return false;
 }
 
 // Renova session_token_hash apos checkPassword OK no client.
 // Passa o hash atual de password como prova de autenticidade.
-export async function setMasterSessionRemote(id, currentPasswordHash, newSessionTokenHash) {
-  if (!supabase || !id) return false;
-  try {
-    const { error } = await supabase.rpc('master_set_session', {
-      p_id: id,
-      p_current_password_hash: currentPasswordHash,
-      p_new_session_token_hash: newSessionTokenHash,
-    });
-    if (error) { console.warn('setMasterSessionRemote:', error.message); return false; }
-    return true;
-  } catch (e) { console.warn('setMasterSessionRemote falhou:', e.message); return false; }
+// LOCKDOWN DE SEGURANÇA (ADR 009): `master_set_session` REVOGADA. Era o elo
+// final do takeover — aceitava o hash de senha como "prova" (e a RPC de lookup
+// vazava esse hash). O Edge `master-login` já persiste session_token_hash no
+// banco (service_role) a cada login bem-sucedido, então esta rotação manual
+// client-side não é mais necessária.
+export async function setMasterSessionRemote(_id, _currentPasswordHash, _newSessionTokenHash) {
+  return false;
 }
 
-export async function deleteMasterRemote(id, callerTokenHash) {
-  if (!supabase || !id) return false;
-  try {
-    const { error } = await supabase.rpc('master_delete_authenticated', {
-      p_id: id,
-      p_caller_token_hash: callerTokenHash,
-    });
-    if (error) { console.warn('deleteMasterRemote:', error.message); return false; }
-    return true;
-  } catch (e) { console.warn('deleteMasterRemote falhou:', e.message); return false; }
+// LOCKDOWN DE SEGURANÇA (ADR 009): `master_delete_authenticated` REVOGADA de
+// anon/authenticated. Exclusão de master agora só via service_role (Edge).
+// Retorna false (no-op). TODO: Edge Function se gestão remota de master for
+// necessária.
+export async function deleteMasterRemote(_id, _callerTokenHash) {
+  return false;
 }
 
 // ─── Storage: upload/delete de fotos da OS ───────────────────────────────────

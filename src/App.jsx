@@ -3006,7 +3006,13 @@ function FirstMasterSetup({ onComplete, theme, setTheme }) {
       };
       // Master usa prefixo dedicado e nunca é decorado com companyId
       window.storage.setItem(MASTER_PREFIX + newMaster.id, JSON.stringify(newMaster));
-      // Sync via tabela dedicada master_users — permite logar em outros devices
+      // ATENÇÃO (ADR 009): upsertMasterRemote virou no-op após o lockdown de
+      // segurança (RPC master_upsert revogada). O master criado aqui fica
+      // SÓ neste device — não sincroniza para master_users e o login via
+      // Edge `master-login` (que lê o banco) NÃO o encontrará em outro device.
+      // Bootstrap de master novo precisa de uma Edge Function `master-create`
+      // (service_role). Hoje sem impacto: já existe master cadastrado em prod
+      // (master_count > 0 ⇒ esta tela não aparece).
       try { await upsertMasterRemote(newMaster); } catch { /* ignora — local OK */ }
       onComplete(newMaster);
     } finally {

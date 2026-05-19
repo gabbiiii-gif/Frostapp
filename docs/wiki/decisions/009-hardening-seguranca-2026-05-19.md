@@ -42,7 +42,7 @@ Review pentest do app (autorizado, repo do próprio dono). App = client burro; s
 - **os-fotos sem escopo de empresa**: agora exige login, mas qualquer autenticado de qualquer tenant ainda lê (por URL)/apaga. Fix completo = convenção de path `companyId/...` + policy por path + ajuste no `uploadFotoOS`.
 - **Helpers `user_role/user_company_id/is_master_admin` executáveis por authenticated**: necessários dentro das policies RLS — não revogáveis. Vazam só dados do próprio caller. Aceito.
 - **XSS print docs**: `generate*HTML` usam guard `_h`; auditoria por interpolação não feita. Área de risco se algum campo escapar do guard.
-- **App client**: `src/supabase.js` `lookupMasterByEmail`/`listMastersAuthenticated`/`upsertMasterRemote` agora retornam vazio/erro (RPCs revogadas). Fluxo master local de fallback quebra — caminho suportado é `masterLoginViaEdge` (Edge `master-login`). Validar login master no app.
+- **App client** ✅ RESOLVIDO: validado que `master-login` Edge usa service_role → não afetado pelo REVOKE (teste negativo: credencial inexistente → 401, não 500, prova que o select sob service_role funciona). Login master primário intacto. `src/supabase.js`: wrappers de RPC revogada (`lookupMasterByEmail`, `listMastersAuthenticated`, `upsertMasterRemote`, `setMasterSessionRemote`, `deleteMasterRemote`) viraram no-op documentado (Regra 2, pt-BR) — comportamento intencional, sem erro confuso no console. `FirstMasterSetup` comentado: criar master novo só persiste local (upsert revogado) — sem impacto hoje (já há master em prod, tela não aparece); follow-up real = Edge Function `master-create`.
 
 ## Consequência
 
