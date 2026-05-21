@@ -21,19 +21,21 @@ const TOOLS = [
   {
     name: "propose_os",
     description:
-      "Registra uma PROPOSTA de Ordem de Serviço para aprovação humana. Use só quando tiver TODOS os dados (nome, endereço, equipamento, problema, telefone). Não cria a OS — apenas registra a solicitação para um atendente analisar.",
+      "Registra uma PROPOSTA de Ordem de Serviço para aprovação humana. Use quando tiver os dados obrigatórios (nome, endereço, tipo de equipamento, problema). Marca, modelo e telefone são opcionais. Não cria a OS — apenas registra a solicitação para um atendente analisar.",
     input_schema: {
       type: "object",
       properties: {
         customer_name: { type: "string", description: "Nome completo do cliente" },
         address: { type: "string", description: "Endereço completo" },
         equipment_type: { type: "string", description: "Tipo de equipamento" },
-        equipment_brand: { type: "string", description: "Marca" },
-        equipment_model: { type: "string", description: "Modelo" },
+        equipment_brand: { type: "string", description: "Marca (opcional, se o cliente souber)" },
+        equipment_model: { type: "string", description: "Modelo (opcional, se o cliente souber)" },
         problem: { type: "string", description: "Descrição do problema" },
-        phone: { type: "string", description: "Telefone de contato" },
+        phone: { type: "string", description: "Telefone de contato (opcional; usa o número do WhatsApp se omitido)" },
       },
-      required: ["customer_name", "address", "equipment_type", "equipment_brand", "equipment_model", "problem", "phone"],
+      // Só o essencial é obrigatório. Marca/modelo e telefone são opcionais —
+      // o cliente nem sempre sabe a marca/modelo, e o telefone vem do WhatsApp.
+      required: ["customer_name", "address", "equipment_type", "problem"],
     },
   },
   {
