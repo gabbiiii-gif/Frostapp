@@ -1,7 +1,7 @@
 ---
 title: Role Permissions (gating de módulos + customPermissions override)
 type: concept
-updated: 2026-05-10
+updated: 2026-05-21
 sources: []
 related:
   - ./db-layer.md
@@ -76,6 +76,16 @@ return perms.includes("all") || perms.includes(module);
 | Settings gate (App.jsx:11681) | `user.role === "admin" \|\| hasPermission(user, "config")` |
 | Render do `Dashboard` (12201) | Verifica activeModule (módulo já passou pelo filtro) |
 | Tecnico shell | Decisão **antes** do gating: `role === "tecnico"` → renderiza `TecnicoMobileApp` direto (não passa pelo navItems do ERP) |
+
+## Teto por empresa — `allowedModules` (2026-05-21)
+
+Acima do gating por usuário existe um **teto por empresa**, controlado pelo Master. O objeto `company` (`erp:company:<id>`) tem o campo `allowedModules` (array de ids de módulo, ou `null`).
+
+- Helper puro `isModuleEnabledForCompany(allowedModules, moduleId)` (`src/utils.js`): `null`/ausente → tudo ligado (empresas antigas não quebram); `dashboard` e `config` sempre `true`; senão, só os ids no array.
+- `navItems` filtra por `hasPermission(user, módulo)` **E** `isModuleEnabledForCompany`. A empresa **nunca expande** o que o role/`customPermissions` concede — só restringe.
+- 7 módulos toggláveis (`TOGGLEABLE_MODULES` em `App.jsx`): `processos, agenda, financeiro, cadastro, ia, pos-venda, folha`. `dashboard`/`config` fora — sempre ativos.
+- O Master edita via checkboxes no formulário de empresa do `MasterApp`. O admin da empresa **não** pode reabilitar módulo desligado pelo Master.
+- Se o `activeModule` ficar órfão (módulo desligado), um `useEffect` no `App` volta para `dashboard`.
 
 ## Master tier ≠ ROLE_PERMISSIONS
 

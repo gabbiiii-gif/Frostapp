@@ -110,3 +110,10 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - novo: src/App.jsx botões "Enviar orçamento/OS (WhatsApp)", helper
   buildOSWhatsAppResumo (utils.js), sendWhatsAppMedia (platform.js)
 - touched: concepts/evolution-multitenant.md, flows/whatsapp-ia-os.md
+
+## [2026-05-21] ingest | módulos por empresa (MasterApp)
+- gatilho: implementação do spec 2026-05-21-modulos-por-empresa-design.md
+- novo: campo company.allowedModules; helper isModuleEnabledForCompany (utils.js);
+  TOGGLEABLE_MODULES + filtro navItems + fallback activeModule (App.jsx);
+  checkboxes no formulário de empresa do MasterApp
+- touched: concepts/role-permissions.md
