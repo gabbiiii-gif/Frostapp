@@ -4,7 +4,7 @@
 - **Status:** aprovado (design), aguardando revisão do spec
 - **Escopo:** Duas entregas relacionadas, ambas sobre a Evolution API já no ar:
   - **Parte 1** — Edge Function `whatsapp-webhook`: recebe o webhook da Evolution, persiste a conversa e roda o agente de IA (Claude). Substitui o orquestrador n8n previsto no spec `2026-05-18-ia-whatsapp-v2-design.md`.
-  - **Parte 2** — Botão na OS (`ProcessModule`) para enviar orçamento e OS executada ao WhatsApp do cliente (texto + PDF), via nova Edge Function `send-document`.
+  - **Parte 2** — Botão na OS (`ProcessModule`) para enviar orçamento e OS executada ao WhatsApp do cliente (texto + PDF), via novo helper de frontend `sendWhatsAppMedia` em `src/supabase.js`.
 
 ## Contexto
 
@@ -33,7 +33,8 @@ Estado atual do projeto PROD `frostapp2.0` (`rbwzhglsztmjvwrcydcy`):
 | D3 | A IA **respeita horário comercial** (`ai_agent_config.business_hours`). Fora do horário: envia `out_of_hours_message` e **não** aciona o LLM. |
 | D4 | Arquitetura = **função única com processamento em background** (`EdgeRuntime.waitUntil`). Responde `200` imediato para evitar retry/duplicação da Evolution. |
 | D5 | Permanecem do spec v2: criação de OS sempre exige aprovação humana (proposta via `propose_os`); a OS é escrita pelo app via `DB.set`, não pela Edge Function. |
-| D6 | Parte 2: enviar orçamento/OS ao cliente como **texto + PDF anexo**. PDF gerado no app a partir do HTML existente; envio via nova Edge Function `send-document` (apikey Evolution não pode ficar no frontend). |
+| D6 | Parte 2: enviar orçamento/OS ao cliente como **texto + PDF anexo**. PDF gerado no app a partir do HTML existente; envio **direto do frontend** via novo helper `sendWhatsAppMedia`, espelhando o `sendWhatsAppMessage` já existente em `src/supabase.js`. Não cria Edge Function nova. |
+| D7 | A apikey da Evolution já é exposta ao frontend pelo `sendWhatsAppMessage` atual (lida de `ai_agent_config.metadata.evolution_apikey`). Migrar esse envio para uma Edge Function é **dívida de segurança registrada à parte** — cobre `sendWhatsAppMessage` + `sendWhatsAppMedia` juntos, fora do escopo deste spec. |
 
 ## Arquitetura
 
@@ -116,8 +117,7 @@ O `system_prompt` em `ai_agent_config` é ajustado para refletir `propose_os` (r
 | Secret `EVOLUTION_APIKEY` | Verificar | Já usado por `pos-venda-dispatch`; reusar |
 | `.env` da Evolution VPS | Religar webhook | `N8N_WEBHOOK_URL=https://rbwzhglsztmjvwrcydcy.supabase.co/functions/v1/whatsapp-webhook?token=<WEBHOOK_TOKEN>` → `docker compose up -d` |
 | Edge Function `whatsapp-webhook` | Criar e deployar (Parte 1) | `supabase functions deploy` ou MCP `deploy_edge_function`, `verify_jwt:false` |
-| Edge Function `send-document` | Criar e deployar (Parte 2) | idem; auth alinhada com `send-push` |
-| Dependência de PDF no app | Adicionar | `npm install` da lib escolhida (ex.: `html2pdf.js`) |
+| Dependência de PDF no app | Adicionar (Parte 2) | `npm install html2pdf.js` |
 
 ## Segurança
 
@@ -154,31 +154,34 @@ Parte 2 (`send-document` + botão OS):
 
 ## Parte 2 — Envio de documentos da OS ao WhatsApp
 
-Botão no módulo de Ordens de Serviço para mandar orçamento e OS executada ao WhatsApp do cliente, como mensagem de texto + PDF anexo.
+Botão no módulo de Ordens de Serviço para mandar orçamento e OS executada ao WhatsApp do cliente, como mensagem de texto + PDF anexo. Envio direto do frontend, espelhando o `sendWhatsAppMessage` já existente.
+
+### Helper `sendWhatsAppMedia` (novo, em `src/supabase.js`)
+
+Espelha `sendWhatsAppMessage` (`src/supabase.js:452`): resolve `ai_agent_config` por `company_id`, lê `evolution_url`/`evolution_instance` e a apikey de `metadata.evolution_apikey`, mas envia mídia:
+
+```
+sendWhatsAppMedia(supabase, companyId, phone, { base64, fileName, caption })
+  → POST {evolution_url}/message/sendMedia/{evolution_instance}
+     header apikey
+     body { number, mediatype: 'document', media: <base64>, fileName, caption }
+  → { ok, error? }
+```
+
+Silent fail se Evolution não configurada (mesmo padrão do helper irmão).
 
 ### App (`ProcessModule` em `App.jsx`)
 
 - Botões na OS: "Enviar orçamento" e "Enviar OS" ao WhatsApp do cliente.
 - Telefone resolvido do cliente vinculado (`os.clienteId` → cadastro de clientes, prefixo `erp:client:`). Cliente sem telefone → botão desabilitado com aviso.
-- Gera PDF a partir do HTML já existente (`generateOrcamentoHTML(os, clients)` / `generateOSHTML(os, clients)` — `App.jsx` linhas ~5044-4910) usando lib de geração de PDF (ex.: `html2pdf.js`; lib definitiva decidida no plano de implementação). Resultado: PDF em base64.
+- Gera PDF a partir do HTML já existente (`generateOrcamentoHTML(os, clients)` / `generateOSHTML(os, clients)` — `App.jsx`) usando lib de geração de PDF (`html2pdf.js`). Resultado: PDF em base64.
 - Monta resumo em texto (cliente, serviços, total, garantia, dados PIX).
-- Chama `supabase.functions.invoke('send-document', { body: {company_id, phone, text, pdf_base64, filename} })`.
+- Chama `sendWhatsAppMessage` (texto) e `sendWhatsAppMedia` (PDF).
 - Feedback via toast (padrão do app). Falha no envio → toast de erro; a OS não muda de estado.
-
-### Edge Function `send-document` (nova)
-
-- Recebe `{company_id, phone, text, pdf_base64, filename}`.
-- Resolve `evolution_url`/`evolution_instance` de `ai_agent_config` (mesma query da Parte 1).
-- Envia texto: `POST {evolution_url}/message/sendText/{instance}`.
-- Envia PDF: `POST {evolution_url}/message/sendMedia/{instance}` — `mediatype: document`, conteúdo base64, `fileName`.
-- Header `apikey` = secret `EVOLUTION_APIKEY` (reusado).
-- Erros propagados ao app como JSON `{error}` + status apropriado.
 
 ### Pontos a confirmar no plano de implementação (não no spec)
 
-- Lib de PDF definitiva (`html2pdf.js` vs `jsPDF.html()`); ambas rasterizam via html2canvas — aceitável para documento visual.
-- Modelo de auth da `send-document` — alinhar com o padrão de `send-push` (`verify_jwt`); confirmar como o app autentica chamadas a Edge Functions (Supabase Auth JWT vs anon key).
-- Endpoint exato de mídia da Evolution v2.3.7 (`/message/sendMedia` — confirmar nome do campo do arquivo: `media`/`fileName`/`mediatype`).
+- Endpoint exato de mídia da Evolution v2.3.7 (`/message/sendMedia` — confirmar campos `mediatype`/`media`/`fileName`).
 
 ## Fora de escopo (fase 1)
 
@@ -194,4 +197,5 @@ Botão no módulo de Ordens de Serviço para mandar orçamento e OS executada ao
 - Endpoint `POST /chat/getBase64FromMediaMessage/{instance}` deve ser validado contra a Evolution **v2.3.7** em uso (o spec v2 citava a imagem `latest`).
 - Custo: Claude Haiku 4.5 no volume estimado (~500 conv/mês) é baixo; vision (imagem) tem custo por imagem — aceitável. Documentar no quadro de custos do `03-setup-guide.md`.
 - O webhook global da Evolution (`WEBHOOK_GLOBAL_*`) envia todos os eventos; a função precisa filtrar `messages.upsert`. Alternativa: restringir eventos no `.env` da Evolution (`WEBHOOK_EVENTS_*`) — já está com `MESSAGES_UPSERT=true`.
+- **Dívida de segurança (registrada, fora de escopo):** a apikey da Evolution é exposta ao frontend via `ai_agent_config.metadata.evolution_apikey` (lida por `sendWhatsAppMessage` e, agora, `sendWhatsAppMedia`). Migrar ambos os envios para uma Edge Function que guarde a apikey server-side é trabalho futuro separado.
 - Ingest no wiki (`docs/wiki/`) das mudanças — CLAUDE.md Regra 5 — após a implementação.
