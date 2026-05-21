@@ -36,6 +36,7 @@
     "@capacitor/status-bar": "^8.0.2",
     "@supabase/supabase-js": "^2.99.1",
     "animejs": "^4.4.1",
+    "html2pdf.js": "^0.14.0",
     "motion": "^12.36.0",
     "ogl": "^1.0.11",
     "qrcode": "^1.5.4",
