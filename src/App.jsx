@@ -1048,14 +1048,49 @@ async function scheduleOSPosVenda(os) {
 // Caminho pelo DB layer (DB.set) — mantém audit trail, escopo por empresa,
 // sync Supabase e dispara o pós-venda. Espelha o newOS do ProcessModule
 // (getNextNumber("OS", ...)). Fotos do cliente entram em `fotos`.
+// Localiza um cliente existente pelo telefone do WhatsApp (compara só dígitos,
+// casando pelos 8 últimos para tolerar variações de DDI/DDD/9º dígito). Se não
+// encontrar, cadastra um novo cliente em erp:client: com os dados coletados pela
+// IA. Só roda na aprovação da proposta — mantém o gate de revisão humana.
+function findOrCreateClientFromProposal(p) {
+  const telDigits = String(p.phone || "").replace(/\D/g, "");
+  const clients = DB.list("erp:client:");
+  if (telDigits.length >= 8) {
+    const alvo = telDigits.slice(-8);
+    const existente = clients.find((c) => {
+      const d = String(c.telefone || "").replace(/\D/g, "");
+      return d.length >= 8 && d.slice(-8) === alvo;
+    });
+    if (existente) return existente;
+  }
+  if (!p.customer_name) return null;
+  const newClient = {
+    id: genId(),
+    nome: String(p.customer_name).trim(),
+    tipo: "pf",
+    cpf: "", rg: "", cnpj: "",
+    telefone: p.phone || "",
+    email: "",
+    endereco: { rua: String(p.address || "").trim(), numero: "", bairro: "", cidade: "", estado: "", cep: "" },
+    observacoes: "Cadastrado automaticamente via IA WhatsApp.",
+    status: "ativo",
+    origem: "ia_whatsapp",
+    createdAt: new Date().toISOString(),
+  };
+  DB.set("erp:client:" + newClient.id, newClient);
+  return newClient;
+}
+
 function createOSFromProposal(p) {
   const orders = DB.list("erp:os:");
   const numero = getNextNumber("OS", orders, "erp:os:");
+  // Vincula a OS a um cliente real: reaproveita cadastro existente ou cria um novo.
+  const cliente = findOrCreateClientFromProposal(p);
   const newOS = {
     id: genId(),
     numero,
-    clienteId: null,
-    clienteNome: p.customer_name || "—",
+    clienteId: cliente ? cliente.id : null,
+    clienteNome: cliente ? cliente.nome : (p.customer_name || "—"),
     endereco: p.address || "",
     servicos: [],
     pecas: [],
