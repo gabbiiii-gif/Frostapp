@@ -994,6 +994,34 @@ async function scheduleOSPosVenda(os) {
     const proximaVisita = new Date(finalizadoEm);
     proximaVisita.setDate(proximaVisita.getDate() + dias);
 
+    // ── Resolve variáveis de template ({{...}}) ──────────────────────────────
+    // Os templates de pós-venda usam placeholders {{cliente_nome}},
+    // {{empresa_nome}}, {{equipamento}} e {{data_sugerida}}. A substituição é
+    // feita aqui, no agendamento — único ponto com acesso a OS + config da
+    // empresa + cliente. Sem isso o cliente recebe o placeholder literal.
+    const empConfig = DB.get("erp:config") || {};
+    const empresaNome = empConfig.nomeEmpresa || empConfig.razaoSocial || "nossa empresa";
+    // Rótulos amigáveis por tipo de equipamento (espelha TYPE_LABEL usado nos docs).
+    const EQUIP_LABEL = {
+      central: "Central de Ar", geladeira: "Geladeira/Freezer", lavadora: "Máq. de Lavar",
+      centrifuga: "Centrífuga", expositor: "Expositor", bebedouro_industrial: "Bebedouro Industrial",
+      bebedouro_mesa: "Gelágua de Mesa", bebedouro_coluna: "Gelágua de Coluna",
+      camara_fria: "Câmara Fria", outro: "equipamento",
+    };
+    const equipLabel = EQUIP_LABEL[os.equipamentoTipo] || "equipamento";
+    const equipamentoTexto = os.equipamentoModelo
+      ? `${equipLabel} ${os.equipamentoModelo}`.trim()
+      : equipLabel;
+    const dataSugerida = proximaVisita.toLocaleDateString("pt-BR");
+    // Aplica as variáveis a um template. Aceita chave simples {var} e dupla
+    // {{var}} — os templates salvos no banco usam {var}, mas o editor da UI
+    // exibe {{var}}; o regex \{\{?...\}?\} cobre os dois formatos.
+    const aplicarVars = (tpl) => String(tpl || "")
+      .replace(/\{\{?\s*cliente_nome\s*\}?\}/g, clienteNome)
+      .replace(/\{\{?\s*empresa_nome\s*\}?\}/g, empresaNome)
+      .replace(/\{\{?\s*equipamento\s*\}?\}/g, equipamentoTexto)
+      .replace(/\{\{?\s*data_sugerida\s*\}?\}/g, dataSugerida);
+
     const rows = [];
 
     // NPS — 24h após finalização
@@ -1007,8 +1035,8 @@ async function scheduleOSPosVenda(os) {
         os_numero: os.numero || null,
         tipo: "nps",
         status: "pendente",
-        conteudo: tplByTipo.nps ||
-          "Olá! Como foi nosso atendimento? De 0 a 10, qual nota você dá?",
+        conteudo: aplicarVars(tplByTipo.nps ||
+          "Olá! Como foi nosso atendimento? De 0 a 10, qual nota você dá?"),
         telefone,
         agendada_para: agendada.toISOString(),
       });
@@ -1027,8 +1055,8 @@ async function scheduleOSPosVenda(os) {
         os_numero: os.numero || null,
         tipo: "lembrete_visita",
         status: "pendente",
-        conteudo: tplByTipo.lembrete_visita ||
-          "Oi! Já fazem alguns meses do seu último serviço. Que tal agendar uma manutenção preventiva?",
+        conteudo: aplicarVars(tplByTipo.lembrete_visita ||
+          "Oi! Já fazem alguns meses do seu último serviço. Que tal agendar uma manutenção preventiva?"),
         telefone,
         agendada_para: agendada.toISOString(),
       });
