@@ -4771,52 +4771,50 @@ function FinanceModule({ user, dateFilter, addToast }) {
 // Usamos Blob URL para que <script>, onclick e window.print() funcionem
 // (browsers podem desabilitar scripts em documentos abertos via about:blank).
 function openHTMLDoc(html) {
-  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const w = window.open(url, "_blank");
+  // Abre a janela vazia e escreve o HTML direto. Evita window.open(blobURL):
+  // ali o w.document inicial é o about:blank (readyState "complete"), e ligar
+  // os botões nesse momento erra o documento real que ainda vai carregar.
+  // Com document.write o DOM fica pronto de forma síncrona após o close().
+  const w = window.open("", "_blank");
   if (!w) {
-    URL.revokeObjectURL(url);
     alert("Permita popups para gerar documentos.");
     return;
   }
+  w.document.open();
+  w.document.write(html);
+  w.document.close();
+
   // Nome do arquivo PDF derivado do <title> do documento.
   const titulo = (html.match(/<title>([^<]*)<\/title>/i)?.[1] || "documento").trim();
   const filename = titulo.replace(/[^a-zA-Z0-9-_]+/g, "-") || "documento";
 
-  // Liga os botões da barra de ações. O documento é um blob same-origin, então
-  // o app consegue acessar w.document e anexar listeners — necessário porque a
-  // CSP impede scripts dentro do próprio documento.
-  const ligarBotoes = () => {
-    try {
-      const doc = w.document;
-      const btnPrint = doc.getElementById("btn-print");
-      const btnClose = doc.getElementById("btn-close");
-      const btnPdf = doc.getElementById("btn-pdf");
-      if (btnPrint) btnPrint.addEventListener("click", () => w.print());
-      if (btnClose) btnClose.addEventListener("click", () => w.close());
-      if (btnPdf) btnPdf.addEventListener("click", async () => {
-        const orig = btnPdf.textContent;
-        btnPdf.disabled = true;
-        btnPdf.textContent = "Gerando...";
-        try {
-          await gerarPDFDeHTML(html, filename);
-        } catch (e) {
-          console.error("[openHTMLDoc] PDF:", e);
-          alert("Falha ao gerar o PDF. Use Imprimir como alternativa.");
-        } finally {
-          btnPdf.disabled = false;
-          btnPdf.textContent = orig;
-        }
-      });
-    } catch (e) {
-      console.error("[openHTMLDoc] não foi possível ligar a barra de ações:", e);
-    }
-  };
-  if (w.document && w.document.readyState === "complete") ligarBotoes();
-  else w.addEventListener("load", ligarBotoes);
-
-  // Libera o blob depois que a aba carregou (1 min é suficiente)
-  setTimeout(() => URL.revokeObjectURL(url), 60000);
+  // Liga os botões da barra de ações pelo contexto do app (a CSP impede
+  // scripts dentro do próprio documento). Após document.close() os elementos
+  // já existem, então não há corrida com o carregamento.
+  try {
+    const doc = w.document;
+    const btnPrint = doc.getElementById("btn-print");
+    const btnClose = doc.getElementById("btn-close");
+    const btnPdf = doc.getElementById("btn-pdf");
+    if (btnPrint) btnPrint.addEventListener("click", () => w.print());
+    if (btnClose) btnClose.addEventListener("click", () => w.close());
+    if (btnPdf) btnPdf.addEventListener("click", async () => {
+      const orig = btnPdf.textContent;
+      btnPdf.disabled = true;
+      btnPdf.textContent = "Gerando...";
+      try {
+        await gerarPDFDeHTML(html, filename);
+      } catch (e) {
+        console.error("[openHTMLDoc] PDF:", e);
+        alert("Falha ao gerar o PDF. Use Imprimir como alternativa.");
+      } finally {
+        btnPdf.disabled = false;
+        btnPdf.textContent = orig;
+      }
+    });
+  } catch (e) {
+    console.error("[openHTMLDoc] não foi possível ligar a barra de ações:", e);
+  }
 }
 
 // Formatação compacta de moeda (BRL) com tabular-nums implícito
