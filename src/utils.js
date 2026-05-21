@@ -182,6 +182,21 @@ export function buildOSWhatsAppResumo(os, tipo) {
   return linhas.join("\n");
 }
 
+// Calcula o desconto aplicado e o total final de uma OS.
+// subtotal: soma de serviços + peças (número).
+// tipo: "percentual" aplica % sobre o subtotal; qualquer outro valor trata como R$ fixo.
+// valor: o número digitado (% ou R$). O desconto é limitado a [0, subtotal] —
+// nunca deixa o total negativo nem aceita desconto negativo.
+// Helper puro — testado em utils.test.js.
+export function calcDescontoOS(subtotal, tipo, valor) {
+  const sub = Math.max(0, Number(subtotal) || 0);
+  const raw = Math.max(0, Number(valor) || 0);
+  let desconto = tipo === "percentual" ? sub * (raw / 100) : raw;
+  desconto = Math.min(Math.max(0, desconto), sub);
+  desconto = Math.round(desconto * 100) / 100;
+  return { descontoAplicado: desconto, total: Math.round((sub - desconto) * 100) / 100 };
+}
+
 // Decide se um módulo está habilitado para a empresa.
 // allowedModules: array da empresa (ou null/undefined = tudo ligado).
 // "dashboard" e "config" são sempre habilitados (regra de negócio: o admin

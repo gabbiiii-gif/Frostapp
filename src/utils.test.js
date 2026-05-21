@@ -16,6 +16,7 @@ import {
   validateOSProposal,
   buildOSWhatsAppResumo,
   isModuleEnabledForCompany,
+  calcDescontoOS,
 } from './utils.js';
 
 describe('genId', () => {
@@ -283,5 +284,30 @@ describe("isModuleEnabledForCompany", () => {
   it("array vazio desabilita todos os toggláveis", () => {
     expect(isModuleEnabledForCompany([], "financeiro")).toBe(false);
     expect(isModuleEnabledForCompany([], "ia")).toBe(false);
+  });
+});
+
+describe("calcDescontoOS", () => {
+  it("desconto em valor fixo abate direto do subtotal", () => {
+    expect(calcDescontoOS(200, "valor", 50)).toEqual({ descontoAplicado: 50, total: 150 });
+  });
+
+  it("desconto percentual aplica a % sobre o subtotal", () => {
+    expect(calcDescontoOS(200, "percentual", 10)).toEqual({ descontoAplicado: 20, total: 180 });
+  });
+
+  it("desconto nunca deixa o total negativo (limita ao subtotal)", () => {
+    expect(calcDescontoOS(100, "valor", 500)).toEqual({ descontoAplicado: 100, total: 0 });
+    expect(calcDescontoOS(100, "percentual", 150)).toEqual({ descontoAplicado: 100, total: 0 });
+  });
+
+  it("valores ausentes/negativos viram zero", () => {
+    expect(calcDescontoOS(100, "valor", "")).toEqual({ descontoAplicado: 0, total: 100 });
+    expect(calcDescontoOS(100, "valor", -30)).toEqual({ descontoAplicado: 0, total: 100 });
+    expect(calcDescontoOS(0, "percentual", 10)).toEqual({ descontoAplicado: 0, total: 0 });
+  });
+
+  it("arredonda para 2 casas decimais", () => {
+    expect(calcDescontoOS(99.99, "percentual", 33.333)).toEqual({ descontoAplicado: 33.33, total: 66.66 });
   });
 });

@@ -10,7 +10,7 @@ import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, del
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
-import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany } from "./utils.js";
+import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS } from "./utils.js";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
 // Geração de PDF client-side dos documentos de OS/orçamento para envio via WhatsApp
@@ -4866,8 +4866,11 @@ function _h(v) {
     .replace(/'/g, "&#39;");
 }
 
-// Estilos CSS compartilhados — design tokens, print-first (A4)
-function _docStyles(accentColor = "#1d4ed8") {
+// Estilos CSS compartilhados — design tokens, print-first (A4).
+// `compact = true` dimensiona o documento para A5 (meia folha A4) — usado por
+// recibo e vale, que são documentos curtos. As regras compactas vêm depois das
+// de A4 no CSS, então sobrescrevem (inclusive @page e @media print).
+function _docStyles(accentColor = "#1d4ed8", compact = false) {
   return `
     /* ─── Design tokens (semantic) ─────────────────────────────────────── */
     :root{
@@ -4985,6 +4988,29 @@ function _docStyles(accentColor = "#1d4ed8") {
       .totals,.signatures{page-break-inside:avoid}
       thead{display:table-header-group}
     }
+    ${compact ? `
+    /* ─── Modo compacto: documento ocupa meia folha A4 (formato A5) ─────── */
+    @page{size:A5;margin:8mm 10mm}
+    html,body{font-size:11px}
+    body{padding:18px 10px}
+    .page{max-width:540px}
+    .page-inner{padding:22px 26px}
+    .hdr{padding-bottom:14px;gap:6px}
+    .hdr-logo{max-width:130px;max-height:80px;margin-bottom:2px}
+    .hdr-brand{padding:0 96px}
+    .hdr-brand .company{font-size:17px}
+    .hdr-brand .contact{font-size:9.5px;margin-top:4px}
+    .hdr-doc{padding:7px 10px;min-width:110px}
+    .hdr-doc .doc-num{font-size:14px}
+    .section{margin-top:12px}
+    .hero-amount{margin:10px 0 6px;padding:12px 14px}
+    .hero-amount .hero-value{font-size:24px}
+    .terms{margin-top:12px;padding-top:8px}
+    .watermark{margin-top:14px;padding-top:8px}
+    @media print{
+      html,body{font-size:9.5pt}
+    }
+    ` : ""}
   `;
 }
 
@@ -5029,12 +5055,37 @@ function _docHeader(config, docType, numero, dataStr) {
 }
 
 // Barra fixa com ações (imprimir/salvar-PDF + fechar) — some no print
-function _actionBar() {
+// Barra de ações da janela do documento. `pageFormat` ("a4" | "a5") define o
+// tamanho da página do PDF gerado — A5 é usado pelos documentos de meia folha
+// (recibo, vale). O html2pdf é carregado de CDN porque a janela do documento é
+// um blob isolado e não compartilha o bundle do app.
+function _actionBar(pageFormat = "a4") {
   return `
     <div class="actionbar" role="toolbar" aria-label="Ações do documento">
-      <button onclick="window.print()" aria-label="Salvar como PDF ou imprimir">Salvar PDF / Imprimir</button>
+      <button id="btn-pdf" onclick="baixarPDF()" aria-label="Baixar arquivo PDF">Baixar PDF</button>
+      <button class="secondary" onclick="window.print()" aria-label="Imprimir documento">Imprimir</button>
       <button class="secondary" onclick="window.close()" aria-label="Fechar aba">Fechar</button>
     </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.3/html2pdf.bundle.min.js"></script>
+    <script>
+      function baixarPDF(){
+        var btn=document.getElementById('btn-pdf');
+        if(typeof html2pdf==='undefined'){alert('Biblioteca de PDF ainda carregando — tente novamente em instantes.');return;}
+        var el=document.querySelector('main.page');
+        var nome=(document.title||'documento').trim().replace(/[^a-zA-Z0-9-_]+/g,'-');
+        var antes=btn.textContent;
+        btn.disabled=true;btn.textContent='Gerando...';
+        html2pdf().set({
+          margin:0,
+          filename:nome+'.pdf',
+          image:{type:'jpeg',quality:0.98},
+          html2canvas:{scale:2,useCORS:true},
+          jsPDF:{unit:'mm',format:'${pageFormat}',orientation:'portrait'}
+        }).from(el).save()
+        .then(function(){btn.disabled=false;btn.textContent=antes;})
+        .catch(function(){btn.disabled=false;btn.textContent=antes;alert('Falha ao gerar o PDF. Use Imprimir como alternativa.');});
+      }
+    </script>
   `;
 }
 
@@ -5168,7 +5219,12 @@ function generateOrcamentoHTML(os, clients) {
 
   const totServ = servicos.reduce((acc, s) => acc + (Number(s.valor) || 0), 0);
   const totPecas = pecas.reduce((acc, p) => acc + (Number(p.quantidade) || 1) * (Number(p.valorUnit) || 0), 0);
-  const total = (totServ + totPecas) || valorServico;
+  const subtotal = (totServ + totPecas) || valorServico;
+  // Desconto: OS antigas não têm o campo — cai em 0 e o total continua igual.
+  const descontoOrc = Number(os.descontoAplicado) || 0;
+  const descontoLabelOrc = os.descontoTipo === "percentual" && Number(os.descontoValor)
+    ? `Desconto (${Number(os.descontoValor)}%)` : "Desconto";
+  const total = Math.max(0, subtotal - descontoOrc);
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -5221,6 +5277,8 @@ function generateOrcamentoHTML(os, clients) {
       <div class="totals-inner">
         <div class="total-row"><span>Mão de obra</span><span>${_fmtBRL(totServ)}</span></div>
         <div class="total-row"><span>Peças e Materiais</span><span>${totPecas > 0 ? _fmtBRL(totPecas) : "Incluso"}</span></div>
+        ${descontoOrc > 0 ? `<div class="total-row"><span>Subtotal</span><span>${_fmtBRL(subtotal)}</span></div>
+        <div class="total-row"><span>${descontoLabelOrc}</span><span>- ${_fmtBRL(descontoOrc)}</span></div>` : ""}
         <div class="total-row grand"><span class="label">Total</span><span class="value">${_fmtBRL(total)}</span></div>
       </div>
     </div>
@@ -5271,6 +5329,12 @@ function generateOSHTML(os, clients) {
       <td class="num">${valU > 0 ? _fmtBRL(sub) : "—"}</td>
     </tr>`;
   }).join("");
+
+  // Desconto: OS antigas não têm os campos — cai em 0 e o total continua igual.
+  const descontoOS = Number(os.descontoAplicado) || 0;
+  const subtotalOS = Number(os.subtotal) || ((Number(os.valor) || 0) + descontoOS);
+  const descontoLabelOS = os.descontoTipo === "percentual" && Number(os.descontoValor)
+    ? `Desconto (${Number(os.descontoValor)}%)` : "Desconto";
 
   return `<!DOCTYPE html>
 <html lang="pt-BR">
@@ -5327,6 +5391,8 @@ function generateOSHTML(os, clients) {
     <!-- Valor total em destaque -->
     <div class="totals">
       <div class="totals-inner">
+        ${descontoOS > 0 ? `<div class="total-row"><span>Subtotal</span><span>${_fmtBRL(subtotalOS)}</span></div>
+        <div class="total-row"><span>${descontoLabelOS}</span><span>- ${_fmtBRL(descontoOS)}</span></div>` : ""}
         <div class="total-row grand">
           <span class="label">Valor Total</span>
           <span class="value">${_fmtBRL(os.valor || 0)}</span>
@@ -5358,6 +5424,9 @@ function generateReciboHTML(os, clients) {
     : new Date().toLocaleDateString("pt-BR");
   const valor = os.valor || 0;
   const valorExtenso = valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 });
+  // Desconto: OS antigas não têm os campos — cai em 0 e o recibo não muda.
+  const descontoRec = Number(os.descontoAplicado) || 0;
+  const subtotalRec = Number(os.subtotal) || (valor + descontoRec);
 
   const servicos = Array.isArray(os.servicos) && os.servicos.length > 0 ? os.servicos : null;
   const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
@@ -5389,7 +5458,7 @@ function generateReciboHTML(os, clients) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Recibo ${os.numero}</title>
-<style>${_docStyles("#047857")}</style>
+<style>${_docStyles("#047857", true)}</style>
 </head>
 <body>
 <main class="page">
@@ -5400,7 +5469,9 @@ function generateReciboHTML(os, clients) {
     <div class="hero-amount">
       <div class="hero-label">Valor Total do Serviço</div>
       <div class="hero-value">${_fmtBRL(valor)}</div>
-      <div class="hero-hint">R$ ${valorExtenso}</div>
+      <div class="hero-hint">${descontoRec > 0
+        ? `Subtotal ${_fmtBRL(subtotalRec)} − desconto ${_fmtBRL(descontoRec)}`
+        : `R$ ${valorExtenso}`}</div>
     </div>
 
     ${_clienteBlock(cliente, os)}
@@ -5455,7 +5526,7 @@ function generateReciboHTML(os, clients) {
     <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
 </main>
-${_actionBar()}
+${_actionBar("a5")}
 </body></html>`;
 }
 
@@ -5578,7 +5649,7 @@ function generateValeHTML(vale, employee) {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Vale — ${_h(emp.nome || "")} — ${data}</title>
-<style>${_docStyles("#b45309")}</style>
+<style>${_docStyles("#b45309", true)}</style>
 </head>
 <body>
 <main class="page">
@@ -5619,7 +5690,7 @@ function generateValeHTML(vale, employee) {
     <div class="watermark">FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
 </main>
-${_actionBar()}
+${_actionBar("a5")}
 </body></html>`;
 }
 
@@ -5774,10 +5845,12 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
     pecas: [],
     // Equipamento agora vive dentro de cada serviço (não mais no nível da OS).
     tecnicoId: "", dataAgendada: toISODate(new Date()), horaAgendada: "08:00", observacoes: "",
+    // Desconto sobre o total da OS — descontoTipo: "valor" (R$) ou "percentual" (%).
+    descontoTipo: "valor", descontoValor: "",
   };
   const [form, setForm] = useState(emptyForm);
 
-  // Soma reativa dos valores dos serviços + peças
+  // Subtotal reativo: soma dos valores dos serviços + peças (antes do desconto)
   const valorTotalForm = useMemo(() => {
     const totalServicos = (form.servicos || []).reduce((acc, s) => {
       const v = parseFloat(String(s.valor || "0").replace(",", ".")) || 0;
@@ -5790,6 +5863,16 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
     }, 0);
     return totalServicos + totalPecas;
   }, [form.servicos, form.pecas]);
+
+  // Desconto aplicado + total final reativo (subtotal - desconto).
+  const { descontoAplicado: descontoForm, total: valorFinalForm } = useMemo(
+    () => calcDescontoOS(
+      valorTotalForm,
+      form.descontoTipo,
+      parseFloat(String(form.descontoValor || "0").replace(",", ".")) || 0,
+    ),
+    [valorTotalForm, form.descontoTipo, form.descontoValor],
+  );
 
   const addServico = useCallback(() => {
     setForm((f) => ({ ...f, servicos: [...(f.servicos || []), { ...emptyServico }] }));
@@ -5913,6 +5996,8 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
       dataAgendada: row.dataAgendada ? row.dataAgendada.split("T")[0] : toISODate(new Date()),
       horaAgendada: row.horaAgendada || "08:00",
       observacoes: row.observacoes || "",
+      descontoTipo: row.descontoTipo === "percentual" ? "percentual" : "valor",
+      descontoValor: row.descontoValor != null && row.descontoValor !== "" ? String(row.descontoValor) : "",
     });
     setModalOpen(true);
   }, []);
@@ -5989,10 +6074,16 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
 
     const cliente = (allClients || []).find((c) => c.id === form.clienteId);
     const tecnico = tecnicos.find((t) => t.id === form.tecnicoId);
-    // Total da OS = soma dos serviços + soma das peças (qtd × valorUnit)
+    // Subtotal da OS = soma dos serviços + soma das peças (qtd × valorUnit).
+    // O total final (campo `valor`) já vem com o desconto abatido.
     const totalServicos = servicosLimpos.reduce((acc, s) => acc + s.valor, 0);
     const totalPecas = pecasLimpas.reduce((acc, p) => acc + p.quantidade * p.valorUnit, 0);
-    const valorTotal = totalServicos + totalPecas;
+    const subtotalOS = totalServicos + totalPecas;
+    const descontoTipoOS = form.descontoTipo === "percentual" ? "percentual" : "valor";
+    const descontoValorOS = parseFloat(String(form.descontoValor || "0").replace(",", ".")) || 0;
+    const { descontoAplicado: descontoAplicadoOS, total: valorTotal } = calcDescontoOS(
+      subtotalOS, descontoTipoOS, descontoValorOS,
+    );
 
     // Campos de retrocompatibilidade: tipo recebe resumo, descricao monta um texto
     const tipoResumo = servicosLimpos.length === 1
@@ -6030,6 +6121,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
         dataAgendada: form.dataAgendada + "T00:00:00.000Z",
         horaAgendada: form.horaAgendada || "",
         observacoes: form.observacoes,
+        subtotal: subtotalOS,
+        descontoTipo: descontoTipoOS,
+        descontoValor: descontoValorOS,
+        descontoAplicado: descontoAplicadoOS,
         valor: valorTotal,
         // Mantém itensUtilizados sincronizado (alguns docs antigos ainda usam)
         itensUtilizados: pecasLimpas.map((p) => ({ nome: p.nome, quantidade: p.quantidade, valorUnit: p.valorUnit })),
@@ -6066,6 +6161,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
         horaAgendada: form.horaAgendada || "",
         dataConclusao: null,
         observacoes: form.observacoes,
+        subtotal: subtotalOS,
+        descontoTipo: descontoTipoOS,
+        descontoValor: descontoValorOS,
+        descontoAplicado: descontoAplicadoOS,
         valor: valorTotal,
         itensUtilizados: pecasLimpas.map((p) => ({ nome: p.nome, quantidade: p.quantidade, valorUnit: p.valorUnit })),
         createdAt: new Date().toISOString(),
@@ -6903,6 +7002,45 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
               Adicionar peça/material
             </button>
+          </div>
+
+          {/* ─── Desconto sobre o Total da OS (serviços + peças) ──────────
+              Aceita desconto em R$ fixo ou em %. O total final já reflete o
+              abatimento e é o valor gravado no campo `valor` da OS. */}
+          <div className="bg-gray-700/40 border border-gray-700 rounded-lg p-3 space-y-2.5">
+            <label className="block text-sm font-medium text-gray-300">Desconto no Total</label>
+            <div className="flex gap-2">
+              <select
+                value={form.descontoTipo}
+                onChange={(e) => setForm({ ...form, descontoTipo: e.target.value })}
+                className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                aria-label="Tipo de desconto"
+              >
+                <option value="valor">R$</option>
+                <option value="percentual">%</option>
+              </select>
+              <input
+                type="number" min="0" step="0.01"
+                value={form.descontoValor}
+                onChange={(e) => setForm({ ...form, descontoValor: e.target.value })}
+                placeholder={form.descontoTipo === "percentual" ? "0 %" : "R$ 0,00"}
+                className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+              />
+            </div>
+            <div className="text-xs text-gray-400 space-y-1 pt-2 border-t border-gray-700">
+              <div className="flex justify-between">
+                <span>Subtotal (serviços + peças)</span>
+                <span className="tabular-nums text-gray-300">{formatCurrency(valorTotalForm)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Desconto</span>
+                <span className="tabular-nums text-amber-400">- {formatCurrency(descontoForm)}</span>
+              </div>
+              <div className="flex justify-between text-sm pt-1">
+                <span className="text-gray-300 font-medium">Total final</span>
+                <span className="tabular-nums text-white font-semibold">{formatCurrency(valorFinalForm)}</span>
+              </div>
+            </div>
           </div>
 
           {/* Bloco de equipamento global removido — agora é por serviço (ver acima). */}
