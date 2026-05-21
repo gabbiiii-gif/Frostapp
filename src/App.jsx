@@ -10,9 +10,11 @@ import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, del
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
-import { validateOSProposal } from "./utils.js";
+import { validateOSProposal, buildOSWhatsAppResumo } from "./utils.js";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
-import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
+import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
+// Geração de PDF client-side dos documentos de OS/orçamento para envio via WhatsApp
+import html2pdf from "html2pdf.js";
 
 // ─── ErrorBoundary por módulo ────────────────────────────────────────────────
 // Sem isto, qualquer crash em um módulo (Recharts com dado malformado, OS legada
@@ -6020,6 +6022,63 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
     setConfirmDelete(row);
   }, []);
 
+  // Envia orçamento ou OS executada ao WhatsApp do cliente (texto + PDF).
+  // `tipo`: "orcamento" | "os". Gera o PDF client-side a partir do HTML já
+  // existente (generateOrcamentoHTML/generateOSHTML) via html2pdf e despacha
+  // pela camada de plataforma (sendWhatsAppMessage/sendWhatsAppMedia).
+  async function enviarDocWhatsApp(os, tipo) {
+    const cliente = (allClients || []).find((c) => c.id === os.clienteId);
+    const telefone = (cliente?.telefone || "").replace(/\D/g, "");
+    if (!telefone) {
+      addToast("Cliente sem telefone cadastrado.", "error");
+      return;
+    }
+    const companyId = getActiveCompanyId();
+    try {
+      addToast("Gerando documento...", "info");
+      const html = tipo === "os" ? generateOSHTML(os, allClients) : generateOrcamentoHTML(os, allClients);
+      const container = document.createElement("div");
+      container.innerHTML = html;
+      // html2canvas precisa do elemento no DOM para medir largura — anexa off-screen.
+      container.style.position = "fixed";
+      container.style.left = "-9999px";
+      container.style.top = "0";
+      container.style.width = "794px";
+      document.body.appendChild(container);
+      let pdfBlob;
+      try {
+        pdfBlob = await html2pdf().set({
+          margin: 8,
+          filename: `${tipo}-${os.numero || os.id}.pdf`,
+          image: { type: "jpeg", quality: 0.95 },
+          html2canvas: { scale: 2 },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+        }).from(container).outputPdf("blob");
+      } finally {
+        document.body.removeChild(container);
+      }
+      const base64 = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(String(reader.result).split(",")[1] || "");
+        reader.readAsDataURL(pdfBlob);
+      });
+      const resumo = buildOSWhatsAppResumo(os, tipo);
+      const rText = await sendWhatsAppMessage(supabase, companyId, telefone, resumo);
+      const rMedia = await sendWhatsAppMedia(supabase, companyId, telefone, {
+        base64,
+        fileName: `${tipo === "os" ? "OS" : "Orcamento"}-${os.numero || os.id}.pdf`,
+        caption: tipo === "os" ? "Ordem de Serviço" : "Orçamento",
+      });
+      if (rText.ok && rMedia.ok) {
+        addToast("Enviado ao WhatsApp do cliente.", "success");
+      } else {
+        addToast("Falha no envio: " + (rMedia.error || rText.error || "erro"), "error");
+      }
+    } catch (e) {
+      addToast("Erro ao gerar/enviar documento: " + (e?.message || e), "error");
+    }
+  }
+
   const confirmDeleteAction = useCallback(() => {
     if (confirmDelete) {
       // ─── Devolução de peças ao estoque ────────────────────────────────────
@@ -6281,6 +6340,23 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01" /></svg>
               </button>
+              {/* Envio ao WhatsApp do cliente — desabilitado se o cliente não tem telefone */}
+              <button
+                onClick={() => enviarDocWhatsApp(row, "orcamento")}
+                disabled={!(allClients || []).find((c) => c.id === row.clienteId)?.telefone}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+                title={(allClients || []).find((c) => c.id === row.clienteId)?.telefone ? "Enviar orçamento ao WhatsApp do cliente" : "Cliente sem telefone cadastrado"}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" /></svg>
+              </button>
+              <button
+                onClick={() => enviarDocWhatsApp(row, "os")}
+                disabled={!(allClients || []).find((c) => c.id === row.clienteId)?.telefone}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-green-500 hover:bg-gray-700 transition disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-gray-400 disabled:hover:bg-transparent"
+                title={(allClients || []).find((c) => c.id === row.clienteId)?.telefone ? "Enviar OS ao WhatsApp do cliente" : "Cliente sem telefone cadastrado"}
+              >
+                <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 24 24"><path d="M12.04 2C6.58 2 2.13 6.45 2.13 11.91c0 1.75.46 3.45 1.32 4.95L2 22l5.25-1.38c1.45.79 3.08 1.21 4.79 1.21 5.46 0 9.91-4.45 9.91-9.91S17.5 2 12.04 2zm5.8 14.01c-.24.68-1.4 1.3-1.94 1.34-.5.05-1.13.07-1.82-.11-.42-.13-.96-.31-1.65-.61-2.9-1.25-4.8-4.17-4.94-4.36-.15-.19-1.19-1.58-1.19-3.01s.75-2.14 1.02-2.43c.27-.29.58-.36.78-.36.19 0 .39 0 .56.01.18.01.42-.07.66.5.24.59.82 2.03.89 2.18.07.15.12.32.02.51-.1.19-.15.31-.29.48-.15.17-.31.39-.44.52-.15.15-.3.31-.13.6.17.29.76 1.25 1.63 2.02 1.12 1 2.07 1.31 2.36 1.46.29.15.46.12.63-.07.17-.2.73-.85.93-1.14.19-.29.39-.24.65-.15.27.1 1.71.81 2 .96.29.15.49.22.56.34.07.12.07.71-.17 1.39z" /></svg>
+              </button>
               {(row.status === "finalizado" || row.status === "concluido") && (
                 <button
                   onClick={() => openHTMLDoc(generateReciboHTML(row, allClients))}
@@ -6336,6 +6412,19 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                         <div className="flex items-center gap-1 mt-2 pt-2 border-t border-gray-600/30">
                           <button onClick={() => openHTMLDoc(generateOrcamentoHTML(os, allClients))} className="flex-1 py-1 text-xs rounded bg-blue-600/20 text-blue-400 hover:bg-blue-600/40 transition text-center" title="Orçamento">Orç.</button>
                           <button onClick={() => openHTMLDoc(generateOSHTML(os, allClients))} className="flex-1 py-1 text-xs rounded bg-purple-600/20 text-purple-400 hover:bg-purple-600/40 transition text-center" title="OS">OS</button>
+                          {/* Envio ao WhatsApp do cliente — desabilitado se o cliente não tem telefone */}
+                          <button
+                            onClick={() => enviarDocWhatsApp(os, "orcamento")}
+                            disabled={!(allClients || []).find((c) => c.id === os.clienteId)?.telefone}
+                            className="flex-1 py-1 text-xs rounded bg-green-600/20 text-green-400 hover:bg-green-600/40 transition text-center disabled:opacity-40 disabled:cursor-not-allowed"
+                            title={(allClients || []).find((c) => c.id === os.clienteId)?.telefone ? "Enviar orçamento ao WhatsApp do cliente" : "Cliente sem telefone cadastrado"}
+                          >Wpp Orç.</button>
+                          <button
+                            onClick={() => enviarDocWhatsApp(os, "os")}
+                            disabled={!(allClients || []).find((c) => c.id === os.clienteId)?.telefone}
+                            className="flex-1 py-1 text-xs rounded bg-green-600/20 text-green-400 hover:bg-green-600/40 transition text-center disabled:opacity-40 disabled:cursor-not-allowed"
+                            title={(allClients || []).find((c) => c.id === os.clienteId)?.telefone ? "Enviar OS ao WhatsApp do cliente" : "Cliente sem telefone cadastrado"}
+                          >Wpp OS</button>
                           {(os.status === "finalizado" || os.status === "concluido") && (
                             <button onClick={() => openHTMLDoc(generateReciboHTML(os, allClients))} className="flex-1 py-1 text-xs rounded bg-green-600/20 text-green-400 hover:bg-green-600/40 transition text-center" title="Recibo">Recibo</button>
                           )}
