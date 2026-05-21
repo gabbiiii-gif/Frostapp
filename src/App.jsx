@@ -10,7 +10,7 @@ import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, del
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
-import { validateOSProposal, buildOSWhatsAppResumo } from "./utils.js";
+import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany } from "./utils.js";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
 // Geração de PDF client-side dos documentos de OS/orçamento para envio via WhatsApp
@@ -1095,6 +1095,18 @@ const ALL_MODULES = [
   { id: "pos-venda", label: "Pós-Venda" },
   { id: "folha", label: "Folha de Pagamento" },
   { id: "config", label: "Configurações (admin)" },
+];
+
+// Módulos que o Master pode ligar/desligar por empresa.
+// dashboard e config são sempre ativos — não entram nesta lista.
+const TOGGLEABLE_MODULES = [
+  { id: "processos", label: "Ordens de Serviço" },
+  { id: "agenda", label: "Agenda" },
+  { id: "financeiro", label: "Financeiro" },
+  { id: "cadastro", label: "Cadastros" },
+  { id: "ia", label: "IA / Atendimento" },
+  { id: "pos-venda", label: "Pós-Venda" },
+  { id: "folha", label: "Folha de Pagamento" },
 ];
 
 // hasPermission respeita customPermissions quando o array está definido (mesmo vazio,
@@ -13726,20 +13738,32 @@ export default function App() {
     ];
 
     if (!user) return [];
+    // allowedModules da empresa ativa — null/ausente = tudo ligado.
+    const company = user.companyId ? DB.get("erp:company:" + user.companyId) : null;
+    const allowed = company?.allowedModules ?? null;
     // Usa hasPermission para respeitar permissões customizadas (sobrescrevem o role)
+    // E isModuleEnabledForCompany para respeitar o teto de acesso da empresa.
     return items.filter((item) => {
-      if (item.id === "dashboard") return hasPermission(user, "dashboard");
-      if (item.id === "config") {
-        // Apenas admin (ou quem tem 'config' explicitamente) acessa configurações
-        return user.role === "admin" || hasPermission(user, "config");
-      }
-      return hasPermission(user, item.id) || hasPermission(user, item.module);
+      const permOk =
+        item.id === "dashboard"
+          ? hasPermission(user, "dashboard")
+          : item.id === "config"
+            ? (user.role === "admin" || hasPermission(user, "config"))
+            : (hasPermission(user, item.id) || hasPermission(user, item.module));
+      return permOk && isModuleEnabledForCompany(allowed, item.id);
     });
   }, [user]);
 
   const activeModuleLabel = useMemo(() => {
     const item = navItems.find((n) => n.id === activeModule);
     return item ? item.label : "Dashboard";
+  }, [navItems, activeModule]);
+
+  // Se o módulo ativo foi desabilitado (pela empresa ou permissão), volta ao dashboard.
+  useEffect(() => {
+    if (navItems.length && !navItems.some((n) => n.id === activeModule)) {
+      setActiveModule("dashboard");
+    }
   }, [navItems, activeModule]);
 
   // Gera um token seguro, salva apenas o HASH no usuário e o token bruto na sessão
