@@ -479,3 +479,44 @@ export async function sendWhatsAppMessage(supabase, companyId, phone, text) {
     return { ok: false, error: e.message };
   }
 }
+
+// Envia um documento (PDF) ao WhatsApp do cliente via Evolution API.
+// Espelha sendWhatsAppMessage. `doc`: { base64, fileName, caption }.
+// `base64` é o conteúdo do arquivo SEM o prefixo data:. Silent fail se Evolution
+// não estiver configurada.
+export async function sendWhatsAppMedia(supabase, companyId, phone, doc) {
+  if (!supabase || !companyId || !phone || !doc?.base64) return { ok: false, error: 'params' };
+  try {
+    const { data: cfg } = await supabase
+      .from('ai_agent_config')
+      .select('evolution_url, evolution_instance, metadata')
+      .eq('company_id', companyId)
+      .maybeSingle();
+    if (!cfg?.evolution_url || !cfg?.evolution_instance) {
+      return { ok: false, error: 'evolution_nao_configurada' };
+    }
+    const apikey = cfg.metadata?.evolution_apikey || '';
+    const url = `${cfg.evolution_url.replace(/\/$/, '')}/message/sendMedia/${cfg.evolution_instance}`;
+    const number = String(phone).replace(/\D/g, '').replace(/^0+/, '');
+    const fullNumber = number.startsWith('55') ? number : '55' + number;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey },
+      body: JSON.stringify({
+        number: fullNumber,
+        mediatype: 'document',
+        mimetype: 'application/pdf',
+        media: doc.base64,
+        fileName: doc.fileName || 'documento.pdf',
+        caption: doc.caption || '',
+      }),
+    });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => '');
+      return { ok: false, error: `HTTP ${resp.status}: ${body.slice(0, 100)}` };
+    }
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+}
