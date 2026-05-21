@@ -12483,7 +12483,8 @@ function IAAtendimentoModule({ user, addToast }) {
                       Assumir
                     </button>
                   )}
-                  {selected.status === "pending_human" && (
+                  {/* Reativa a IA tanto após handoff (pending_human) quanto após encerramento (closed) */}
+                  {(selected.status === "pending_human" || selected.status === "closed") && (
                     <button onClick={reactivateAI} className="px-3 py-1 text-xs bg-green-500/20 text-green-400 hover:bg-green-500/30 rounded">
                       Devolver à IA
                     </button>
