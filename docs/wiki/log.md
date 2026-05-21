@@ -101,3 +101,12 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - residual aceito/follow-up: pg_net em public (não movido p/ não quebrar cron), leaked-pwd protection (manual Auth), os-fotos sem escopo por empresa, XSS print docs não auditado, validar login master via Edge no app
 - new pages: decisions/009-hardening-seguranca-2026-05-19.md; touched: index.md
 - verificação: dispatcher smoke 200 pós-RLS; anon_can_master_lookup=0; policies trocadas confirmadas
+
+## [2026-05-21] ingest | integração WhatsApp — Edge Function + envio de OS
+- gatilho: implementação do spec 2026-05-20-whatsapp-webhook-edge-function-design.md
+- mudança: n8n substituído pela Edge Function whatsapp-webhook (Claude Haiku 4.5)
+- infra: VPS Hetzner Evolution API v2.3.7 (162.55.58.199), tabela ai_os_proposals,
+  bucket ai-media, coluna ai_agent_config.metadata, linha cmp_default/frost-minas
+- novo: src/App.jsx botões "Enviar orçamento/OS (WhatsApp)", helper
+  buildOSWhatsAppResumo (utils.js), sendWhatsAppMedia (platform.js)
+- touched: concepts/evolution-multitenant.md, flows/whatsapp-ia-os.md
