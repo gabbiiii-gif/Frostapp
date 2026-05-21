@@ -14,6 +14,7 @@ import {
   daysFromNow,
   monthsAgo,
   validateOSProposal,
+  buildOSWhatsAppResumo,
 } from './utils.js';
 
 describe('genId', () => {
@@ -226,5 +227,36 @@ describe("validateOSProposal", () => {
   it("preserva media_urls existentes", () => {
     const r = validateOSProposal({ ...base, media_urls: ["http://x/a.jpg"] });
     expect(r.payload.media_urls).toEqual(["http://x/a.jpg"]);
+  });
+});
+
+describe("buildOSWhatsAppResumo", () => {
+  const os = {
+    numero: "OS 0007", clienteNome: "João Silva",
+    equipamentoTipo: "Ar-condicionado", equipamentoModelo: "Springer 12000",
+    descricao: "Não gela", valor: 350,
+    servicos: [{ nome: "Limpeza", valor: 150 }, { nome: "Recarga de gás", valor: 200 }],
+  };
+
+  it("inclui número, cliente e total formatado", () => {
+    const txt = buildOSWhatsAppResumo(os, "orcamento");
+    expect(txt).toContain("OS 0007");
+    expect(txt).toContain("João Silva");
+    expect(txt).toMatch(/R\$\s*350,00/);
+  });
+
+  it("lista os serviços", () => {
+    const txt = buildOSWhatsAppResumo(os, "orcamento");
+    expect(txt).toContain("Limpeza");
+    expect(txt).toContain("Recarga de gás");
+  });
+
+  it("usa rótulo diferente para tipo 'os'", () => {
+    expect(buildOSWhatsAppResumo(os, "os")).toContain("Ordem de Serviço");
+    expect(buildOSWhatsAppResumo(os, "orcamento")).toContain("Orçamento");
+  });
+
+  it("não quebra com OS mínima", () => {
+    expect(() => buildOSWhatsAppResumo({ numero: "OS 1" }, "os")).not.toThrow();
   });
 });

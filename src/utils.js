@@ -159,3 +159,25 @@ export function validateOSProposal(input) {
   };
   return { valid: missing.length === 0, missing, payload };
 }
+
+// Monta o texto-resumo de uma OS/orçamento para envio via WhatsApp.
+// `tipo`: "orcamento" ou "os". Helper puro — testado em utils.test.js.
+export function buildOSWhatsAppResumo(os, tipo) {
+  const o = os || {};
+  const titulo = tipo === "os" ? "Ordem de Serviço" : "Orçamento";
+  const linhas = [`*${titulo} — ${o.numero || ""}*`.trim()];
+  if (o.clienteNome) linhas.push(`Cliente: ${o.clienteNome}`);
+  const equip = [o.equipamentoTipo, o.equipamentoModelo].filter(Boolean).join(" ");
+  if (equip) linhas.push(`Equipamento: ${equip}`);
+  if (o.descricao) linhas.push(`Serviço: ${o.descricao}`);
+  const servicos = Array.isArray(o.servicos) ? o.servicos : [];
+  if (servicos.length) {
+    linhas.push("");
+    servicos.forEach((s) => {
+      linhas.push(`• ${s.nome || "Item"}${s.valor ? " — " + formatCurrency(s.valor) : ""}`);
+    });
+  }
+  linhas.push("");
+  linhas.push(`*Total: ${formatCurrency(o.valor)}*`);
+  return linhas.join("\n");
+}
