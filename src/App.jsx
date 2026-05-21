@@ -3213,6 +3213,8 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   const [cEmail, setCEmail] = useState("");
   const [cLogoUrl, setCLogoUrl] = useState("");
   const [cMaxUsuarios, setCMaxUsuarios] = useState(0); // 0 = ilimitado
+  // Módulos liberados da empresa — inicia com todos os toggláveis marcados.
+  const [cAllowedModules, setCAllowedModules] = useState(TOGGLEABLE_MODULES.map((m) => m.id));
   const [adminNome, setAdminNome] = useState("");
   const [adminEmail, setAdminEmail] = useState("");
   const [adminSenha, setAdminSenha] = useState("");
@@ -3243,6 +3245,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   const resetForm = () => {
     setCNome(""); setCCnpj(""); setCTelefone(""); setCEmail(""); setCLogoUrl("");
     setCMaxUsuarios(0);
+    setCAllowedModules(TOGGLEABLE_MODULES.map((m) => m.id));
     setAdminNome(""); setAdminEmail(""); setAdminSenha("");
     setFormError("");
     setEditingCompany(null);
@@ -3277,6 +3280,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
         email: cEmail.trim(),
         logoUrl: cLogoUrl.trim(),
         maxUsuarios: Math.max(0, parseInt(cMaxUsuarios, 10) || 0),
+        allowedModules: cAllowedModules,
         ativo: true,
         criadoEm: new Date().toISOString(),
         criadoPor: master?.id,
@@ -3312,7 +3316,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
     } finally {
       setSaving(false);
     }
-  }, [cNome, cCnpj, cTelefone, cEmail, cLogoUrl, cMaxUsuarios, adminNome, adminEmail, adminSenha, master, addToast, writeAudit]);
+  }, [cNome, cCnpj, cTelefone, cEmail, cLogoUrl, cMaxUsuarios, cAllowedModules, adminNome, adminEmail, adminSenha, master, addToast, writeAudit]);
 
   const toggleAtivo = useCallback((company) => {
     const updated = { ...company, ativo: !company.ativo };
@@ -3354,6 +3358,11 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
     setCEmail(c.email || "");
     setCLogoUrl(c.logoUrl || "");
     setCMaxUsuarios(typeof c.maxUsuarios === "number" ? c.maxUsuarios : 0);
+    setCAllowedModules(
+      Array.isArray(c.allowedModules)
+        ? c.allowedModules
+        : TOGGLEABLE_MODULES.map((m) => m.id),
+    );
     setShowForm(true);
   }, []);
 
@@ -3370,6 +3379,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
       email: cEmail.trim(),
       logoUrl: cLogoUrl.trim(),
       maxUsuarios: Math.max(0, parseInt(cMaxUsuarios, 10) || 0),
+      allowedModules: cAllowedModules,
       atualizadoEm: new Date().toISOString(),
     };
     window.storage.setItem("erp:company:" + updated.id, JSON.stringify(updated));
@@ -3379,7 +3389,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
     setShowForm(false);
     resetForm();
     setReload((r) => r + 1);
-  }, [editingCompany, cNome, cCnpj, cTelefone, cEmail, cLogoUrl, cMaxUsuarios, addToast, writeAudit]);
+  }, [editingCompany, cNome, cCnpj, cTelefone, cEmail, cLogoUrl, cMaxUsuarios, cAllowedModules, addToast, writeAudit]);
 
   // Filtra empresas por busca e status
   const filteredCompanies = useMemo(() => {
@@ -3583,6 +3593,39 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
                 <p className="text-[11px] text-gray-500 mt-1">Ao atingir o limite, novos usuários não poderão ser cadastrados pelos admins desta empresa.</p>
               </div>
               <LogoPicker value={cLogoUrl} onChange={setCLogoUrl} addToast={addToast} />
+            </div>
+
+            {/* Módulos liberados — Master escolhe quais módulos a empresa pode acessar */}
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Módulos liberados</label>
+              <div className="grid grid-cols-2 gap-2">
+                {[{ id: "dashboard", label: "Dashboard" }, { id: "config", label: "Configurações" }].map((m) => (
+                  <label key={m.id} className="flex items-center gap-2 text-sm text-gray-500">
+                    <input type="checkbox" checked disabled className="rounded" />
+                    {m.label} <span className="text-xs">(sempre ativo)</span>
+                  </label>
+                ))}
+                {TOGGLEABLE_MODULES.map((m) => (
+                  <label key={m.id} className="flex items-center gap-2 text-sm text-gray-300">
+                    <input
+                      type="checkbox"
+                      className="rounded"
+                      checked={cAllowedModules.includes(m.id)}
+                      onChange={(e) => {
+                        setCAllowedModules((prev) =>
+                          e.target.checked ? [...prev, m.id] : prev.filter((x) => x !== m.id),
+                        );
+                      }}
+                    />
+                    {m.label}
+                  </label>
+                ))}
+              </div>
+              {!cAllowedModules.includes("processos") && (
+                <p className="text-xs text-amber-400 mt-1.5">
+                  Desligar Ordens de Serviço afeta o app do técnico desta empresa.
+                </p>
+              )}
             </div>
 
             {!editingCompany && (
