@@ -4779,6 +4779,42 @@ function openHTMLDoc(html) {
     alert("Permita popups para gerar documentos.");
     return;
   }
+  // Nome do arquivo PDF derivado do <title> do documento.
+  const titulo = (html.match(/<title>([^<]*)<\/title>/i)?.[1] || "documento").trim();
+  const filename = titulo.replace(/[^a-zA-Z0-9-_]+/g, "-") || "documento";
+
+  // Liga os botões da barra de ações. O documento é um blob same-origin, então
+  // o app consegue acessar w.document e anexar listeners — necessário porque a
+  // CSP impede scripts dentro do próprio documento.
+  const ligarBotoes = () => {
+    try {
+      const doc = w.document;
+      const btnPrint = doc.getElementById("btn-print");
+      const btnClose = doc.getElementById("btn-close");
+      const btnPdf = doc.getElementById("btn-pdf");
+      if (btnPrint) btnPrint.addEventListener("click", () => w.print());
+      if (btnClose) btnClose.addEventListener("click", () => w.close());
+      if (btnPdf) btnPdf.addEventListener("click", async () => {
+        const orig = btnPdf.textContent;
+        btnPdf.disabled = true;
+        btnPdf.textContent = "Gerando...";
+        try {
+          await gerarPDFDeHTML(html, filename);
+        } catch (e) {
+          console.error("[openHTMLDoc] PDF:", e);
+          alert("Falha ao gerar o PDF. Use Imprimir como alternativa.");
+        } finally {
+          btnPdf.disabled = false;
+          btnPdf.textContent = orig;
+        }
+      });
+    } catch (e) {
+      console.error("[openHTMLDoc] não foi possível ligar a barra de ações:", e);
+    }
+  };
+  if (w.document && w.document.readyState === "complete") ligarBotoes();
+  else w.addEventListener("load", ligarBotoes);
+
   // Libera o blob depois que a aba carregou (1 min é suficiente)
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
@@ -4989,26 +5025,31 @@ function _docStyles(accentColor = "#1d4ed8", compact = false) {
       thead{display:table-header-group}
     }
     ${compact ? `
-    /* ─── Modo compacto: documento ocupa meia folha A4 (formato A5) ─────── */
-    @page{size:A5;margin:8mm 10mm}
+    /* ─── Modo compacto: documento ocupa ~metade de uma folha A4 ─────────
+       Página A4 normal, mas o conteúdo é curto e fica na METADE de cima da
+       folha — imprime em A4 comum e pode ser cortado ao meio. */
+    @page{size:A4;margin:12mm 16mm}
     html,body{font-size:11px}
-    body{padding:18px 10px}
-    .page{max-width:540px}
-    .page-inner{padding:22px 26px}
-    .hdr{padding-bottom:14px;gap:6px}
-    .hdr-logo{max-width:130px;max-height:80px;margin-bottom:2px}
-    .hdr-brand{padding:0 96px}
-    .hdr-brand .company{font-size:17px}
-    .hdr-brand .contact{font-size:9.5px;margin-top:4px}
-    .hdr-doc{padding:7px 10px;min-width:110px}
-    .hdr-doc .doc-num{font-size:14px}
-    .section{margin-top:12px}
-    .hero-amount{margin:10px 0 6px;padding:12px 14px}
-    .hero-amount .hero-value{font-size:24px}
-    .terms{margin-top:12px;padding-top:8px}
-    .watermark{margin-top:14px;padding-top:8px}
+    body{padding:18px 12px}
+    .page{max-width:720px}
+    .page-inner{padding:20px 30px}
+    .hdr{padding-bottom:12px;gap:5px}
+    .hdr-logo{max-width:120px;max-height:66px;margin-bottom:2px}
+    .hdr-brand{padding:0 110px}
+    .hdr-brand .company{font-size:16px}
+    .hdr-brand .contact{font-size:9px;margin-top:3px}
+    .hdr-doc{padding:6px 9px;min-width:104px}
+    .hdr-doc .doc-num{font-size:13px}
+    .section{margin-top:9px}
+    .hero-amount{margin:8px 0 5px;padding:10px 12px}
+    .hero-amount .hero-value{font-size:21px}
+    tbody td,th{padding:5px 8px}
+    .terms{margin-top:9px;padding-top:7px;line-height:1.4}
+    .signatures{margin-top:24px}
+    .sig{padding-top:26px}
+    .watermark{margin-top:10px;padding-top:7px}
     @media print{
-      html,body{font-size:9.5pt}
+      html,body{font-size:9pt}
     }
     ` : ""}
   `;
@@ -5055,38 +5096,41 @@ function _docHeader(config, docType, numero, dataStr) {
 }
 
 // Barra fixa com ações (imprimir/salvar-PDF + fechar) — some no print
-// Barra de ações da janela do documento. `pageFormat` ("a4" | "a5") define o
-// tamanho da página do PDF gerado — A5 é usado pelos documentos de meia folha
-// (recibo, vale). O html2pdf é carregado de CDN porque a janela do documento é
-// um blob isolado e não compartilha o bundle do app.
-function _actionBar(pageFormat = "a4") {
+// Barra de ações da janela do documento. Os botões NÃO têm handlers inline:
+// a CSP (script-src 'self') bloqueia qualquer script dentro do documento, que
+// é um blob isolado. Os listeners são ligados pelo app em openHTMLDoc(), a
+// partir do contexto da página principal — que tem o html2pdf empacotado.
+function _actionBar() {
   return `
     <div class="actionbar" role="toolbar" aria-label="Ações do documento">
-      <button id="btn-pdf" onclick="baixarPDF()" aria-label="Baixar arquivo PDF">Baixar PDF</button>
-      <button class="secondary" onclick="window.print()" aria-label="Imprimir documento">Imprimir</button>
-      <button class="secondary" onclick="window.close()" aria-label="Fechar aba">Fechar</button>
+      <button id="btn-pdf" type="button" aria-label="Baixar arquivo PDF">Baixar PDF</button>
+      <button id="btn-print" type="button" class="secondary" aria-label="Imprimir documento">Imprimir</button>
+      <button id="btn-close" type="button" class="secondary" aria-label="Fechar aba">Fechar</button>
     </div>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.3/html2pdf.bundle.min.js"></script>
-    <script>
-      function baixarPDF(){
-        var btn=document.getElementById('btn-pdf');
-        if(typeof html2pdf==='undefined'){alert('Biblioteca de PDF ainda carregando — tente novamente em instantes.');return;}
-        var el=document.querySelector('main.page');
-        var nome=(document.title||'documento').trim().replace(/[^a-zA-Z0-9-_]+/g,'-');
-        var antes=btn.textContent;
-        btn.disabled=true;btn.textContent='Gerando...';
-        html2pdf().set({
-          margin:0,
-          filename:nome+'.pdf',
-          image:{type:'jpeg',quality:0.98},
-          html2canvas:{scale:2,useCORS:true},
-          jsPDF:{unit:'mm',format:'${pageFormat}',orientation:'portrait'}
-        }).from(el).save()
-        .then(function(){btn.disabled=false;btn.textContent=antes;})
-        .catch(function(){btn.disabled=false;btn.textContent=antes;alert('Falha ao gerar o PDF. Use Imprimir como alternativa.');});
-      }
-    </script>
   `;
+}
+
+// Gera e baixa um PDF a partir do HTML completo de um documento. Roda no
+// contexto do app (html2pdf empacotado = permitido pela CSP 'self'). Renderiza
+// o conteúdo num container fora da tela porque o html2canvas precisa medir o
+// elemento. Reaproveita a mesma abordagem de enviarDocWhatsApp.
+async function gerarPDFDeHTML(html, filename) {
+  const container = document.createElement("div");
+  container.innerHTML = html;
+  container.style.cssText = "position:fixed;left:-9999px;top:0;width:794px";
+  document.body.appendChild(container);
+  try {
+    const alvo = container.querySelector("main.page") || container;
+    await html2pdf().set({
+      margin: 0,
+      filename: (filename || "documento") + ".pdf",
+      image: { type: "jpeg", quality: 0.98 },
+      html2canvas: { scale: 2, useCORS: true },
+      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+    }).from(alvo).save();
+  } finally {
+    document.body.removeChild(container);
+  }
 }
 
 // ─── Bloco PIX (dados de recebimento) ────────────────────────────────────────
@@ -5526,7 +5570,7 @@ function generateReciboHTML(os, clients) {
     <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
 </main>
-${_actionBar("a5")}
+${_actionBar()}
 </body></html>`;
 }
 
@@ -5690,7 +5734,7 @@ function generateValeHTML(vale, employee) {
     <div class="watermark">FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
 </main>
-${_actionBar("a5")}
+${_actionBar()}
 </body></html>`;
 }
 
