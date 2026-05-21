@@ -15,6 +15,7 @@ import {
   monthsAgo,
   validateOSProposal,
   buildOSWhatsAppResumo,
+  isModuleEnabledForCompany,
 } from './utils.js';
 
 describe('genId', () => {
@@ -258,5 +259,29 @@ describe("buildOSWhatsAppResumo", () => {
 
   it("não quebra com OS mínima", () => {
     expect(() => buildOSWhatsAppResumo({ numero: "OS 1" }, "os")).not.toThrow();
+  });
+});
+
+describe("isModuleEnabledForCompany", () => {
+  it("allowedModules null/undefined → tudo habilitado", () => {
+    expect(isModuleEnabledForCompany(null, "financeiro")).toBe(true);
+    expect(isModuleEnabledForCompany(undefined, "ia")).toBe(true);
+  });
+
+  it("dashboard e config sempre habilitados, mesmo com array vazio", () => {
+    expect(isModuleEnabledForCompany([], "dashboard")).toBe(true);
+    expect(isModuleEnabledForCompany([], "config")).toBe(true);
+  });
+
+  it("array → habilita só os listados", () => {
+    const allowed = ["processos", "agenda"];
+    expect(isModuleEnabledForCompany(allowed, "processos")).toBe(true);
+    expect(isModuleEnabledForCompany(allowed, "agenda")).toBe(true);
+    expect(isModuleEnabledForCompany(allowed, "financeiro")).toBe(false);
+  });
+
+  it("array vazio desabilita todos os toggláveis", () => {
+    expect(isModuleEnabledForCompany([], "financeiro")).toBe(false);
+    expect(isModuleEnabledForCompany([], "ia")).toBe(false);
   });
 });

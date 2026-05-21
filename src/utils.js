@@ -181,3 +181,13 @@ export function buildOSWhatsAppResumo(os, tipo) {
   linhas.push(`*Total: ${formatCurrency(o.valor)}*`);
   return linhas.join("\n");
 }
+
+// Decide se um módulo está habilitado para a empresa.
+// allowedModules: array da empresa (ou null/undefined = tudo ligado).
+// "dashboard" e "config" são sempre habilitados (regra de negócio: o admin
+// da empresa nunca pode perder a tela inicial nem o acesso a configurações).
+export function isModuleEnabledForCompany(allowedModules, moduleId) {
+  if (moduleId === "dashboard" || moduleId === "config") return true;
+  if (allowedModules == null) return true;
+  return Array.isArray(allowedModules) && allowedModules.includes(moduleId);
+}
