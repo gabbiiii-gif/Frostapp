@@ -140,6 +140,37 @@ Any new printable artifact should follow the same pattern — don't introduce a 
 
 The app UI is entirely in **Brazilian Portuguese** (pt-BR). All labels, categories, messages, and field names are in Portuguese.
 
+## Integrações externas
+
+### Webhook n8n → WhatsApp (Evolution API)
+
+Mudanças de status de OS disparam um webhook configurável que o n8n consome para enviar mensagem WhatsApp ao cliente via Evolution API.
+
+- **Trigger**: `DB.set("erp:os:*", value)` em `src/App.jsx` — quando `prev.status !== value.status`, chama `notifyOSStatusChange(prev, value)` (fire-and-forget POST).
+- **URL configurável**: campo `n8nWebhookOSStatusUrl` em `erp:config`, editável em Settings → "🔔 Notificação WhatsApp ao mudar status de OS". Vazio = desabilitado.
+- **Payload (JSON)**:
+  ```json
+  {
+    "event": "os.status_changed",
+    "ts": "ISO8601",
+    "companyId": "...",
+    "empresa": "...",
+    "osId": "...",
+    "numero": 123,
+    "statusAnterior": "em_servico",
+    "status": "aguardando_finalizacao",
+    "clienteId": "...",
+    "clienteNome": "...",
+    "clienteTelefone": "+5599...",
+    "valor": 350.0,
+    "tecnicoNome": "...",
+    "dataAgendada": "...",
+    "horaAgendada": "...",
+    "endereco": "..."
+  }
+  ```
+- **Setup n8n (resumo)**: criar workflow com nó `Webhook` (POST) → `Switch` por `status` → `HTTP Request` para Evolution API `/message/sendText/{instance}` com `number=clienteTelefone` e `text` montado conforme template por status.
+
 ## Supabase Sync Layer (`src/supabase.js`)
 
 The app syncs its `window.storage` key-value data to a Supabase table `kv_store` (columns: `key`, `value`, `updated_at`). Requires env vars `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. If absent, Supabase is disabled and the app runs fully local.
