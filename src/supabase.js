@@ -324,26 +324,6 @@ export function deleteFromSupabase(key) {
     });
 }
 
-// ─── Admin: criar usuário (chama Edge Function admin-create-user) ────────────
-// Usado quando admin cadastra um membro novo no app.
-export async function adminCreateUser({ email, password, role, nome, avatar, legacy_user_id, custom_permissions, status }) {
-  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
-  const { data: { session } } = await supabase.auth.getSession();
-  if (!session) return { ok: false, error: 'Não autenticado.' };
-  const resp = await fetch(`${supabaseUrl}/functions/v1/admin-create-user`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: supabaseKey,
-      Authorization: `Bearer ${session.access_token}`,
-    },
-    body: JSON.stringify({ email, password, role, nome, avatar, legacy_user_id, custom_permissions, status }),
-  });
-  const body = await resp.json().catch(() => ({}));
-  if (!resp.ok) return { ok: false, error: body.error || 'Falha ao criar usuário.' };
-  return { ok: true, ...body };
-}
-
 // ─── Master users: sync via RPCs SECURITY DEFINER ───────────────────────────
 // Acesso direto a master_users foi bloqueado para anon (RLS lockdown Phase 1).
 // Toda interacao passa por RPCs com superficie reduzida:
