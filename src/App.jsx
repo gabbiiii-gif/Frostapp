@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser } from "./supabase.js";
+import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, clearRecoveryUrl } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -2313,6 +2313,177 @@ function clearLoginAttempts() {
   try { sessionStorage.removeItem(LOGIN_ATTEMPTS_KEY); } catch { /* ignora */ }
 }
 
+// ─── Diálogo "Esqueci minha senha" (Fase 2.2 — recuperação via Supabase Auth) ─
+// Mostra input email + botão Enviar. Após sucesso, exibe confirmação de envio.
+// Email contém link que volta ao app com ?type=recovery → app renderiza
+// ResetPasswordScreen (componente abaixo).
+function ForgotPasswordDialog({ initialEmail = "", onClose }) {
+  const [email, setEmail] = useState(initialEmail);
+  const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSend = async () => {
+    setError("");
+    const emailNorm = email.trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(emailNorm)) {
+      setError("Email inválido.");
+      return;
+    }
+    setBusy(true);
+    const r = await requestPasswordReset(emailNorm);
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error || "Falha ao enviar email.");
+      return;
+    }
+    setSent(true);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+      <div className="bg-gray-800 rounded-2xl border border-gray-700 max-w-sm w-full p-6 shadow-2xl">
+        {!sent ? (
+          <>
+            <div className="text-center mb-4">
+              <div className="text-4xl mb-2">🔑</div>
+              <h3 className="text-lg font-bold text-white">Recuperar senha</h3>
+              <p className="text-gray-400 text-sm mt-2">
+                Digite seu email. Vamos enviar um link para você criar uma nova senha.
+              </p>
+            </div>
+            <input
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => { setEmail(e.target.value); setError(""); }}
+              placeholder="seu@email.com"
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition mb-3"
+              autoFocus
+            />
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm mb-3">
+                {error}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                disabled={busy}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-200 py-2.5 rounded-lg font-medium transition disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSend}
+                disabled={busy}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-medium transition disabled:opacity-50"
+              >
+                {busy ? "Enviando..." : "Enviar link"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="text-center mb-4">
+              <div className="text-4xl mb-2">📬</div>
+              <h3 className="text-lg font-bold text-white">Email enviado!</h3>
+              <p className="text-gray-400 text-sm mt-2">
+                Verifique sua caixa de entrada (e a pasta de spam). Clique no link recebido para definir nova senha.
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-medium transition"
+            >
+              Fechar
+            </button>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Tela de redefinição de senha (Fase 2.2) ─────────────────────────────────
+// Renderizada quando app detecta URL de recovery do Supabase (?type=recovery).
+// Supabase já hidratou a sessão temporária via detectSessionInUrl; basta
+// chamar supabase.auth.updateUser({ password }).
+function ResetPasswordScreen({ onDone, addToast }) {
+  const [pwd, setPwd] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSave = async () => {
+    setError("");
+    const ps = validatePasswordStrength(pwd);
+    if (!ps.ok) { setError(`Senha fraca: ${ps.reasons[0]}`); return; }
+    if (pwd !== confirm) { setError("As senhas não conferem."); return; }
+    setBusy(true);
+    const r = await updatePasswordWithRecoveryToken(pwd);
+    setBusy(false);
+    if (!r.ok) {
+      setError(r.error || "Falha ao atualizar senha. Link pode ter expirado.");
+      return;
+    }
+    clearRecoveryUrl();
+    addToast?.("Senha atualizada! Faça login com a nova senha.", "success");
+    onDone?.();
+  };
+
+  return (
+    <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4">
+      <div className="w-full max-w-md">
+        <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-8">
+          <div className="text-center mb-6">
+            <div className="text-4xl mb-2">🔐</div>
+            <h2 className="text-xl font-bold text-white">Definir Nova Senha</h2>
+            <p className="text-gray-400 text-sm mt-2">
+              Crie uma senha forte para sua conta.
+            </p>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Nova senha</label>
+              <PasswordInput
+                value={pwd}
+                onChange={(e) => { setPwd(e.target.value); setError(""); }}
+                placeholder="12+ chars, A-z, 0-9, símbolo"
+                strengthMeter
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                autoFocus
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar senha</label>
+              <PasswordInput
+                value={confirm}
+                onChange={(e) => { setConfirm(e.target.value); setError(""); }}
+                placeholder="Repita a senha"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+              />
+            </div>
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">
+                {error}
+              </div>
+            )}
+            <button
+              onClick={handleSave}
+              disabled={busy}
+              className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50"
+            >
+              {busy ? "Salvando..." : "Definir nova senha"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassword }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -2329,6 +2500,8 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
   const [bioEnabled, setBioEnabled] = useState(false);
   const [bioEnroll, setBioEnroll] = useState(null); // { email, password, user }
   const [bioBusy, setBioBusy] = useState(false);
+  // Diálogo "Esqueci minha senha" (recovery via Supabase Auth — Fase 2.2)
+  const [showForgot, setShowForgot] = useState(false);
   // Inicializa a partir do sessionStorage para que o lockout persista entre recargas
   const initial = readLoginAttempts();
   const [failedAttempts, setFailedAttempts] = useState(initial.count);
@@ -2810,6 +2983,15 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
           </form>
           )}
 
+          {/* Link Esqueci senha — abre diálogo de recuperação via Supabase Auth */}
+          <button
+            type="button"
+            onClick={() => setShowForgot(true)}
+            className="mt-3 w-full text-center text-sm text-blue-400 hover:text-blue-300 transition"
+          >
+            Esqueci minha senha
+          </button>
+
           <div className="mt-6 pt-6 border-t border-gray-700 flex flex-col items-center gap-2">
             <p className="text-gray-500 text-xs text-center">
               FrostERP &copy; {new Date().getFullYear()}
@@ -2826,6 +3008,14 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
           </div>
         </div>
       </div>
+
+      {/* Diálogo "Esqueci minha senha" — envia link de reset via Supabase Auth */}
+      {showForgot && (
+        <ForgotPasswordDialog
+          initialEmail={email}
+          onClose={() => setShowForgot(false)}
+        />
+      )}
 
       {/* Modal: oferece habilitar biometria apos primeiro login no APK */}
       {bioEnroll && (
@@ -14689,6 +14879,24 @@ export default function App() {
       <>
         <StyleSheet />
         <ForcePasswordChangeDialog user={pendingPasswordChange} onComplete={handlePasswordChanged} />
+      </>
+    );
+  }
+
+  // Fase 2.2: detecta URL de recovery do Supabase Auth (?type=recovery)
+  // e renderiza tela de redefinição. Após sucesso, volta ao login normal.
+  if (!user && isRecoveryUrl()) {
+    return (
+      <>
+        <StyleSheet />
+        <ToastContainer toasts={toasts} removeToast={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
+        <ResetPasswordScreen
+          addToast={addToast}
+          onDone={() => {
+            // Limpa hash/query e força re-render — LoginScreen aparece em seguida
+            window.location.replace(window.location.origin);
+          }}
+        />
       </>
     );
   }

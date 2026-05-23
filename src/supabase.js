@@ -143,6 +143,61 @@ export async function signOutSupabase() {
   if (supabase) await supabase.auth.signOut().catch(() => {});
 }
 
+// ─── Recuperação de senha (Supabase Auth nativo) ────────────────────────────
+// Fluxo:
+// 1) Usuário clica "Esqueci minha senha" → requestPasswordReset(email)
+//    → Supabase envia email com link tipo https://app/?type=recovery#access_token=...
+// 2) Usuário clica link → app detecta hash recovery → mostra ResetPasswordScreen
+// 3) Usuário define nova senha → updatePasswordWithRecoveryToken(novaSenha)
+//    → Supabase Auth atualiza senha + retorna sessão.
+// Importante: adicionar a URL do app em "Redirect URLs" em Supabase Auth →
+// URL Configuration. Sem isso, o link redireciona pra fallback default.
+export async function requestPasswordReset(email) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const emailNorm = (email || '').trim().toLowerCase();
+    if (!emailNorm) return { ok: false, error: 'Informe o email.' };
+    // redirectTo: URL absoluta do app (Supabase só aceita URLs listadas em Auth → Redirect URLs)
+    const redirectTo = `${window.location.origin}/?type=recovery`;
+    const { error } = await supabase.auth.resetPasswordForEmail(emailNorm, { redirectTo });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+export async function updatePasswordWithRecoveryToken(newPassword) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const { data, error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, user: data?.user || null };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// Detecta se a URL atual veio do flow de recovery do Supabase
+// (Supabase pode enviar como query ?type=recovery OU hash #type=recovery)
+export function isRecoveryUrl() {
+  if (typeof window === 'undefined') return false;
+  const qs = new URLSearchParams(window.location.search);
+  if (qs.get('type') === 'recovery') return true;
+  const hash = window.location.hash || '';
+  if (hash.includes('type=recovery')) return true;
+  return false;
+}
+
+// Remove os params/hash de recovery após reset bem-sucedido
+export function clearRecoveryUrl() {
+  if (typeof window === 'undefined') return;
+  const u = new URL(window.location.href);
+  u.search = '';
+  u.hash = '';
+  window.history.replaceState({}, '', u.toString());
+}
+
 // ─── Admin: cria usuário da empresa (auth.users + company_members) ───────────
 // Chama edge function admin-create-user (que usa service_role). O caller
 // precisa estar autenticado e ser admin/gerente da company alvo.

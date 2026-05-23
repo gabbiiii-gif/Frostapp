@@ -140,6 +140,27 @@ Any new printable artifact should follow the same pattern — don't introduce a 
 
 The app UI is entirely in **Brazilian Portuguese** (pt-BR). All labels, categories, messages, and field names are in Portuguese.
 
+## Recuperação de senha (Fase 2.2)
+
+Usa Supabase Auth nativo (`resetPasswordForEmail` + `updateUser`). Sem edge function adicional.
+
+**Fluxo:**
+1. Usuário clica "Esqueci minha senha" em `LoginScreen` → `ForgotPasswordDialog`.
+2. Dialog chama `requestPasswordReset(email)` → Supabase envia email com link `https://app/?type=recovery#access_token=...`.
+3. Usuário clica link → Supabase JS auto-detecta hash → estabelece sessão temporária.
+4. App detecta `isRecoveryUrl()` no top-level e renderiza `ResetPasswordScreen` (em vez de `LoginScreen`).
+5. Usuário define nova senha → `updatePasswordWithRecoveryToken(pwd)` → `clearRecoveryUrl()` → volta ao login.
+
+**Setup obrigatório no Supabase Dashboard:**
+- Auth → URL Configuration → **Redirect URLs**: adicionar `https://SEU_DOMINIO/*` (e `http://localhost:5173/*` para dev).
+- Auth → Email Templates → "Reset Password" pode ser customizado em pt-BR. Variáveis: `{{ .ConfirmationURL }}`.
+
+Helpers exportados em `src/supabase.js`:
+- `requestPasswordReset(email)` → `{ ok, error? }`
+- `updatePasswordWithRecoveryToken(pwd)` → `{ ok, user?, error? }`
+- `isRecoveryUrl()` → boolean (checa query `?type=recovery` ou hash)
+- `clearRecoveryUrl()` → remove query/hash após reset
+
 ## Edge Functions
 
 Pasta `supabase/functions/`. Deploy com `supabase functions deploy <nome>`.
