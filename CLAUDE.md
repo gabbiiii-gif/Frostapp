@@ -140,6 +140,32 @@ Any new printable artifact should follow the same pattern — don't introduce a 
 
 The app UI is entirely in **Brazilian Portuguese** (pt-BR). All labels, categories, messages, and field names are in Portuguese.
 
+## Edge Functions
+
+Pasta `supabase/functions/`. Deploy com `supabase functions deploy <nome>`.
+
+| Função              | verify_jwt | Propósito                                                                |
+| ------------------- | ---------- | ------------------------------------------------------------------------ |
+| `master-login`      | false      | Valida credencial master via service_role (PBKDF2)                       |
+| `migrate-login`     | false      | Migra user legacy → auth.users (deployed externamente, fora do repo)     |
+| `admin-create-user` | true       | Cria/atualiza user da empresa (auth.users + company_members)             |
+| `pos-venda-dispatch`| —          | Cron pós-venda                                                           |
+| `whatsapp-webhook`  | —          | Webhook WhatsApp → IA                                                    |
+
+### admin-create-user — provisionamento de usuário
+
+`UserManagement` precisa chamar essa function ao criar (ou trocar senha de) usuário. Salvar só em `erp:user:*` deixa o registro órfão (login falha com 400 — user não existe em `auth.users`).
+
+Payload: `{ mode: "create"|"update_password", email, password, nome, role, company_id, legacy_user_id, custom_permissions, comissao_percentual, avatar }`.
+
+A function:
+1. Valida JWT do caller via `Authorization: Bearer`.
+2. Confere que caller é `admin`/`gerente`/`is_super_admin` em `company_members` da `company_id` alvo.
+3. Em `create`: `admin.auth.admin.createUser` + upsert `company_members`.
+4. Em `update_password`: `admin.auth.admin.updateUserById`.
+
+Deploy: `supabase functions deploy admin-create-user`.
+
 ## Integrações externas
 
 ### Webhook n8n → WhatsApp (Evolution API)

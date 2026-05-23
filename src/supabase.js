@@ -143,6 +143,36 @@ export async function signOutSupabase() {
   if (supabase) await supabase.auth.signOut().catch(() => {});
 }
 
+// ─── Admin: cria usuário da empresa (auth.users + company_members) ───────────
+// Chama edge function admin-create-user (que usa service_role). O caller
+// precisa estar autenticado e ser admin/gerente da company alvo.
+// payload: { mode, email, password, nome, role, company_id, legacy_user_id,
+//   custom_permissions, comissao_percentual, avatar }
+// Retorna { ok, error?, auth_user_id? }.
+export async function adminCreateUser(payload) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return { ok: false, error: 'Sessão expirada. Faça login novamente.' };
+    const resp = await fetch(`${supabaseUrl}/functions/v1/admin-create-user`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseKey,
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok || !body.ok) {
+      return { ok: false, error: body.error || `HTTP ${resp.status}` };
+    }
+    return { ok: true, auth_user_id: body.auth_user_id };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 // Restaura member após reload (a sessão persiste, mas o member state cai com a aba)
 export async function ensureMemberLoaded() {
   if (!supabase) return null;

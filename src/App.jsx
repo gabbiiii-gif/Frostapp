@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge } from "./supabase.js";
+import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -10582,6 +10582,8 @@ function UserManagement({ currentUser, addToast }) {
       ? Math.max(0, Math.min(100, Number(form.comissaoPercentual) || 0))
       : null;
 
+    const companyId = currentUser?.companyId || null;
+
     if (editing) {
       const updated = {
         ...editing,
@@ -10594,6 +10596,25 @@ function UserManagement({ currentUser, addToast }) {
         updatedAt: new Date().toISOString(),
       };
       if (form.password) {
+        // Troca senha também no Supabase Auth (caso contrário, login falha).
+        if (companyId) {
+          const r = await adminCreateUser({
+            mode: "update_password",
+            legacy_user_id: updated.id,
+            email: emailNorm,
+            password: form.password,
+            nome,
+            role: form.role,
+            company_id: companyId,
+            custom_permissions: form.useCustomPermissions ? form.customPermissions : null,
+            comissao_percentual: comissaoNum,
+            avatar: updated.avatar || nome.slice(0, 2).toUpperCase(),
+          });
+          if (!r.ok) {
+            addToast(`Falha ao atualizar senha no Auth: ${r.error}`, "error");
+            return;
+          }
+        }
         updated.password = await hashPassword(form.password);
         // Invalida sessões antigas ao trocar senha
         updated.sessionTokenHash = null;
@@ -10615,13 +10636,37 @@ function UserManagement({ currentUser, addToast }) {
         customPermissions: form.useCustomPermissions ? form.customPermissions : null,
         comissaoPercentual: comissaoNum,
       };
+      // Provisiona em auth.users + company_members via edge function antes de
+      // salvar local. Sem isso, o novo usuário não consegue logar (signInWithPassword
+      // retorna 400 porque não existe em auth.users).
+      if (!companyId) {
+        addToast("Sem empresa ativa — usuário não pode ser criado.", "error");
+        return;
+      }
+      const provision = await adminCreateUser({
+        mode: "create",
+        legacy_user_id: newUser.id,
+        email: emailNorm,
+        password: form.password,
+        nome,
+        role: form.role,
+        company_id: companyId,
+        custom_permissions: newUser.customPermissions,
+        comissao_percentual: comissaoNum,
+        avatar: newUser.avatar,
+      });
+      if (!provision.ok) {
+        addToast(`Falha ao criar usuário no Auth: ${provision.error}`, "error");
+        return;
+      }
+      newUser.authUserId = provision.auth_user_id;
       DB.set("erp:user:" + newUser.id, newUser);
       addToast("Usuário criado.", "success");
     }
 
     setModalOpen(false);
     loadUsers();
-  }, [form, editing, users, addToast, loadUsers]);
+  }, [form, editing, users, addToast, loadUsers, currentUser]);
 
   const handleDelete = useCallback((u) => {
     if (u.id === currentUser.id) {
