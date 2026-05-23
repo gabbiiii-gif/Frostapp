@@ -17,6 +17,7 @@ import {
   buildOSWhatsAppResumo,
   isModuleEnabledForCompany,
   calcDescontoOS,
+  validatePasswordStrength,
 } from './utils.js';
 
 describe('genId', () => {
@@ -309,5 +310,44 @@ describe("calcDescontoOS", () => {
 
   it("arredonda para 2 casas decimais", () => {
     expect(calcDescontoOS(99.99, "percentual", 33.333)).toEqual({ descontoAplicado: 33.33, total: 66.66 });
+  });
+});
+
+describe("validatePasswordStrength", () => {
+  it("rejeita senha curta", () => {
+    const r = validatePasswordStrength("Aa1!");
+    expect(r.ok).toBe(false);
+    expect(r.reasons).toContain("Mínimo 12 caracteres");
+  });
+
+  it("rejeita senha sem símbolo", () => {
+    const r = validatePasswordStrength("SenhaForte123");
+    expect(r.ok).toBe(false);
+    expect(r.reasons).toContain("Incluir símbolo (!@#$...)");
+  });
+
+  it("rejeita senha sem maiúscula", () => {
+    const r = validatePasswordStrength("senhaforte123!");
+    expect(r.ok).toBe(false);
+    expect(r.reasons).toContain("Incluir letra maiúscula");
+  });
+
+  it("rejeita senha com espaço", () => {
+    const r = validatePasswordStrength("Senha Forte 123!");
+    expect(r.ok).toBe(false);
+    expect(r.reasons).toContain("Não pode conter espaço");
+  });
+
+  it("aceita senha forte completa", () => {
+    const r = validatePasswordStrength("MinhaSenha123!");
+    expect(r.ok).toBe(true);
+    expect(r.score).toBe(5);
+    expect(r.strength).toBe("forte");
+  });
+
+  it("classifica fraca/média/forte corretamente", () => {
+    expect(validatePasswordStrength("abc").strength).toBe("fraca");
+    expect(validatePasswordStrength("Abcdef123").strength).toBe("média");
+    expect(validatePasswordStrength("Abcdefgh1234!").strength).toBe("forte");
   });
 });

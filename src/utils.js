@@ -197,6 +197,33 @@ export function calcDescontoOS(subtotal, tipo, valor) {
   return { descontoAplicado: desconto, total: Math.round((sub - desconto) * 100) / 100 };
 }
 
+// ─── Política de senha forte ────────────────────────────────────────────────
+// Regras: 12+ chars, maiúscula, minúscula, número, símbolo, sem espaço.
+// Retorna { ok, score (0-5), reasons[], strength: 'fraca'|'média'|'forte' }.
+// Helper puro — testado em utils.test.js.
+export function validatePasswordStrength(pwd) {
+  const reasons = [];
+  const s = String(pwd || "");
+  if (s.length < 12) reasons.push("Mínimo 12 caracteres");
+  if (!/[a-z]/.test(s)) reasons.push("Incluir letra minúscula");
+  if (!/[A-Z]/.test(s)) reasons.push("Incluir letra maiúscula");
+  if (!/\d/.test(s)) reasons.push("Incluir número");
+  if (!/[^\w\s]|_/.test(s)) reasons.push("Incluir símbolo (!@#$...)");
+  if (/\s/.test(s)) reasons.push("Não pode conter espaço");
+  // Score: 1 ponto por critério atendido (max 5; espaço é regra de exclusão)
+  const checks = [
+    s.length >= 12,
+    /[a-z]/.test(s),
+    /[A-Z]/.test(s),
+    /\d/.test(s),
+    /[^\w\s]|_/.test(s),
+  ];
+  const score = checks.filter(Boolean).length;
+  const ok = reasons.length === 0;
+  const strength = score <= 2 ? "fraca" : score <= 4 ? "média" : "forte";
+  return { ok, score, reasons, strength };
+}
+
 // Decide se um módulo está habilitado para a empresa.
 // allowedModules: array da empresa (ou null/undefined = tudo ligado).
 // "dashboard" e "config" são sempre habilitados (regra de negócio: o admin

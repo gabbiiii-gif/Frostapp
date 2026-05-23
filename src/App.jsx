@@ -11,7 +11,7 @@ import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
 import SignaturePad from "./SignaturePad.jsx";
-import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS } from "./utils.js";
+import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength } from "./utils.js";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
 // Geração de PDF client-side dos documentos de OS/orçamento para envio via WhatsApp
@@ -2402,10 +2402,11 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
           // Falha de fato — aplica lockout normal
           const persistedNow = readLoginAttempts();
           const attemptsNow = (persistedNow.count || failedAttempts) + 1;
+          // Lockout endurecido (Fase 2.1): 3→1min, 5→5min, 7+→15min
           let lockNow = 0;
-          if (attemptsNow >= 15) lockNow = Date.now() + 300000;
-          else if (attemptsNow >= 10) lockNow = Date.now() + 60000;
-          else if (attemptsNow >= 5) lockNow = Date.now() + 30000;
+          if (attemptsNow >= 7) lockNow = Date.now() + 900000;
+          else if (attemptsNow >= 5) lockNow = Date.now() + 300000;
+          else if (attemptsNow >= 3) lockNow = Date.now() + 60000;
           setFailedAttempts(attemptsNow);
           setLockoutUntil(lockNow || null);
           writeLoginAttempts({ count: attemptsNow, lockoutUntil: lockNow });
@@ -2524,15 +2525,20 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
         onLogin(found);
       } else {
         const attempts = (persisted.count || failedAttempts) + 1;
-        // Lockout progressivo: 5 falhas=30s, 10=60s, 15+=300s
+        // Lockout endurecido (Fase 2.1): 3 falhas=1min, 5=5min, 7+=15min
         let nextLockout = 0;
-        if (attempts >= 15) nextLockout = Date.now() + 300000;
-        else if (attempts >= 10) nextLockout = Date.now() + 60000;
-        else if (attempts >= 5) nextLockout = Date.now() + 30000;
+        if (attempts >= 7) nextLockout = Date.now() + 900000;
+        else if (attempts >= 5) nextLockout = Date.now() + 300000;
+        else if (attempts >= 3) nextLockout = Date.now() + 60000;
         setFailedAttempts(attempts);
         setLockoutUntil(nextLockout || null);
         writeLoginAttempts({ count: attempts, lockoutUntil: nextLockout });
-        setError("Email ou senha incorretos.");
+        // Mensagem mostra quantas tentativas restam antes do próximo lockout
+        const remaining = attempts < 3 ? 3 - attempts : attempts < 5 ? 5 - attempts : attempts < 7 ? 7 - attempts : 0;
+        const hint = nextLockout
+          ? ` Bloqueado por ${Math.round((nextLockout - Date.now()) / 60000)}min.`
+          : remaining > 0 ? ` ${remaining} tentativa(s) restante(s).` : "";
+        setError("Email ou senha incorretos." + hint);
       }
     } finally {
       setLoading(false);
@@ -2868,8 +2874,10 @@ function ForcePasswordChangeDialog({ user, onComplete }) {
       setError("Preencha todos os campos.");
       return;
     }
-    if (newPassword.length < 8) {
-      setError("A senha deve ter no mínimo 8 caracteres.");
+    // Política endurecida (Fase 2.1) — 12+, maiúscula, minúscula, número, símbolo
+    const ps = validatePasswordStrength(newPassword);
+    if (!ps.ok) {
+      setError(`Senha fraca: ${ps.reasons.join(" • ")}`);
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -2906,7 +2914,8 @@ function ForcePasswordChangeDialog({ user, onComplete }) {
               <PasswordInput name="newPassword"
                 value={newPassword}
                 onChange={(e) => { setNewPassword(e.target.value); setError(""); }}
-                placeholder="Mínimo 8 caracteres"
+                placeholder="12+ chars, A-z, 0-9, símbolo"
+                strengthMeter
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
                 autoFocus
               />
@@ -2965,8 +2974,9 @@ function FirstUserSetup({ onComplete, onSwitchToLogin }) {
       setError("Formato de email inválido.");
       return;
     }
-    if (password.length < 8) {
-      setError("A senha deve ter no mínimo 8 caracteres.");
+    const ps = validatePasswordStrength(password);
+    if (!ps.ok) {
+      setError(`Senha fraca: ${ps.reasons.join(" • ")}`);
       return;
     }
     if (password !== confirmPassword) {
@@ -3043,7 +3053,8 @@ function FirstUserSetup({ onComplete, onSwitchToLogin }) {
                 autoComplete="new-password"
                 value={password}
                 onChange={(e) => { setPassword(e.target.value); setError(""); }}
-                placeholder="Mínimo 8 caracteres"
+                placeholder="12+ chars, A-z, 0-9, símbolo"
+                strengthMeter
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
               />
             </div>
@@ -3129,7 +3140,10 @@ function FirstMasterSetup({ onComplete, theme, setTheme }) {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const normalizedEmail = email.trim().toLowerCase();
     if (!emailRegex.test(normalizedEmail)) { setError("Email inválido."); return; }
-    if (password.length < 8) { setError("Senha mínima 8 caracteres."); return; }
+    {
+      const ps = validatePasswordStrength(password);
+      if (!ps.ok) { setError(`Senha fraca: ${ps.reasons[0]}`); return; }
+    }
     if (password !== confirm) { setError("Senhas não conferem."); return; }
     setSaving(true);
     try {
@@ -3181,7 +3195,7 @@ function FirstMasterSetup({ onComplete, theme, setTheme }) {
           <div className="space-y-4">
             <input name="nome" type="text" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Nome completo" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
             <input name="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
-            <PasswordInput name="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha (min. 8)" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
+            <PasswordInput name="password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Senha (12+ chars, A-z, 0-9, símbolo)" strengthMeter className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
             <PasswordInput name="confirm" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} placeholder="Confirmar senha" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition" />
             {error && <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">{error}</div>}
             <button onClick={handleSave} disabled={saving} className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50">
@@ -3382,7 +3396,10 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
     if (!adminNome.trim() || !adminEmail.trim() || !adminSenha) {
       setFormError("Preencha o admin inicial (nome, email, senha)."); return;
     }
-    if (adminSenha.length < 8) { setFormError("Senha do admin: mínimo 8 caracteres."); return; }
+    {
+      const ps = validatePasswordStrength(adminSenha);
+      if (!ps.ok) { setFormError(`Senha do admin fraca: ${ps.reasons[0]}`); return; }
+    }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const normalizedAdminEmail = adminEmail.trim().toLowerCase();
     if (!emailRegex.test(normalizedAdminEmail)) { setFormError("Email do admin inválido."); return; }
@@ -3758,7 +3775,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
                 <div className="grid grid-cols-2 gap-3">
                   <input name="adminNome" type="text" value={adminNome} onChange={(e) => setAdminNome(e.target.value)} placeholder="Nome do admin *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
                   <input name="adminEmail" type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="Email do admin *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
-                  <PasswordInput name="adminSenha" value={adminSenha} onChange={(e) => setAdminSenha(e.target.value)} placeholder="Senha provisória (min. 8) *" containerClassName="col-span-2" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
+                  <PasswordInput name="adminSenha" value={adminSenha} onChange={(e) => setAdminSenha(e.target.value)} placeholder="Senha provisória (12+ chars, A-z, 0-9, símbolo) *" strengthMeter containerClassName="col-span-2" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
                 </div>
                 <p className="text-xs text-gray-400">O admin será forçado a trocar a senha no primeiro login.</p>
               </>
@@ -10547,9 +10564,10 @@ function UserManagement({ currentUser, addToast }) {
     if (dup) { addToast("Já existe um usuário com este email.", "error"); return; }
 
     if (!editing) {
-      // Criação exige senha
-      if (!form.password || form.password.length < 8) {
-        addToast("Senha deve ter no mínimo 8 caracteres.", "error"); return;
+      // Criação exige senha forte (política endurecida — Fase 2.1)
+      const ps = validatePasswordStrength(form.password);
+      if (!ps.ok) {
+        addToast(`Senha fraca: ${ps.reasons[0]}`, "error"); return;
       }
       if (form.password !== form.confirmPassword) {
         addToast("As senhas não conferem.", "error"); return;
@@ -10568,9 +10586,10 @@ function UserManagement({ currentUser, addToast }) {
         }
       }
     } else if (form.password) {
-      // Em edição, troca de senha é opcional
-      if (form.password.length < 8) {
-        addToast("Nova senha deve ter no mínimo 8 caracteres.", "error"); return;
+      // Em edição, troca de senha é opcional — mas se trocou, exige senha forte
+      const ps = validatePasswordStrength(form.password);
+      if (!ps.ok) {
+        addToast(`Nova senha fraca: ${ps.reasons[0]}`, "error"); return;
       }
       if (form.password !== form.confirmPassword) {
         addToast("As senhas não conferem.", "error"); return;
@@ -10834,7 +10853,8 @@ function UserManagement({ currentUser, addToast }) {
                 autoComplete="new-password"
                 value={form.password}
                 onChange={(e) => setForm({ ...form, password: e.target.value })}
-                placeholder="Mínimo 8 caracteres"
+                placeholder="12+ chars, A-z, 0-9, símbolo"
+                strengthMeter
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
               />
             </div>
