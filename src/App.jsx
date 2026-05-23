@@ -6,10 +6,11 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge } from "./supabase.js";
+import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
+import SignaturePad from "./SignaturePad.jsx";
 import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS } from "./utils.js";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
@@ -5232,6 +5233,30 @@ function _agradecimentoBlock(config) {
   `;
 }
 
+// ─── Bloco de Assinatura do Cliente (OS / Recibo) ───────────────────────────
+// Renderiza assinatura capturada no app do técnico ao final do documento.
+// Inclui imagem da assinatura, nome de quem assinou, CPF (se houver) e data/hora.
+// Se OS não tem assinatura, retorna string vazia (bloco não aparece).
+function _assinaturaBlock(os) {
+  if (!os || !os.assinatura || !os.assinatura.url) return "";
+  const a = os.assinatura;
+  const data = a.dataHora ? new Date(a.dataHora).toLocaleString("pt-BR") : "";
+  return `
+    <div class="section">
+      <div class="section-title">Assinatura do Cliente</div>
+      <div class="info-card" style="text-align:center">
+        <img src="${_h(a.url)}" alt="Assinatura"
+             style="max-width:340px;max-height:140px;background:#fff;border:1px solid var(--ink-200);border-radius:8px;padding:6px" />
+        <div style="margin-top:10px;font-size:13px;color:var(--ink-900);font-weight:600">
+          ${_h(a.nome || "—")}
+        </div>
+        ${a.cpf ? `<div style="font-size:11px;color:var(--ink-500)">CPF: ${_h(a.cpf)}</div>` : ""}
+        ${data ? `<div style="font-size:11px;color:var(--ink-500);margin-top:4px">Assinado em ${_h(data)}</div>` : ""}
+      </div>
+    </div>
+  `;
+}
+
 // ─── Helper compartilhado: descrição do equipamento ────────────────────────
 // Monta "Modelo — Capacidade Unidade" conforme o tipo salvo na OS.
 function _equipamentoDescricao(os) {
@@ -5476,6 +5501,8 @@ function generateOSHTML(os, clients) {
       Serviço com garantia de 90 dias contados a partir da execução, cobrindo defeitos de execução. Equipamentos seguem garantia do fabricante conforme manual. Não cobre danos por mau uso, sobrecarga elétrica, sinistros ou falta de manutenção periódica.
     </div>
 
+    ${_assinaturaBlock(os)}
+
     <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
 </main>
@@ -5592,6 +5619,8 @@ function generateReciboHTML(os, clients) {
     ${_pixBlock(config)}
 
     ${_agradecimentoBlock(config)}
+
+    ${_assinaturaBlock(os)}
 
     <div class="watermark">Documento gerado por FrostERP · ${new Date().toLocaleString("pt-BR")}</div>
   </div>
@@ -10403,6 +10432,7 @@ function UserManagement({ currentUser, addToast }) {
     role: "atendente", status: "ativo",
     useCustomPermissions: false,
     customPermissions: [],
+    comissaoPercentual: "", // só usado quando role === "tecnico"
   };
   const [form, setForm] = useState(emptyForm);
 
@@ -10430,6 +10460,7 @@ function UserManagement({ currentUser, addToast }) {
       status: u.status || "ativo",
       useCustomPermissions: Array.isArray(u.customPermissions),
       customPermissions: Array.isArray(u.customPermissions) ? u.customPermissions : [],
+      comissaoPercentual: u.comissaoPercentual != null ? String(u.comissaoPercentual) : "",
     });
     setModalOpen(true);
   }, []);
@@ -10486,6 +10517,11 @@ function UserManagement({ currentUser, addToast }) {
       }
     }
 
+    // Parse comissão (apenas para técnico). String vazia → null.
+    const comissaoNum = form.role === "tecnico" && form.comissaoPercentual !== ""
+      ? Math.max(0, Math.min(100, Number(form.comissaoPercentual) || 0))
+      : null;
+
     if (editing) {
       const updated = {
         ...editing,
@@ -10494,6 +10530,7 @@ function UserManagement({ currentUser, addToast }) {
         role: form.role,
         status: form.status,
         customPermissions: form.useCustomPermissions ? form.customPermissions : null,
+        comissaoPercentual: comissaoNum,
         updatedAt: new Date().toISOString(),
       };
       if (form.password) {
@@ -10516,6 +10553,7 @@ function UserManagement({ currentUser, addToast }) {
         forcePasswordChange: false,
         sessionTokenHash: null,
         customPermissions: form.useCustomPermissions ? form.customPermissions : null,
+        comissaoPercentual: comissaoNum,
       };
       DB.set("erp:user:" + newUser.id, newUser);
       addToast("Usuário criado.", "success");
@@ -10732,6 +10770,29 @@ function UserManagement({ currentUser, addToast }) {
               </select>
             </div>
           </div>
+
+          {/* ─── Comissão (somente técnico). Aparece no dashboard pessoal do técnico ─── */}
+          {form.role === "tecnico" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                Comissão sobre OS finalizadas (%)
+              </label>
+              <input
+                name="comissaoPercentual"
+                type="number"
+                min="0"
+                max="100"
+                step="0.1"
+                value={form.comissaoPercentual}
+                onChange={(e) => setForm({ ...form, comissaoPercentual: e.target.value })}
+                placeholder="Ex: 10"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Percentual sobre o valor de cada OS finalizada. Mostrado no app do técnico como estimativa mensal.
+              </p>
+            </div>
+          )}
 
           <div className="border border-gray-700 rounded-lg p-4 bg-gray-900/40">
             <label className="flex items-center gap-2 mb-3 cursor-pointer">
@@ -12825,9 +12886,147 @@ function IAAtendimentoModule({ user, addToast }) {
 // Shell totalmente separado renderizado quando o usuário logado tem role="tecnico".
 // Não usa sidebar — UI mobile-first focada exclusivamente nas demandas do técnico.
 // Fluxo: vê OS atribuídas → marca chegada → preenche relatório+fotos → finaliza.
+// ─── Dashboard pessoal do técnico (tab "Resumo") ────────────────────────────
+// KPIs por técnico: OS finalizadas mês (com variação vs mês anterior),
+// OS abertas, tempo médio de execução, ranking entre técnicos, comissão
+// estimada (se user.comissaoPercentual estiver definido) e próximas 3 OS.
+function TecnicoDashboard({ user, orders }) {
+  const stats = useMemo(() => {
+    const now = new Date();
+    const inicioMes = new Date(now.getFullYear(), now.getMonth(), 1);
+    const inicioMesAnterior = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const fimMesAnterior = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+
+    const finalizadas = (statusList) =>
+      orders.filter((o) =>
+        ["concluido", "finalizado", "aguardando_finalizacao"].includes(o.status) &&
+        o.tecnico?.saida && statusList(new Date(o.tecnico.saida))
+      );
+    const noMes = finalizadas((d) => d >= inicioMes);
+    const noMesAnterior = finalizadas((d) => d >= inicioMesAnterior && d <= fimMesAnterior);
+
+    const trend = noMesAnterior.length === 0
+      ? (noMes.length > 0 ? 100 : 0)
+      : Math.round(((noMes.length - noMesAnterior.length) / noMesAnterior.length) * 100);
+
+    const abertas = orders.filter((o) =>
+      ["aguardando", "agendado", "em_deslocamento", "em_servico", "em_execucao", "confirmado"].includes(o.status)
+    );
+
+    // Tempo médio (minutos) das OS finalizadas no mês
+    const tempos = noMes
+      .filter((o) => o.tecnico?.chegada && o.tecnico?.saida)
+      .map((o) => (new Date(o.tecnico.saida) - new Date(o.tecnico.chegada)) / 60000);
+    const tempoMedio = tempos.length > 0
+      ? Math.round(tempos.reduce((a, b) => a + b, 0) / tempos.length)
+      : 0;
+
+    // Ranking entre técnicos por OS finalizadas no mês
+    const todasOS = DB.list("erp:os:") || [];
+    const porTecnico = {};
+    todasOS.forEach((o) => {
+      if (!["concluido", "finalizado", "aguardando_finalizacao"].includes(o.status)) return;
+      if (!o.tecnico?.saida) return;
+      if (new Date(o.tecnico.saida) < inicioMes) return;
+      const id = o.tecnicoId || o.tecnicoNome || "—";
+      porTecnico[id] = (porTecnico[id] || 0) + 1;
+    });
+    const ranking = Object.entries(porTecnico)
+      .sort(([, a], [, b]) => b - a)
+      .map(([id]) => id);
+    const myId = user.id || user.nome;
+    const posicao = ranking.indexOf(myId) + 1;
+    const totalTec = ranking.length || 1;
+
+    // Comissão estimada (se configurada)
+    const pct = Number(user.comissaoPercentual) || 0;
+    const receitaMes = noMes.reduce((sum, o) => sum + (Number(o.valor) || 0), 0);
+    const comissao = pct > 0 ? receitaMes * (pct / 100) : null;
+
+    // Próximas 3 OS agendadas
+    const proximas = abertas
+      .filter((o) => o.dataAgendada)
+      .sort((a, b) => new Date(a.dataAgendada) - new Date(b.dataAgendada))
+      .slice(0, 3);
+
+    return { noMes, trend, abertas, tempoMedio, posicao, totalTec, comissao, pct, receitaMes, proximas };
+  }, [orders, user.id, user.nome, user.comissaoPercentual]);
+
+  const formatTempo = (min) => {
+    if (min <= 0) return "—";
+    const h = Math.floor(min / 60);
+    const m = min % 60;
+    return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <KPICard
+          title="OS finalizadas (mês)"
+          value={stats.noMes.length}
+          icon="✅"
+          trend={stats.trend}
+        />
+        <KPICard
+          title="OS em aberto"
+          value={stats.abertas.length}
+          icon="📋"
+        />
+        <KPICard
+          title="Tempo médio"
+          value={formatTempo(stats.tempoMedio)}
+          icon="⏱"
+        />
+        <KPICard
+          title="Ranking"
+          value={stats.posicao > 0 ? `${stats.posicao}º / ${stats.totalTec}` : "—"}
+          icon="🏆"
+        />
+      </div>
+
+      {stats.comissao !== null && (
+        <div className="bg-gradient-to-br from-cyan-900/40 to-cyan-700/20 border border-cyan-700/50 rounded-xl p-5">
+          <p className="text-cyan-300 text-xs mb-1">Comissão estimada (mês)</p>
+          <p className="text-3xl font-bold text-white">{formatCurrency(stats.comissao)}</p>
+          <p className="text-xs text-cyan-400/80 mt-2">
+            {stats.pct}% sobre {formatCurrency(stats.receitaMes)} em OS finalizadas
+          </p>
+        </div>
+      )}
+
+      {stats.comissao === null && (
+        <div className="bg-gray-800/50 border border-gray-700 rounded-xl p-4 text-xs text-gray-400">
+          💡 Peça ao administrador para configurar seu percentual de comissão para ver o valor estimado.
+        </div>
+      )}
+
+      <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+        <h3 className="text-xs font-semibold text-gray-400 mb-3">PRÓXIMAS OS</h3>
+        {stats.proximas.length === 0 && (
+          <p className="text-sm text-gray-500 text-center py-6">Sem OS agendadas.</p>
+        )}
+        {stats.proximas.map((os) => (
+          <div key={os.id} className="border-l-2 border-cyan-500/50 pl-3 py-2">
+            <div className="flex justify-between items-start">
+              <p className="text-sm font-semibold">{os.clienteNome || "—"}</p>
+              <StatusBadge status={os.status} />
+            </div>
+            <p className="text-xs text-gray-400 mt-1">
+              📅 {formatDate(os.dataAgendada)}
+              {os.horaAgendada && <span className="ml-2">⏰ {os.horaAgendada}</span>}
+            </p>
+            {os.endereco && <p className="text-xs text-gray-500 mt-0.5">📍 {os.endereco}</p>}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function TecnicoMobileApp({ user, onLogout, addToast, theme, setTheme }) {
   const [orders, setOrders] = useState([]);
-  const [tab, setTab] = useState("ativas"); // ativas | historico
+  const [tab, setTab] = useState("resumo"); // resumo | ativas | historico
   const [selected, setSelected] = useState(null); // OS aberta no detalhe
   const [reload, setReload] = useState(0);
 
@@ -12900,6 +13099,7 @@ function TecnicoMobileApp({ user, onLogout, addToast, theme, setTheme }) {
       {/* Tabs */}
       <div className="flex border-b border-gray-700 bg-gray-800">
         {[
+          { id: "resumo", label: "Resumo" },
           { id: "ativas", label: `Ativas (${ativas.length})` },
           { id: "historico", label: `Histórico (${historico.length})` },
         ].map((t) => (
@@ -12919,7 +13119,11 @@ function TecnicoMobileApp({ user, onLogout, addToast, theme, setTheme }) {
 
       {/* Lista */}
       <main className="p-4 space-y-3 pb-24">
-        {lista.length === 0 && (
+        {tab === "resumo" && (
+          <TecnicoDashboard user={user} orders={orders} />
+        )}
+
+        {tab !== "resumo" && lista.length === 0 && (
           <div className="text-center py-20 text-gray-500">
             <div className="text-4xl mb-2">📋</div>
             <p className="text-sm">
@@ -12930,7 +13134,7 @@ function TecnicoMobileApp({ user, onLogout, addToast, theme, setTheme }) {
           </div>
         )}
 
-        {lista.map((os) => (
+        {tab !== "resumo" && lista.map((os) => (
           <button
             key={os.id}
             onClick={() => setSelected(os)}
@@ -12990,6 +13194,11 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
   });
   const [uploading, setUploading] = useState(false);
   const [busy, setBusy] = useState(false);
+  // ─── Estado do diálogo de assinatura do cliente (pré-finalização) ───
+  const [showSignDialog, setShowSignDialog] = useState(false);
+  const [assinaturaBlob, setAssinaturaBlob] = useState(null);
+  const [assinaturaNome, setAssinaturaNome] = useState("");
+  const [assinaturaCpf, setAssinaturaCpf] = useState("");
 
   // ─── Botão "voltar" Android/navegador fecha esta tela ao invés de sair do app ───
   // Mesmo motivo do Modal: deps vazias + ref para onClose, senão re-render do pai
@@ -13089,19 +13298,39 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
   // Helper local: combina deteccao por extensao + Set de blobs identificados como video
   const isVideoLocal = (url) => isVideoUrl(url) || videoUrls.has(url);
 
-  // ─── Finaliza serviço: envia tudo para ERP revisar ───
+  // ─── Finaliza serviço: abre diálogo de assinatura (opcional) antes ───
   const handleFinalizar = async () => {
     if (!descricao.trim()) {
       addToast("Descreva o serviço realizado antes de finalizar", "warning");
       return;
     }
-    if (!confirm("Finalizar serviço e enviar para escritório?")) return;
+    // Abre diálogo de assinatura do cliente. Técnico pode pular se cliente ausente.
+    setShowSignDialog(true);
+  };
+
+  // ─── Confirma finalização: faz upload de assinatura (se houver) e envia OS ───
+  const confirmFinalizar = async () => {
     setBusy(true);
+    let assinatura = null;
+    if (assinaturaBlob) {
+      const url = await uploadAssinaturaOS(assinaturaBlob, os.id);
+      if (url) {
+        assinatura = {
+          url,
+          nome: assinaturaNome.trim() || null,
+          cpf: assinaturaCpf.trim() || null,
+          dataHora: new Date().toISOString(),
+        };
+      } else {
+        addToast("Falha ao enviar assinatura — finalizando sem ela", "warning");
+      }
+    }
     const updated = {
       ...os,
       status: "aguardando_finalizacao",
       descricaoTecnico: descricao.trim(),
       fotos,
+      ...(assinatura ? { assinatura } : {}),
       tecnico: {
         ...(os.tecnico || {}),
         chegada: os.tecnico?.chegada || new Date().toISOString(),
@@ -13113,6 +13342,7 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
     DB.set(`erp:os:${os.id}`, updated);
     addToast("Serviço enviado para revisão!", "success");
     setBusy(false);
+    setShowSignDialog(false);
     onUpdated();
   };
 
@@ -13333,6 +13563,73 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
           </>
         )}
       </div>
+
+      {/* ─── Diálogo de assinatura do cliente (opcional) ─── */}
+      {showSignDialog && (
+        <div className="fixed inset-0 z-[60] bg-black/70 flex items-end sm:items-center justify-center p-2 sm:p-4 fade-in">
+          <div className="bg-gray-800 border border-gray-700 rounded-2xl w-full max-w-md max-h-[95vh] overflow-y-auto">
+            <div className="p-4 border-b border-gray-700">
+              <h3 className="text-base font-bold">Assinatura do cliente</h3>
+              <p className="text-xs text-gray-400 mt-1">
+                Opcional. Peça ao cliente para assinar e confirmar o serviço.
+              </p>
+            </div>
+            <div className="p-4 space-y-3">
+              <div>
+                <label className="text-xs font-semibold text-gray-400 mb-1 block">
+                  Nome de quem assina
+                </label>
+                <input
+                  type="text"
+                  value={assinaturaNome}
+                  onChange={(e) => setAssinaturaNome(e.target.value)}
+                  placeholder="Nome completo"
+                  className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-400 mb-1 block">
+                  CPF (opcional)
+                </label>
+                <input
+                  type="text"
+                  value={assinaturaCpf}
+                  onChange={(e) => setAssinaturaCpf(e.target.value)}
+                  placeholder="000.000.000-00"
+                  className="w-full bg-gray-900 border border-gray-700 rounded-lg p-2 text-sm focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-gray-400 mb-1 block">
+                  Assinatura
+                </label>
+                <SignaturePad onChange={setAssinaturaBlob} height={200} disabled={busy} />
+              </div>
+            </div>
+            <div className="p-4 border-t border-gray-700 flex gap-2">
+              <button
+                onClick={() => {
+                  setAssinaturaBlob(null);
+                  setAssinaturaNome("");
+                  setAssinaturaCpf("");
+                  setShowSignDialog(false);
+                }}
+                disabled={busy}
+                className="flex-1 py-3 rounded-lg bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-sm font-semibold"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={confirmFinalizar}
+                disabled={busy}
+                className="flex-1 py-3 rounded-lg bg-green-600 hover:bg-green-700 disabled:opacity-50 text-sm font-bold"
+              >
+                {busy ? "Enviando..." : assinaturaBlob ? "Finalizar com assinatura" : "Finalizar sem assinatura"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

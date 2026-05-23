@@ -469,6 +469,41 @@ export async function deleteFotoOS(publicUrl) {
   }
 }
 
+// ─── Storage: upload/delete de assinatura do cliente na OS ───────────────────
+// Bucket: 'os-assinaturas' (público). Criar manualmente no Supabase Dashboard.
+// Estrutura: {osId}/{timestamp}.png — uma assinatura por OS (sobrescreve).
+export async function uploadAssinaturaOS(blob, osId) {
+  if (!supabase) return null;
+  try {
+    const path = `${osId}/${Date.now()}.png`;
+    const { error: upErr } = await supabase.storage
+      .from('os-assinaturas')
+      .upload(path, blob, { cacheControl: '3600', upsert: true, contentType: 'image/png' });
+    if (upErr) {
+      console.warn('Upload assinatura erro:', upErr.message);
+      return null;
+    }
+    const { data } = supabase.storage.from('os-assinaturas').getPublicUrl(path);
+    return data?.publicUrl || null;
+  } catch (err) {
+    console.warn('Upload assinatura falhou:', err.message);
+    return null;
+  }
+}
+
+export async function deleteAssinaturaOS(publicUrl) {
+  if (!supabase || !publicUrl) return;
+  try {
+    const marker = '/os-assinaturas/';
+    const idx = publicUrl.indexOf(marker);
+    if (idx === -1) return;
+    const path = publicUrl.slice(idx + marker.length);
+    await supabase.storage.from('os-assinaturas').remove([path]);
+  } catch (err) {
+    console.warn('Delete assinatura falhou:', err.message);
+  }
+}
+
 // ─── Realtime: escuta mudanças no Supabase e atualiza o local ────────────────
 // O callback recebe { eventType, key } para que o consumidor possa fazer sync
 // incremental (re-ler só a fatia afetada) em vez de recarregar tudo.
