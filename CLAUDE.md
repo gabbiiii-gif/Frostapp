@@ -140,6 +140,44 @@ Any new printable artifact should follow the same pattern — don't introduce a 
 
 The app UI is entirely in **Brazilian Portuguese** (pt-BR). All labels, categories, messages, and field names are in Portuguese.
 
+## 2FA via Supabase MFA built-in (Fase 2.5)
+
+Refactor do 2FA TOTP: usa `supabase.auth.mfa.enroll/challenge/verify/unenroll` em vez do `generateTotpSecret`/`verifyTotp` custom. Factors ficam em `auth.users` → cross-device automático, rate-limit e audit server-side.
+
+**Mudanças principais:**
+- Toggle por empresa `companies.require_mfa` (admin/gerente liga em Settings → "Segurança da empresa").
+- `TwoFactorAuthPanel` refatorado: lista factors, enrolla via Supabase, mostra QR retornado pelo próprio Supabase, deleta via unenroll.
+- LoginScreen detecta após `signInWithFallback`:
+  - Tem verified TOTP factor → challenge → tela "Verificação em 2 etapas" (`pendingMfaChallenge`).
+  - `require_mfa` ON sem factor → enroll forçado inline (`pendingMfaEnroll`).
+  - Tem campos legacy (`twoFactorEnabled`/`twoFactorSecret`) sem factor + `require_mfa` OFF → limpa campos legacy do `erp:user` e permite login (panel mostra badge "Reenrolar" pra reativar).
+- `UserManagement` ganhou botão "Resetar 2FA" (admin/gerente) → chama edge `admin-remove-user-mfa` que via service_role apaga todos os factors do alvo (caso "técnico perdeu celular").
+- Campos legacy (`twoFactorEnabled`, `twoFactorSecret`, `twoFactorBackupCodes`, `twoFactorEnabledAt`) são limpos do `erp:user:*` automaticamente no primeiro enroll novo bem-sucedido.
+
+**Backup codes:** não implementados nesta fase. Supabase MFA não tem nativo. Recovery: admin reseta 2FA via UserManagement.
+
+**Migração silenciosa:** usuários com 2FA legacy não perdem login. Detectam-se 3 estados:
+1. Online sem `require_mfa` → entra direto + cleanup local + panel sugere reativar.
+2. Online com `require_mfa` → enroll forçado inline (reason="legacy_reenroll").
+3. Offline (Supabase fora) → fallback local não checa MFA (degradação aceita).
+
+**Schema (migração `fase_2_5_company_require_mfa`):**
+- `companies.require_mfa boolean` (default false)
+
+**Edge function nova:**
+- `admin-remove-user-mfa` — verify_jwt=true; caller admin/gerente da mesma company; lista + deleta todos os factors do `user_id` alvo via service_role.
+
+Helpers em `src/supabase.js`:
+- `listMfaFactors()` → `{ ok, factors[], totp[] }`
+- `enrollMfaTotp(friendlyName)` → `{ ok, factorId, qr, secret, uri }`
+- `challengeMfa(factorId)` → `{ ok, challengeId }`
+- `verifyMfaChallenge(factorId, challengeId, code)` → `{ ok, session? }`
+- `challengeAndVerifyMfa(factorId, code)` — atalho enroll
+- `unenrollMfa(factorId)` → `{ ok }`
+- `adminRemoveUserMfa(targetUserId)` → `{ ok, removed }`
+
+`_afterAuth` adiciona `member.company_require_mfa` derivado de `companies.require_mfa` (junto com `company_require_first_login_otp` da Fase 2.4).
+
 ## Email OTP no 1º login (Fase 2.4)
 
 Camada extra de verificação no primeiro login bem-sucedido de cada membro. Opt-in por empresa (toggle em Settings → "Segurança da empresa").
@@ -236,6 +274,7 @@ Pasta `supabase/functions/`. Deploy com `supabase functions deploy <nome>`.
 | `send-email`        | false      | Helper Resend (chamado server-to-server por outras edge functions)       |
 | `first-login-otp-send`   | true  | Fase 2.4 — gera OTP 6 dígitos e dispara email                            |
 | `first-login-otp-verify` | true  | Fase 2.4 — valida código + promove `first_login_otp_done`                |
+| `admin-remove-user-mfa`  | true  | Fase 2.5 — admin/gerente apaga factors MFA de outro user (reset 2FA)     |
 
 ### admin-create-user — provisionamento de usuário
 

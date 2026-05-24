@@ -130,18 +130,19 @@ async function _afterAuth(session) {
   if (error || !member) {
     return { ok: false, error: 'Usuário sem vínculo com empresa. Contate o administrador.' };
   }
-  // Fase 2.4: carrega flag require_first_login_otp da empresa pra LoginScreen
-  // decidir se intercepta o login com tela de OTP. Falha aqui é não-bloqueante
-  // (default false = OTP não exigido).
+  // Fase 2.4/2.5: carrega flags da empresa pra LoginScreen decidir se
+  // intercepta o login. Falha aqui é não-bloqueante (default false).
   try {
     const { data: company } = await supabase
       .from('companies')
-      .select('id, require_first_login_otp')
+      .select('id, require_first_login_otp, require_mfa')
       .eq('id', member.company_id)
       .maybeSingle();
     member.company_require_first_login_otp = !!company?.require_first_login_otp;
+    member.company_require_mfa = !!company?.require_mfa;
   } catch {
     member.company_require_first_login_otp = false;
+    member.company_require_mfa = false;
   }
   // Fase 2.3: convidado que acabou de aceitar (definir senha + login) entra com
   // status='pendente'. Como autenticou com sucesso, promove para 'ativo'.
@@ -287,6 +288,124 @@ export async function adminCreateUser(payload) {
       return { ok: false, error: body.error || `HTTP ${resp.status}` };
     }
     return { ok: true, auth_user_id: body.auth_user_id };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// ─── 2FA via Supabase MFA built-in (Fase 2.5) ───────────────────────────────
+// Refactor do 2FA TOTP: usa supabase.auth.mfa.* server-side em vez do
+// generateTotpSecret/verifyTotp custom. Cross-device automaticamente (factors
+// armazenados em auth.users), rate-limit e audit no servidor.
+
+// Lista factors MFA do usuário logado. Retorna objeto Supabase nativo
+// { all: [...], totp: [...], phone: [...] } ou null em caso de erro.
+export async function listMfaFactors() {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.', factors: [] };
+  try {
+    const { data, error } = await supabase.auth.mfa.listFactors();
+    if (error) return { ok: false, error: error.message, factors: [] };
+    return { ok: true, factors: data?.all || [], totp: data?.totp || [] };
+  } catch (err) {
+    return { ok: false, error: err.message, factors: [] };
+  }
+}
+
+// Inicia enrollment de novo factor TOTP. Retorna { factorId, qr, secret, uri }.
+// Após scanear QR, o caller precisa chamar challengeMfa + verifyMfa pra
+// confirmar e ativar o factor.
+export async function enrollMfaTotp(friendlyName) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const params = { factorType: 'totp' };
+    if (friendlyName) params.friendlyName = friendlyName;
+    const { data, error } = await supabase.auth.mfa.enroll(params);
+    if (error) return { ok: false, error: error.message };
+    return {
+      ok: true,
+      factorId: data.id,
+      qr: data.totp?.qr_code,        // data URL pronto pra <img src>
+      secret: data.totp?.secret,     // string base32 (chave manual)
+      uri: data.totp?.uri,           // otpauth:// URI bruta
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// Dispara um desafio MFA pro factor informado. Retorna challengeId que deve
+// ser passado pro verifyMfaChallenge junto com o código de 6 dígitos.
+export async function challengeMfa(factorId) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const { data, error } = await supabase.auth.mfa.challenge({ factorId });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, challengeId: data.id };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// Valida código TOTP. Usado tanto pra finalizar enrollment quanto pra elevar
+// AAL durante o login.
+export async function verifyMfaChallenge(factorId, challengeId, code) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const { data, error } = await supabase.auth.mfa.verify({
+      factorId,
+      challengeId,
+      code,
+    });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true, session: data };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// Atalho: enrolling de factor já gera challenge implícito. Esse helper combina
+// challenge + verify pra reduzir round-trips na UI de enrollment.
+export async function challengeAndVerifyMfa(factorId, code) {
+  const ch = await challengeMfa(factorId);
+  if (!ch.ok) return ch;
+  return verifyMfaChallenge(factorId, ch.challengeId, code);
+}
+
+// Remove (unenroll) factor MFA do usuário logado. Usuário pode desativar
+// próprio 2FA. Pra resetar 2FA de OUTRO usuário (técnico que perdeu celular),
+// use adminRemoveUserMfa.
+export async function unenrollMfa(factorId) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const { error } = await supabase.auth.mfa.unenroll({ factorId });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// Chama edge function admin-remove-user-mfa (service_role) pra apagar todos os
+// factors do user alvo. Caller precisa ser admin/gerente da mesma company.
+export async function adminRemoveUserMfa(targetUserId) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return { ok: false, error: 'Sessão expirada.' };
+    const resp = await fetch(`${supabaseUrl}/functions/v1/admin-remove-user-mfa`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseKey,
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ user_id: targetUserId }),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok || !body.ok) {
+      return { ok: false, error: body.error || `HTTP ${resp.status}` };
+    }
+    return { ok: true, removed: body.removed };
   } catch (err) {
     return { ok: false, error: err.message };
   }

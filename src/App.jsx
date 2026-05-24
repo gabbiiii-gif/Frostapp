@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP } from "./supabase.js";
+import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -2524,7 +2524,12 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   // Estado intermediário do 2FA — quando senha OK mas usuário tem TOTP ativado
-  const [pending2FA, setPending2FA] = useState(null);
+  // Fase 2.5: 2FA via Supabase MFA built-in.
+  // pendingMfaChallenge: usuário tem factor verified → digita código → verify.
+  // pendingMfaEnroll: empresa exige MFA OU usuário tinha 2FA legacy mas sem
+  // factor no Supabase → mostra QR pra registrar novo factor.
+  const [pendingMfaChallenge, setPendingMfaChallenge] = useState(null); // { user, factorId, challengeId }
+  const [pendingMfaEnroll, setPendingMfaEnroll] = useState(null); // { user, factorId, qr, secret, reason }
   const [totpCodeInput, setTotpCodeInput] = useState("");
   // Fase 2.4: estado da etapa intermediária de email OTP no 1º login
   const [pendingFirstOTP, setPendingFirstOTP] = useState(null); // { user, expiresAt }
@@ -2642,10 +2647,12 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
         setFailedAttempts(0);
         setLockoutUntil(null);
         clearLoginAttempts();
-        if (localMatch.twoFactorEnabled && localMatch.twoFactorSecret) {
-          setPending2FA(localMatch);
-          setLoading(false);
-          return;
+        // Fase 2.5: 2FA local (sem Supabase) só funciona em modo offline. Como
+        // estamos no fallback (Supabase falhou), não dá pra usar MFA built-in.
+        // Avisa e permite login sem 2FA — Supabase MFA exige conexão.
+        if (localMatch.twoFactorEnabled) {
+          // Sem alternativa: aceita login offline (segurança degradada).
+          // Quando voltar online, panel vai pedir reenroll.
         }
         if (isNative() && bioAvail && !bioEnabled && !overrideEmail) {
           setBioEnroll({ email: normalizedEmail, password: usePassword, user: localMatch });
@@ -2753,11 +2760,64 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
           setLoading(false);
           return;
         }
-        // Se o usuário tem 2FA ativado, segura o login até validar o código TOTP
-        if (found.twoFactorEnabled && found.twoFactorSecret) {
-          setPending2FA(found);
+        // Fase 2.5: MFA via Supabase built-in.
+        const factorsRes = await listMfaFactors();
+        const verifiedTotp = (factorsRes.totp || []).find((f) => f.status === "verified");
+        const requireMfa = !!memberState?.company_require_mfa;
+        const hadLegacy = !!(found.twoFactorEnabled || found.twoFactorSecret);
+
+        if (verifiedTotp) {
+          const ch = await challengeMfa(verifiedTotp.id);
+          if (!ch.ok) {
+            setError(`Falha ao iniciar verificação 2FA: ${ch.error}`);
+            await signOutSupabase();
+            setLoading(false);
+            return;
+          }
+          setPendingMfaChallenge({
+            user: found,
+            factorId: verifiedTotp.id,
+            challengeId: ch.challengeId,
+          });
+          setTotpCodeInput("");
           setLoading(false);
           return;
+        }
+
+        if (requireMfa) {
+          // Empresa exige MFA mas user não tem factor → enroll forçado
+          for (const f of (factorsRes.factors || []).filter((x) => x.status === "unverified")) {
+            await unenrollMfa(f.id);
+          }
+          const r = await enrollMfaTotp(`FrostERP (${normalizedEmail})`);
+          if (!r.ok) {
+            setError(`Falha ao iniciar 2FA obrigatório: ${r.error}`);
+            await signOutSupabase();
+            setLoading(false);
+            return;
+          }
+          setPendingMfaEnroll({
+            user: found,
+            factorId: r.factorId,
+            qr: r.qr,
+            secret: r.secret,
+            reason: hadLegacy ? "legacy_reenroll" : "company_required",
+          });
+          setTotpCodeInput("");
+          setLoading(false);
+          return;
+        }
+
+        // hadLegacy sem require_mfa: limpa flags legacy local (sync vai propagar);
+        // permite login sem 2FA. Usuário pode reativar em Settings.
+        if (hadLegacy) {
+          const fresh = DB.get("erp:user:" + found.id) || found;
+          const updated = { ...fresh };
+          delete updated.twoFactorEnabled;
+          delete updated.twoFactorSecret;
+          delete updated.twoFactorBackupCodes;
+          delete updated.twoFactorEnabledAt;
+          DB.set("erp:user:" + found.id, updated);
         }
         // APK: se biometria disponivel mas ainda nao habilitada, oferece habilitar
         // antes de fechar a tela. Pulamos se ja veio de login biometrico (override).
@@ -2849,26 +2909,80 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
     onLogin(u);
   }, [bioEnroll, onLogin]);
 
-  const handleVerify2FA = useCallback(async (e) => {
+  // Fase 2.5: valida challenge MFA (factor já registrado anteriormente)
+  const handleVerifyMfaChallenge = useCallback(async (e) => {
     e.preventDefault();
     setError("");
-    if (!pending2FA) return;
+    if (!pendingMfaChallenge) return;
     const code = totpCodeInput.trim();
     if (code.length !== 6) { setError("Digite o código de 6 dígitos."); return; }
     setLoading(true);
     try {
-      const ok = await verifyTotp(pending2FA.twoFactorSecret, code);
-      if (ok) {
-        setPending2FA(null);
-        setTotpCodeInput("");
-        onLogin(pending2FA);
-      } else {
-        setError("Código inválido. Tente novamente.");
+      const r = await verifyMfaChallenge(
+        pendingMfaChallenge.factorId,
+        pendingMfaChallenge.challengeId,
+        code
+      );
+      if (!r.ok) {
+        // Challenge expira após uso. Cria novo automaticamente pra próxima tentativa.
+        const fresh = await challengeMfa(pendingMfaChallenge.factorId);
+        if (fresh.ok) {
+          setPendingMfaChallenge({ ...pendingMfaChallenge, challengeId: fresh.challengeId });
+        }
+        setError(`Código inválido. ${r.error || ""}`);
+        return;
       }
+      const userToLogin = pendingMfaChallenge.user;
+      setPendingMfaChallenge(null);
+      setTotpCodeInput("");
+      onLogin(userToLogin);
     } finally {
       setLoading(false);
     }
-  }, [pending2FA, totpCodeInput, onLogin]);
+  }, [pendingMfaChallenge, totpCodeInput, onLogin]);
+
+  // Fase 2.5: confirma enroll forçado (require_mfa)
+  const handleConfirmMfaEnroll = useCallback(async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!pendingMfaEnroll) return;
+    const code = totpCodeInput.trim();
+    if (code.length !== 6) { setError("Digite o código de 6 dígitos do app autenticador."); return; }
+    setLoading(true);
+    try {
+      const r = await challengeAndVerifyMfa(pendingMfaEnroll.factorId, code);
+      if (!r.ok) {
+        setError(`Código inválido. ${r.error || "Verifique o horário do dispositivo."}`);
+        return;
+      }
+      const userToLogin = pendingMfaEnroll.user;
+      // Limpa flags legacy local após enroll bem-sucedido
+      const fresh = DB.get("erp:user:" + userToLogin.id) || userToLogin;
+      const updated = { ...fresh };
+      delete updated.twoFactorEnabled;
+      delete updated.twoFactorSecret;
+      delete updated.twoFactorBackupCodes;
+      delete updated.twoFactorEnabledAt;
+      DB.set("erp:user:" + userToLogin.id, updated);
+      setPendingMfaEnroll(null);
+      setTotpCodeInput("");
+      onLogin(userToLogin);
+    } finally {
+      setLoading(false);
+    }
+  }, [pendingMfaEnroll, totpCodeInput, onLogin]);
+
+  const handleCancelMfa = useCallback(async () => {
+    // Cancelar = sair. Se enroll iniciado, deleta factor unverified pra não acumular.
+    if (pendingMfaEnroll?.factorId) {
+      await unenrollMfa(pendingMfaEnroll.factorId).catch(() => {});
+    }
+    setPendingMfaChallenge(null);
+    setPendingMfaEnroll(null);
+    setTotpCodeInput("");
+    setError("");
+    await signOutSupabase();
+  }, [pendingMfaEnroll]);
 
   // Fase 2.4: countdown do cooldown de reenvio (60s default)
   useEffect(() => {
@@ -3068,9 +3182,9 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
                 </button>
               </div>
             </form>
-          ) : pending2FA ? (
-            // ─── Etapa 2 do login: validação TOTP ───
-            <form onSubmit={handleVerify2FA} className="space-y-4">
+          ) : pendingMfaChallenge ? (
+            // ─── Fase 2.5: validação 2FA via Supabase MFA (factor já registrado) ───
+            <form onSubmit={handleVerifyMfaChallenge} className="space-y-4">
               <div className="text-center">
                 <div className="w-12 h-12 mx-auto rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center text-xl mb-3">🔐</div>
                 <p className="text-sm text-gray-300">Verificação em 2 etapas</p>
@@ -3100,7 +3214,61 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
               </button>
               <button
                 type="button"
-                onClick={() => { setPending2FA(null); setTotpCodeInput(""); setError(""); }}
+                onClick={handleCancelMfa}
+                className="w-full text-xs text-gray-400 hover:text-white transition"
+              >
+                Cancelar e voltar ao login
+              </button>
+            </form>
+          ) : pendingMfaEnroll ? (
+            // ─── Fase 2.5: enroll forçado (empresa exige MFA OU reenroll legacy) ───
+            <form onSubmit={handleConfirmMfaEnroll} className="space-y-4">
+              <div className="text-center">
+                <div className="w-12 h-12 mx-auto rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-xl mb-3">📱</div>
+                <p className="text-sm text-gray-300">
+                  {pendingMfaEnroll.reason === "legacy_reenroll"
+                    ? "Reativar 2FA"
+                    : "2FA obrigatório nesta empresa"}
+                </p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Escaneie o QR no seu app autenticador (Google Authenticator, Authy)
+                  e digite o código gerado.
+                </p>
+              </div>
+              <div className="bg-white p-2 rounded-lg mx-auto w-[200px] h-[200px] flex items-center justify-center">
+                <img src={pendingMfaEnroll.qr} alt="QR Code 2FA" className="w-full h-full" />
+              </div>
+              <details className="text-xs text-gray-400">
+                <summary className="cursor-pointer hover:text-white">Não consegue escanear? Use a chave manual</summary>
+                <code className="block mt-2 bg-gray-900/60 border border-gray-700 rounded p-2 text-xs text-gray-200 font-mono break-all">
+                  {pendingMfaEnroll.secret}
+                </code>
+              </details>
+              <input
+                name="totp-enroll"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                autoFocus
+                value={totpCodeInput}
+                onChange={(e) => { setTotpCodeInput(e.target.value.replace(/\D/g, "")); setError(""); }}
+                placeholder="000000"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white text-center text-2xl tracking-widest font-mono focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition"
+              />
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">{error}</div>
+              )}
+              <button
+                type="submit"
+                disabled={loading || totpCodeInput.length !== 6}
+                className="w-full bg-gradient-to-b from-amber-500 to-amber-600 text-white py-3 rounded-lg font-medium hover:from-amber-400 hover:to-amber-500 transition disabled:opacity-50 min-h-[44px]"
+              >
+                {loading ? "Ativando..." : "Ativar 2FA e entrar"}
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelMfa}
                 className="w-full text-xs text-gray-400 hover:text-white transition"
               >
                 Cancelar e voltar ao login
@@ -11096,6 +11264,27 @@ function UserManagement({ currentUser, addToast }) {
     loadUsers();
   }, [confirmDelete, addToast, loadUsers]);
 
+  // Fase 2.5: reseta 2FA do usuário alvo (apaga todos os factors MFA via
+  // edge function admin-remove-user-mfa). Caso: técnico perde celular ou troca
+  // de app autenticador. Após reset, alvo precisa enrolar de novo no próximo
+  // login (se require_mfa da empresa estiver ativo).
+  const handleResetMfa = useCallback(async (u) => {
+    if (!u.authUserId) {
+      addToast("Usuário sem authUserId — não consegue resetar 2FA.", "error");
+      return;
+    }
+    const confirmed = window.confirm(
+      `Resetar 2FA de ${u.nome}? Todos os factors MFA serão apagados — ele(a) terá que registrar app autenticador de novo no próximo login.`
+    );
+    if (!confirmed) return;
+    const r = await adminRemoveUserMfa(u.authUserId);
+    if (!r.ok) {
+      addToast(`Falha: ${r.error}`, "error");
+      return;
+    }
+    addToast(`2FA de ${u.nome} resetado (${r.removed} factor(s) removidos).`, "success");
+  }, [addToast]);
+
   const toggleStatus = useCallback((u) => {
     if (u.id === currentUser.id) {
       addToast("Você não pode desativar a si mesmo.", "error");
@@ -11189,6 +11378,16 @@ function UserManagement({ currentUser, addToast }) {
                   >
                     Editar
                   </button>
+                  {/* Fase 2.5: admin/gerente reseta 2FA de quem perdeu celular */}
+                  {u.id !== currentUser.id && u.authUserId && (
+                    <button
+                      onClick={() => handleResetMfa(u)}
+                      className="px-2 py-1 text-xs rounded bg-amber-600/30 text-amber-300 hover:bg-amber-600/50 transition mr-1"
+                      title="Apaga factors MFA do usuário no Supabase (cross-device). Usar quando técnico perde acesso ao app autenticador."
+                    >
+                      Resetar 2FA
+                    </button>
+                  )}
                   <button
                     onClick={() => handleDelete(u)}
                     className="px-2 py-1 text-xs rounded bg-red-600/30 text-red-300 hover:bg-red-600/50 transition"
@@ -11632,160 +11831,135 @@ function AutoBackupPanel({ addToast }) {
   );
 }
 
-// ─── Painel 2FA TOTP (Settings) ─────────────────────────────────────────────
-// Permite ao usuário logado ativar/desativar Two-Factor Authentication usando
-// app autenticador (Google Authenticator/Authy/1Password) via TOTP RFC 6238.
-// Fluxo enroll: gera secret → renderiza QR + chave texto → usuário escaneia →
-// digita código atual → valida → gera 8 backup codes (single-use, exibidos UMA VEZ).
-// Fluxo disable: pede código TOTP atual pra confirmar → zera campos no user.
-// Backup codes: regenerar requer código TOTP. Lista mostra apenas a contagem
-// restante (códigos consumidos no login).
+// ─── Painel 2FA TOTP via Supabase MFA built-in (Fase 2.5) ───────────────────
+// Refactor: usa supabase.auth.mfa.enroll/challenge/verify/unenroll. Factors
+// armazenados em auth.users → cross-device automaticamente. Sem backup codes
+// (não suportado pelo Supabase MFA; admin pode usar "Resetar 2FA" no
+// UserManagement caso usuário perca celular).
 //
-// Persistência: campos `twoFactorEnabled`, `twoFactorSecret`, `twoFactorBackupCodes`
-// gravados em `erp:user:<id>`. `USER_SECRET_FIELDS` em supabase.js já strip
-// `twoFactorSecret`/`twoFactorBackupCodes` no upload — secrets só no device.
+// Limpa campos legacy (twoFactorEnabled/Secret/BackupCodes) em erp:user no
+// primeiro enroll ou unenroll bem-sucedido. Migração silenciosa.
 function TwoFactorAuthPanel({ user, addToast, reloadData }) {
-  // Lê snapshot fresco do user no DB (prop `user` pode estar stale após enable/disable)
-  const freshUser = useMemo(() => DB.get("erp:user:" + user.id) || user, [user, user.id]);
-  const enabled = !!(freshUser.twoFactorEnabled && freshUser.twoFactorSecret);
-  const backupCount = Array.isArray(freshUser.twoFactorBackupCodes) ? freshUser.twoFactorBackupCodes.length : 0;
-
-  const [mode, setMode] = useState("idle"); // idle | enrolling | disabling | regenerating
-  const [secret, setSecret] = useState(null);
-  const [qrDataUrl, setQrDataUrl] = useState(null);
+  // Carrega factors do Supabase MFA. Refresh manual após enroll/unenroll.
+  const [factors, setFactors] = useState([]);
+  const [loadingFactors, setLoadingFactors] = useState(true);
+  const [mode, setMode] = useState("idle"); // idle | enrolling
+  const [pendingEnroll, setPendingEnroll] = useState(null); // { factorId, qr, secret }
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  // Backup codes mostrados UMA VEZ após enroll/regen. Limpos quando user fecha.
-  const [revealedBackupCodes, setRevealedBackupCodes] = useState(null);
 
-  // Gera 8 backup codes de 8 chars cada (alfanumérico maiúsculo). 8^36 ~ keyspace suficiente.
-  const generateBackupCodes = useCallback(() => {
-    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // sem 0/O/1/I pra legibilidade
-    const codes = [];
-    for (let i = 0; i < 8; i++) {
-      const bytes = crypto.getRandomValues(new Uint8Array(8));
-      let c = "";
-      for (let j = 0; j < 8; j++) c += chars[bytes[j] % chars.length];
-      codes.push(c);
-    }
-    return codes;
+  // verified factor = enrollment confirmado; unverified = enroll iniciado mas
+  // user nunca digitou código. Limpamos unverified ao cancelar.
+  const verifiedTotpFactor = useMemo(
+    () => factors.find((f) => f.factor_type === "totp" && f.status === "verified"),
+    [factors]
+  );
+  const enabled = !!verifiedTotpFactor;
+  const hasLegacy2FA = !!(user.twoFactorEnabled || user.twoFactorSecret);
+
+  const refreshFactors = useCallback(async () => {
+    setLoadingFactors(true);
+    const r = await listMfaFactors();
+    setFactors(r.factors || []);
+    setLoadingFactors(false);
   }, []);
 
-  // Inicia enrollment: gera secret + QR code
+  useEffect(() => { refreshFactors(); }, [refreshFactors]);
+
+  // Limpa campos 2FA legacy do erp:user — chamamos após confirmar enroll novo
+  // (já tem MFA cross-device) ou após desativar (sem backup do antigo).
+  const cleanupLegacy = useCallback(() => {
+    if (!hasLegacy2FA) return;
+    const fresh = DB.get("erp:user:" + user.id) || user;
+    const updated = { ...fresh };
+    delete updated.twoFactorEnabled;
+    delete updated.twoFactorSecret;
+    delete updated.twoFactorBackupCodes;
+    delete updated.twoFactorEnabledAt;
+    DB.set("erp:user:" + user.id, updated);
+  }, [user, hasLegacy2FA]);
+
+  // Inicia enroll: chama supabase mfa.enroll → recebe QR + secret. Se já existe
+  // unverified factor, deleta antes pra evitar acumular.
   const startEnroll = useCallback(async () => {
     setError("");
     setBusy(true);
     try {
-      const newSecret = generateTotpSecret();
+      // Limpa factors unverified pendentes (caso usuário tenha cancelado antes)
+      const unverified = factors.filter((f) => f.status === "unverified");
+      for (const f of unverified) {
+        await unenrollMfa(f.id);
+      }
       const cfg = DB.get("erp:config") || {};
       const issuer = (cfg.nomeEmpresa || cfg.razaoSocial || "FrostERP").slice(0, 40);
-      const accountName = freshUser.email || freshUser.nome || "usuario";
-      const uri = buildOtpAuthUri({ issuer, accountName, secret: newSecret });
-      const dataUrl = await QRCode.toDataURL(uri, { margin: 1, width: 220 });
-      setSecret(newSecret);
-      setQrDataUrl(dataUrl);
+      const friendly = `${issuer} (${user.email || user.nome || "usuario"})`;
+      const r = await enrollMfaTotp(friendly);
+      if (!r.ok) {
+        setError(`Erro ao iniciar enrollment: ${r.error}`);
+        return;
+      }
+      setPendingEnroll({ factorId: r.factorId, qr: r.qr, secret: r.secret });
       setMode("enrolling");
-    } catch (err) {
-      console.error("[2fa] erro ao gerar QR", err);
-      setError("Erro ao gerar QR code. Tente novamente.");
     } finally {
       setBusy(false);
     }
-  }, [freshUser, generateTotpSecret]);
+  }, [factors, user]);
 
-  // Confirma enrollment: valida código + persiste secret + gera backup codes
   const confirmEnroll = useCallback(async () => {
     setError("");
-    if (code.length !== 6) { setError("Digite o código de 6 dígitos do app autenticador."); return; }
+    if (code.length !== 6 || !pendingEnroll?.factorId) {
+      setError("Digite o código de 6 dígitos do app autenticador.");
+      return;
+    }
     setBusy(true);
     try {
-      const ok = await verifyTotp(secret, code);
-      if (!ok) { setError("Código inválido. Verifique o horário do dispositivo."); return; }
-      const backupCodes = generateBackupCodes();
-      const updated = {
-        ...freshUser,
-        twoFactorEnabled: true,
-        twoFactorSecret: secret,
-        twoFactorBackupCodes: backupCodes,
-        twoFactorEnabledAt: new Date().toISOString(),
-      };
-      DB.set("erp:user:" + freshUser.id, updated);
-      setRevealedBackupCodes(backupCodes);
+      const r = await challengeAndVerifyMfa(pendingEnroll.factorId, code);
+      if (!r.ok) {
+        setError(`Código inválido. ${r.error || "Verifique o horário do dispositivo."}`);
+        return;
+      }
+      cleanupLegacy();
+      setPendingEnroll(null);
       setMode("idle");
-      setSecret(null);
-      setQrDataUrl(null);
       setCode("");
       addToast("2FA ativado com sucesso!", "success");
+      await refreshFactors();
       if (typeof reloadData === "function") reloadData();
     } finally {
       setBusy(false);
     }
-  }, [code, secret, freshUser, addToast, reloadData, generateBackupCodes]);
+  }, [code, pendingEnroll, cleanupLegacy, refreshFactors, addToast, reloadData]);
 
-  // Desativa 2FA: precisa código TOTP válido pra evitar que invasor casual desative
-  const confirmDisable = useCallback(async () => {
-    setError("");
-    if (code.length !== 6) { setError("Digite o código TOTP atual pra confirmar."); return; }
-    setBusy(true);
-    try {
-      const ok = await verifyTotp(freshUser.twoFactorSecret, code);
-      if (!ok) { setError("Código inválido."); return; }
-      const updated = { ...freshUser };
-      delete updated.twoFactorEnabled;
-      delete updated.twoFactorSecret;
-      delete updated.twoFactorBackupCodes;
-      delete updated.twoFactorEnabledAt;
-      DB.set("erp:user:" + freshUser.id, updated);
-      setMode("idle");
-      setCode("");
-      addToast("2FA desativado.", "info");
-      if (typeof reloadData === "function") reloadData();
-    } finally {
-      setBusy(false);
+  const cancelEnroll = useCallback(async () => {
+    if (pendingEnroll?.factorId) {
+      await unenrollMfa(pendingEnroll.factorId).catch(() => {});
     }
-  }, [code, freshUser, addToast, reloadData]);
-
-  // Regenera backup codes: precisa código TOTP. Lista antiga invalidada.
-  const confirmRegenerate = useCallback(async () => {
-    setError("");
-    if (code.length !== 6) { setError("Digite o código TOTP atual."); return; }
-    setBusy(true);
-    try {
-      const ok = await verifyTotp(freshUser.twoFactorSecret, code);
-      if (!ok) { setError("Código inválido."); return; }
-      const backupCodes = generateBackupCodes();
-      const updated = { ...freshUser, twoFactorBackupCodes: backupCodes };
-      DB.set("erp:user:" + freshUser.id, updated);
-      setRevealedBackupCodes(backupCodes);
-      setMode("idle");
-      setCode("");
-      addToast("Novos códigos de recuperação gerados. Os antigos não funcionam mais.", "success");
-      if (typeof reloadData === "function") reloadData();
-    } finally {
-      setBusy(false);
-    }
-  }, [code, freshUser, addToast, reloadData, generateBackupCodes]);
-
-  const cancelFlow = useCallback(() => {
+    setPendingEnroll(null);
     setMode("idle");
-    setSecret(null);
-    setQrDataUrl(null);
     setCode("");
     setError("");
-  }, []);
+    await refreshFactors();
+  }, [pendingEnroll, refreshFactors]);
 
-  // Copia backup codes pro clipboard (txt) — usuário pode colar num arquivo seguro
-  const copyBackupCodes = useCallback(() => {
-    if (!revealedBackupCodes) return;
-    const txt = revealedBackupCodes.join("\n");
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(txt).then(
-        () => addToast("Códigos copiados.", "success"),
-        () => addToast("Falha ao copiar.", "error")
-      );
+  const confirmDisable = useCallback(async () => {
+    if (!verifiedTotpFactor) return;
+    setError("");
+    setBusy(true);
+    try {
+      const r = await unenrollMfa(verifiedTotpFactor.id);
+      if (!r.ok) {
+        setError(`Falha ao desativar: ${r.error}`);
+        return;
+      }
+      cleanupLegacy();
+      addToast("2FA desativado.", "info");
+      await refreshFactors();
+      if (typeof reloadData === "function") reloadData();
+    } finally {
+      setBusy(false);
     }
-  }, [revealedBackupCodes, addToast]);
+  }, [verifiedTotpFactor, cleanupLegacy, refreshFactors, addToast, reloadData]);
 
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
@@ -11796,6 +11970,9 @@ function TwoFactorAuthPanel({ user, addToast, reloadData }) {
             {enabled && (
               <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">Ativo</span>
             )}
+            {!enabled && hasLegacy2FA && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/30">Reenrolar</span>
+            )}
           </h3>
           <p className="text-gray-400 text-sm mt-0.5">
             Protege o login mesmo se sua senha vazar. Requer app autenticador (Google Authenticator, Authy, 1Password).
@@ -11803,38 +11980,26 @@ function TwoFactorAuthPanel({ user, addToast, reloadData }) {
         </div>
       </div>
 
-      {/* Códigos de backup recém-gerados — exibidos UMA VEZ */}
-      {revealedBackupCodes && (
-        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-4">
-          <p className="text-sm font-medium text-amber-200 mb-2">⚠️ Códigos de recuperação — guarde agora!</p>
-          <p className="text-xs text-amber-300/80 mb-3">
-            Cada código funciona UMA VEZ pra entrar caso você perca acesso ao app autenticador. Não serão exibidos novamente.
-          </p>
-          <div className="grid grid-cols-2 gap-2 font-mono text-sm text-amber-100 bg-gray-900/60 rounded p-3">
-            {revealedBackupCodes.map((c, i) => (
-              <div key={i} className="tracking-wider">{c}</div>
-            ))}
-          </div>
-          <div className="flex gap-2 mt-3">
-            <button onClick={copyBackupCodes} className="px-3 py-1.5 text-xs rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition">
-              Copiar todos
-            </button>
-            <button onClick={() => setRevealedBackupCodes(null)} className="px-3 py-1.5 text-xs rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition">
-              Já anotei, fechar
-            </button>
-          </div>
+      {/* Aviso de reenroll: usuário tinha 2FA legacy antes da migração pra Supabase MFA */}
+      {!enabled && hasLegacy2FA && mode === "idle" && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-4 text-sm text-amber-200">
+          Detectamos 2FA antigo neste dispositivo, mas ele não funciona mais no novo sistema.
+          Clique em <strong>Ativar 2FA</strong> abaixo pra reativar e gerar um novo QR code.
+          O 2FA antigo será descartado automaticamente.
         </div>
       )}
 
-      {/* Estado: não ativado, idle */}
-      {!enabled && mode === "idle" && !revealedBackupCodes && (
+      {loadingFactors && (
+        <p className="text-sm text-gray-400">Carregando configuração…</p>
+      )}
+
+      {!loadingFactors && !enabled && mode === "idle" && (
         <button onClick={startEnroll} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition disabled:opacity-50">
-          Ativar 2FA
+          {busy ? "Preparando…" : "Ativar 2FA"}
         </button>
       )}
 
-      {/* Estado: enrolling — mostra QR + secret + input de código */}
-      {mode === "enrolling" && qrDataUrl && (
+      {mode === "enrolling" && pendingEnroll && (
         <div className="space-y-4">
           <ol className="text-sm text-gray-300 list-decimal list-inside space-y-1">
             <li>Abra seu app autenticador (Google Authenticator, Authy, 1Password).</li>
@@ -11843,12 +12008,12 @@ function TwoFactorAuthPanel({ user, addToast, reloadData }) {
           </ol>
           <div className="flex flex-col sm:flex-row gap-4 items-center sm:items-start">
             <div className="bg-white p-2 rounded-lg">
-              <img src={qrDataUrl} alt="QR Code 2FA" className="w-[220px] h-[220px]" />
+              <img src={pendingEnroll.qr} alt="QR Code 2FA" className="w-[220px] h-[220px]" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs text-gray-400 uppercase mb-1">Chave manual (caso não consiga escanear)</p>
               <code className="block bg-gray-900/60 border border-gray-700 rounded p-2 text-xs text-gray-200 font-mono break-all">
-                {secret}
+                {pendingEnroll.secret}
               </code>
               <p className="text-xs text-gray-500 mt-2">Algoritmo: SHA-1 • 6 dígitos • 30s</p>
             </div>
@@ -11872,86 +12037,25 @@ function TwoFactorAuthPanel({ user, addToast, reloadData }) {
             <button onClick={confirmEnroll} disabled={busy || code.length !== 6} className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition disabled:opacity-50">
               {busy ? "Verificando..." : "Confirmar e ativar"}
             </button>
-            <button onClick={cancelFlow} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition">
+            <button onClick={cancelEnroll} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition">
               Cancelar
             </button>
           </div>
         </div>
       )}
 
-      {/* Estado: ativado, idle */}
       {enabled && mode === "idle" && (
         <div className="space-y-3">
-          <div className="text-sm text-gray-300">
-            <p>🛡️ 2FA está ativo. Você precisa do código do app autenticador a cada login.</p>
-            <p className="text-xs text-gray-500 mt-1">
-              Códigos de recuperação restantes: <strong className="text-gray-300">{backupCount}/8</strong>
-              {backupCount < 3 && backupCount > 0 && <span className="text-amber-400"> — gere novos códigos!</span>}
-              {backupCount === 0 && <span className="text-red-400"> — sem códigos! Gere novos.</span>}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button onClick={() => { setMode("regenerating"); setCode(""); setError(""); }} className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition">
-              Gerar novos códigos de recuperação
-            </button>
-            <button onClick={() => { setMode("disabling"); setCode(""); setError(""); }} className="px-3 py-1.5 text-sm rounded-lg bg-red-600/80 hover:bg-red-600 text-white transition">
-              Desativar 2FA
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Estado: disabling — confirma com código TOTP */}
-      {mode === "disabling" && (
-        <div className="space-y-3 border-t border-gray-700 pt-4 mt-3">
-          <p className="text-sm text-gray-300">Pra desativar, digite o código atual do seu app autenticador:</p>
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]{6}"
-            maxLength={6}
-            autoFocus
-            value={code}
-            onChange={(e) => { setCode(e.target.value.replace(/\D/g, "")); setError(""); }}
-            placeholder="000000"
-            className="w-full sm:w-48 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white text-center text-2xl tracking-widest font-mono focus:outline-none focus:border-red-500 transition"
-          />
+          <p className="text-sm text-gray-300">
+            🛡️ 2FA está ativo. Você precisa do código do app autenticador a cada login.
+          </p>
           {error && <p className="text-sm text-red-400">{error}</p>}
-          <div className="flex gap-2">
-            <button onClick={confirmDisable} disabled={busy || code.length !== 6} className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white transition disabled:opacity-50">
-              {busy ? "Verificando..." : "Confirmar desativação"}
-            </button>
-            <button onClick={cancelFlow} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition">
-              Cancelar
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Estado: regenerating backup codes — confirma com código TOTP */}
-      {mode === "regenerating" && (
-        <div className="space-y-3 border-t border-gray-700 pt-4 mt-3">
-          <p className="text-sm text-gray-300">Pra gerar novos códigos (e invalidar os antigos), digite o código TOTP atual:</p>
-          <input
-            type="text"
-            inputMode="numeric"
-            pattern="[0-9]{6}"
-            maxLength={6}
-            autoFocus
-            value={code}
-            onChange={(e) => { setCode(e.target.value.replace(/\D/g, "")); setError(""); }}
-            placeholder="000000"
-            className="w-full sm:w-48 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white text-center text-2xl tracking-widest font-mono focus:outline-none focus:border-blue-500 transition"
-          />
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          <div className="flex gap-2">
-            <button onClick={confirmRegenerate} disabled={busy || code.length !== 6} className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition disabled:opacity-50">
-              {busy ? "Verificando..." : "Gerar novos códigos"}
-            </button>
-            <button onClick={cancelFlow} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition">
-              Cancelar
-            </button>
-          </div>
+          <button onClick={confirmDisable} disabled={busy} className="px-3 py-1.5 text-sm rounded-lg bg-red-600/80 hover:bg-red-600 text-white transition disabled:opacity-50">
+            {busy ? "Desativando…" : "Desativar 2FA"}
+          </button>
+          <p className="text-xs text-gray-500">
+            Perdeu o celular? Peça pra um admin/gerente resetar seu 2FA em Settings → Usuários.
+          </p>
         </div>
       )}
     </div>
@@ -11963,27 +12067,32 @@ function TwoFactorAuthPanel({ user, addToast, reloadData }) {
 // (admin/gerente da própria empresa têm permissão).
 function CompanySecurityPanel({ companyId, addToast }) {
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [savingOtp, setSavingOtp] = useState(false);
+  const [savingMfa, setSavingMfa] = useState(false);
   const [requireOTP, setRequireOTP] = useState(false);
+  const [requireMfa, setRequireMfa] = useState(false);
 
   const load = useCallback(async () => {
     if (!supabase || !companyId) { setLoading(false); return; }
     try {
       const { data, error } = await supabase
         .from("companies")
-        .select("require_first_login_otp")
+        .select("require_first_login_otp, require_mfa")
         .eq("id", companyId)
         .maybeSingle();
-      if (!error && data) setRequireOTP(!!data.require_first_login_otp);
+      if (!error && data) {
+        setRequireOTP(!!data.require_first_login_otp);
+        setRequireMfa(!!data.require_mfa);
+      }
     } catch { /* ignora */ }
     setLoading(false);
   }, [companyId]);
 
   useEffect(() => { load(); }, [load]);
 
-  const handleToggle = useCallback(async () => {
-    if (!supabase || !companyId || saving) return;
-    setSaving(true);
+  const toggleOTP = useCallback(async () => {
+    if (!supabase || !companyId || savingOtp) return;
+    setSavingOtp(true);
     const newValue = !requireOTP;
     try {
       const { error } = await supabase
@@ -12002,9 +12111,34 @@ function CompanySecurityPanel({ companyId, addToast }) {
         "success"
       );
     } finally {
-      setSaving(false);
+      setSavingOtp(false);
     }
-  }, [companyId, requireOTP, saving, addToast]);
+  }, [companyId, requireOTP, savingOtp, addToast]);
+
+  const toggleMfa = useCallback(async () => {
+    if (!supabase || !companyId || savingMfa) return;
+    setSavingMfa(true);
+    const newValue = !requireMfa;
+    try {
+      const { error } = await supabase
+        .from("companies")
+        .update({ require_mfa: newValue })
+        .eq("id", companyId);
+      if (error) {
+        addToast?.(`Falha ao salvar: ${error.message}`, "error");
+        return;
+      }
+      setRequireMfa(newValue);
+      addToast?.(
+        newValue
+          ? "2FA agora é OBRIGATÓRIO pra todos os usuários dessa empresa."
+          : "2FA voltou a ser opcional.",
+        newValue ? "warning" : "success"
+      );
+    } finally {
+      setSavingMfa(false);
+    }
+  }, [companyId, requireMfa, savingMfa, addToast]);
 
   if (loading) {
     return (
@@ -12015,18 +12149,20 @@ function CompanySecurityPanel({ companyId, addToast }) {
   }
 
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
-      <h3 className="text-lg font-semibold text-white mb-1">Segurança da empresa</h3>
-      <p className="text-gray-400 text-sm mb-4">
-        Configurações que valem pra todos os usuários da empresa.
-      </p>
+    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 space-y-4">
+      <div>
+        <h3 className="text-lg font-semibold text-white mb-1">Segurança da empresa</h3>
+        <p className="text-gray-400 text-sm">
+          Configurações que valem pra todos os usuários da empresa.
+        </p>
+      </div>
 
       <label className="flex items-start gap-3 cursor-pointer">
         <input
           type="checkbox"
           checked={requireOTP}
-          onChange={handleToggle}
-          disabled={saving}
+          onChange={toggleOTP}
+          disabled={savingOtp}
           className="mt-1 w-4 h-4 cursor-pointer"
         />
         <span>
@@ -12036,8 +12172,27 @@ function CompanySecurityPanel({ companyId, addToast }) {
           <span className="block text-xs text-gray-400 mt-1">
             Quando ativado, todo novo usuário recebe um código de 6 dígitos por email
             no primeiro login bem-sucedido. Após confirmar uma vez, os próximos logins
-            entram direto. Não substitui 2FA (TOTP) — é uma camada extra de verificação
-            inicial.
+            entram direto.
+          </span>
+        </span>
+      </label>
+
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={requireMfa}
+          onChange={toggleMfa}
+          disabled={savingMfa}
+          className="mt-1 w-4 h-4 cursor-pointer"
+        />
+        <span>
+          <span className="block text-sm text-white font-medium">
+            Exigir 2FA (autenticador) pra todos os usuários
+          </span>
+          <span className="block text-xs text-gray-400 mt-1">
+            Quando ativado, qualquer usuário sem 2FA configurado é obrigado a registrar
+            um app autenticador (Google Authenticator, Authy, 1Password) durante o
+            login pra prosseguir. Recomendado pra empresas com dados sensíveis.
           </span>
         </span>
       </label>
