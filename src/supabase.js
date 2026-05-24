@@ -124,11 +124,24 @@ async function _afterAuth(session) {
   // Carrega vínculo company_members do usuário autenticado
   const { data: member, error } = await supabase
     .from('company_members')
-    .select('user_id, company_id, role, is_super_admin, legacy_user_id, custom_permissions, status, nome, avatar')
+    .select('user_id, company_id, role, is_super_admin, legacy_user_id, custom_permissions, status, nome, avatar, first_login_otp_done')
     .eq('user_id', session.user.id)
     .maybeSingle();
   if (error || !member) {
     return { ok: false, error: 'Usuário sem vínculo com empresa. Contate o administrador.' };
+  }
+  // Fase 2.4: carrega flag require_first_login_otp da empresa pra LoginScreen
+  // decidir se intercepta o login com tela de OTP. Falha aqui é não-bloqueante
+  // (default false = OTP não exigido).
+  try {
+    const { data: company } = await supabase
+      .from('companies')
+      .select('id, require_first_login_otp')
+      .eq('id', member.company_id)
+      .maybeSingle();
+    member.company_require_first_login_otp = !!company?.require_first_login_otp;
+  } catch {
+    member.company_require_first_login_otp = false;
   }
   // Fase 2.3: convidado que acabou de aceitar (definir senha + login) entra com
   // status='pendente'. Como autenticou com sucesso, promove para 'ativo'.
@@ -274,6 +287,67 @@ export async function adminCreateUser(payload) {
       return { ok: false, error: body.error || `HTTP ${resp.status}` };
     }
     return { ok: true, auth_user_id: body.auth_user_id };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// ─── Email OTP no 1º login (Fase 2.4) ───────────────────────────────────────
+// Dispara envio do código de 6 dígitos para o email do caller. Só funciona
+// se a empresa do caller tiver require_first_login_otp=true E o member ainda
+// não tiver first_login_otp_done=true. Caller precisa estar autenticado.
+// Retorna { ok, expires_at?, retry_in?, error? }.
+export async function sendFirstLoginOTP() {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return { ok: false, error: 'Sessão expirada.' };
+    const resp = await fetch(`${supabaseUrl}/functions/v1/first-login-otp-send`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseKey,
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({}),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok || !body.ok) {
+      return { ok: false, error: body.error || `HTTP ${resp.status}`, retry_in: body.retry_in };
+    }
+    return { ok: true, expires_at: body.expires_at };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// Valida código informado pelo usuário. Sucesso: marca first_login_otp_done=true
+// no banco — próximos logins pulam o passo de OTP. Retorna { ok, attempts_left?,
+// locked?, error? }.
+export async function verifyFirstLoginOTP(code) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return { ok: false, error: 'Sessão expirada.' };
+    const resp = await fetch(`${supabaseUrl}/functions/v1/first-login-otp-verify`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseKey,
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ code }),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok || !body.ok) {
+      return {
+        ok: false,
+        error: body.error || `HTTP ${resp.status}`,
+        attempts_left: body.attempts_left,
+        locked: !!body.locked,
+      };
+    }
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
   }

@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession } from "./supabase.js";
+import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -2526,6 +2526,10 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
   // Estado intermediário do 2FA — quando senha OK mas usuário tem TOTP ativado
   const [pending2FA, setPending2FA] = useState(null);
   const [totpCodeInput, setTotpCodeInput] = useState("");
+  // Fase 2.4: estado da etapa intermediária de email OTP no 1º login
+  const [pendingFirstOTP, setPendingFirstOTP] = useState(null); // { user, expiresAt }
+  const [otpCodeInput, setOtpCodeInput] = useState("");
+  const [otpResendCooldown, setOtpResendCooldown] = useState(0);
   // ─── Biometria (APK) ──────────────────────────────────────────────────────
   // bioAvail: hardware tem biometria configurada (digital/face/iris)
   // bioEnabled: usuario ja optou por habilitar login biometrico nesse device
@@ -2727,6 +2731,28 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
         setFailedAttempts(0);
         setLockoutUntil(null);
         clearLoginAttempts();
+        // Fase 2.4: se empresa exige OTP no 1º login e member ainda não confirmou,
+        // intercepta antes de qualquer outra etapa. Cooldown=60s no servidor — se
+        // bater, mostra dialog mesmo assim (usuário pode digitar OTP do email
+        // anterior).
+        const memberState = getCurrentMember();
+        if (memberState?.company_require_first_login_otp && !memberState?.first_login_otp_done) {
+          const sendRes = await sendFirstLoginOTP();
+          if (!sendRes.ok && sendRes.error !== 'cooldown') {
+            setError(`Falha ao enviar código: ${sendRes.error}`);
+            await signOutSupabase();
+            setLoading(false);
+            return;
+          }
+          setPendingFirstOTP({ user: found, expiresAt: sendRes.expires_at || null });
+          if (sendRes.error === 'cooldown' && sendRes.retry_in) {
+            setOtpResendCooldown(sendRes.retry_in);
+          } else {
+            setOtpResendCooldown(60);
+          }
+          setLoading(false);
+          return;
+        }
         // Se o usuário tem 2FA ativado, segura o login até validar o código TOTP
         if (found.twoFactorEnabled && found.twoFactorSecret) {
           setPending2FA(found);
@@ -2844,6 +2870,85 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
     }
   }, [pending2FA, totpCodeInput, onLogin]);
 
+  // Fase 2.4: countdown do cooldown de reenvio (60s default)
+  useEffect(() => {
+    if (otpResendCooldown <= 0) return;
+    const id = setInterval(() => {
+      setOtpResendCooldown((prev) => (prev > 0 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(id);
+  }, [otpResendCooldown]);
+
+  // Fase 2.4: valida código OTP enviado por email
+  const handleVerifyFirstOTP = useCallback(async (e) => {
+    e.preventDefault();
+    setError("");
+    if (!pendingFirstOTP) return;
+    const code = otpCodeInput.trim();
+    if (!/^\d{6}$/.test(code)) { setError("Digite o código de 6 dígitos."); return; }
+    setLoading(true);
+    try {
+      const r = await verifyFirstLoginOTP(code);
+      if (r.ok) {
+        const userToLogin = pendingFirstOTP.user;
+        setPendingFirstOTP(null);
+        setOtpCodeInput("");
+        setOtpResendCooldown(0);
+        onLogin(userToLogin);
+        return;
+      }
+      if (r.locked) {
+        setError("Muitas tentativas. Conta bloqueada temporariamente. Faça login novamente em 15 minutos.");
+        await signOutSupabase();
+        setPendingFirstOTP(null);
+        setOtpCodeInput("");
+        // Lockout local de 15min para coibir bruteforce
+        const lockUntil = Date.now() + 15 * 60 * 1000;
+        setLockoutUntil(lockUntil);
+        writeLoginAttempts({ count: 7, lockoutUntil: lockUntil });
+        return;
+      }
+      if (r.error === "no_active_otp") {
+        setError("Código expirado. Clique em 'Reenviar código' pra receber um novo.");
+        return;
+      }
+      const left = r.attempts_left;
+      setError(`Código inválido.${typeof left === "number" ? ` ${left} tentativa(s) restante(s).` : ""}`);
+    } finally {
+      setLoading(false);
+    }
+  }, [pendingFirstOTP, otpCodeInput, onLogin]);
+
+  const handleResendFirstOTP = useCallback(async () => {
+    if (otpResendCooldown > 0) return;
+    setError("");
+    setLoading(true);
+    try {
+      const r = await sendFirstLoginOTP();
+      if (!r.ok) {
+        if (r.error === "cooldown" && r.retry_in) {
+          setOtpResendCooldown(r.retry_in);
+          setError(`Aguarde ${r.retry_in}s antes de pedir um novo código.`);
+        } else {
+          setError(`Falha ao reenviar: ${r.error}`);
+        }
+        return;
+      }
+      setOtpResendCooldown(60);
+      setPendingFirstOTP((prev) => prev ? { ...prev, expiresAt: r.expires_at } : prev);
+    } finally {
+      setLoading(false);
+    }
+  }, [otpResendCooldown]);
+
+  const handleCancelFirstOTP = useCallback(async () => {
+    setPendingFirstOTP(null);
+    setOtpCodeInput("");
+    setOtpResendCooldown(0);
+    setError("");
+    await signOutSupabase();
+  }, []);
+
   // Paleta da Aurora muda com o tema — light usa azuis claros para combinar com superfície branca
   const isLight = theme === "light";
   const auroraColors = isLight
@@ -2912,7 +3017,58 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
             <p className="text-gray-400 text-sm mt-1">Sistema de Gestão Integrada</p>
           </div>
 
-          {pending2FA ? (
+          {pendingFirstOTP ? (
+            // ─── Fase 2.4: etapa intermediária — código OTP enviado por email ───
+            <form onSubmit={handleVerifyFirstOTP} className="space-y-4">
+              <div className="text-center">
+                <div className="w-12 h-12 mx-auto rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center text-xl mb-3">📩</div>
+                <p className="text-sm text-gray-300">Verificação por email</p>
+                <p className="text-xs text-gray-500 mt-1">
+                  Enviamos um código de 6 dígitos pra <strong>{(email || "").toLowerCase()}</strong>.
+                  Cole abaixo (válido por 10 min).
+                </p>
+              </div>
+              <input
+                name="otp-email"
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]{6}"
+                maxLength={6}
+                autoFocus
+                value={otpCodeInput}
+                onChange={(e) => { setOtpCodeInput(e.target.value.replace(/\D/g, "")); setError(""); }}
+                placeholder="000000"
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white text-center text-2xl tracking-widest font-mono focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition"
+              />
+              {error && (
+                <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm">{error}</div>
+              )}
+              <button
+                type="submit"
+                disabled={loading || otpCodeInput.length !== 6}
+                className="w-full bg-gradient-to-b from-amber-500 to-amber-600 text-white py-3 rounded-lg font-medium hover:from-amber-400 hover:to-amber-500 transition disabled:opacity-50 min-h-[44px]"
+              >
+                {loading ? "Validando..." : "Confirmar código"}
+              </button>
+              <div className="flex items-center justify-between text-xs">
+                <button
+                  type="button"
+                  onClick={handleResendFirstOTP}
+                  disabled={otpResendCooldown > 0 || loading}
+                  className="text-blue-400 hover:text-blue-300 transition disabled:text-gray-500 disabled:cursor-not-allowed"
+                >
+                  {otpResendCooldown > 0 ? `Reenviar em ${otpResendCooldown}s` : "Reenviar código"}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCancelFirstOTP}
+                  className="text-gray-400 hover:text-white transition"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </form>
+          ) : pending2FA ? (
             // ─── Etapa 2 do login: validação TOTP ───
             <form onSubmit={handleVerify2FA} className="space-y-4">
               <div className="text-center">
@@ -11802,6 +11958,93 @@ function TwoFactorAuthPanel({ user, addToast, reloadData }) {
   );
 }
 
+// Fase 2.4: painel de segurança por empresa. Hoje só tem o toggle de OTP no
+// 1º login (extensível). Lê e grava direto na tabela companies via RLS
+// (admin/gerente da própria empresa têm permissão).
+function CompanySecurityPanel({ companyId, addToast }) {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [requireOTP, setRequireOTP] = useState(false);
+
+  const load = useCallback(async () => {
+    if (!supabase || !companyId) { setLoading(false); return; }
+    try {
+      const { data, error } = await supabase
+        .from("companies")
+        .select("require_first_login_otp")
+        .eq("id", companyId)
+        .maybeSingle();
+      if (!error && data) setRequireOTP(!!data.require_first_login_otp);
+    } catch { /* ignora */ }
+    setLoading(false);
+  }, [companyId]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleToggle = useCallback(async () => {
+    if (!supabase || !companyId || saving) return;
+    setSaving(true);
+    const newValue = !requireOTP;
+    try {
+      const { error } = await supabase
+        .from("companies")
+        .update({ require_first_login_otp: newValue })
+        .eq("id", companyId);
+      if (error) {
+        addToast?.(`Falha ao salvar: ${error.message}`, "error");
+        return;
+      }
+      setRequireOTP(newValue);
+      addToast?.(
+        newValue
+          ? "OTP por email ativado pro 1º login dos novos usuários."
+          : "OTP por email desativado.",
+        "success"
+      );
+    } finally {
+      setSaving(false);
+    }
+  }, [companyId, requireOTP, saving, addToast]);
+
+  if (loading) {
+    return (
+      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+        <div className="text-gray-400 text-sm">Carregando configurações de segurança…</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+      <h3 className="text-lg font-semibold text-white mb-1">Segurança da empresa</h3>
+      <p className="text-gray-400 text-sm mb-4">
+        Configurações que valem pra todos os usuários da empresa.
+      </p>
+
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={requireOTP}
+          onChange={handleToggle}
+          disabled={saving}
+          className="mt-1 w-4 h-4 cursor-pointer"
+        />
+        <span>
+          <span className="block text-sm text-white font-medium">
+            Exigir código por email no primeiro login
+          </span>
+          <span className="block text-xs text-gray-400 mt-1">
+            Quando ativado, todo novo usuário recebe um código de 6 dígitos por email
+            no primeiro login bem-sucedido. Após confirmar uma vez, os próximos logins
+            entram direto. Não substitui 2FA (TOTP) — é uma camada extra de verificação
+            inicial.
+          </span>
+        </span>
+      </label>
+    </div>
+  );
+}
+
 function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
   const [config, setConfig] = useState({
     razaoSocial: "", cnpj: "", telefone: "", email: "", endereco: "",
@@ -12360,6 +12603,11 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
 
       {/* Gerenciamento de Usuários (apenas admin) */}
       <UserManagement currentUser={user} addToast={addToast} />
+
+      {/* Fase 2.4: segurança da empresa (toggle de OTP no 1º login dos membros) */}
+      {(user.role === "admin" || user.role === "gerente") && (
+        <CompanySecurityPanel companyId={user.companyId} addToast={addToast} />
+      )}
 
       {/* 2FA TOTP — ativar/desativar autenticador no próprio user logado */}
       <TwoFactorAuthPanel user={user} addToast={addToast} reloadData={reloadData} />

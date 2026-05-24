@@ -140,6 +140,40 @@ Any new printable artifact should follow the same pattern — don't introduce a 
 
 The app UI is entirely in **Brazilian Portuguese** (pt-BR). All labels, categories, messages, and field names are in Portuguese.
 
+## Email OTP no 1º login (Fase 2.4)
+
+Camada extra de verificação no primeiro login bem-sucedido de cada membro. Opt-in por empresa (toggle em Settings → "Segurança da empresa").
+
+**Fluxo:**
+1. Admin/gerente ativa o toggle `require_first_login_otp` em `CompanySecurityPanel`.
+2. Novo usuário aceita convite + define senha + tenta logar.
+3. `signInWithFallback` OK → `_afterAuth` carrega `member` (com `company_require_first_login_otp` derivado de `companies` table).
+4. LoginScreen `handleSubmit` detecta `member.company_require_first_login_otp && !member.first_login_otp_done` → chama edge `first-login-otp-send` → renderiza tela intermediária de OTP (estado `pendingFirstOTP`).
+5. Edge `first-login-otp-send` gera código 6 dígitos, salva `sha256(code)` em `email_otps` (purpose='first_login', expires_at=+10min), chama `send-email` (Resend) com template pt-BR.
+6. Usuário digita código → `verifyFirstLoginOTP(code)` → edge `first-login-otp-verify` compara hash, incrementa `attempts`, na 5ª errada esgota o OTP e força lockout local 15min.
+7. Sucesso: marca `consumed_at` no OTP + `company_members.first_login_otp_done=true` → próximos logins pulam o passo.
+
+**Tabelas/colunas (migração `fase_2_4_email_otp`):**
+- `companies.require_first_login_otp boolean` (default false)
+- `company_members.first_login_otp_done boolean` (default false)
+- `email_otps` (id, user_id, company_id, code_hash, purpose, expires_at, attempts, consumed_at, created_at) — RLS ativa sem policies (acesso só via edge functions com service_role)
+
+**Edge functions novas:**
+- `send-email` — wrapper Resend reusável (verify_jwt=false; checa `INTERNAL_FUNCTION_SECRET` opcional)
+- `first-login-otp-send` — verify_jwt=true; cooldown 60s; invalida OTP anteriores; chama `send-email`
+- `first-login-otp-verify` — verify_jwt=true; SHA-256 do código; max 5 tentativas; promove flag no sucesso
+
+**Setup obrigatório:**
+- `supabase secrets set RESEND_API_KEY=re_xxx` (ou via dashboard → Functions → Secrets)
+- (Opcional) `INTERNAL_FUNCTION_SECRET` se quiser blindar `send-email` contra abuso externo
+- Sender email fixo: `noreply@app.frosterp.com.br` (precisa domínio verificado em Resend)
+
+**Master tier:** ignorado. Master não passa por `company_members`.
+
+Helpers em `src/supabase.js`:
+- `sendFirstLoginOTP()` → `{ ok, expires_at?, retry_in?, error? }`
+- `verifyFirstLoginOTP(code)` → `{ ok, attempts_left?, locked?, error? }`
+
 ## Convite por email (Fase 2.3)
 
 Admin cria usuário sem digitar senha — sistema envia convite por email pra que o convidado defina a própria senha. Mais seguro: admin nunca vê senha do convidado.
@@ -199,6 +233,9 @@ Pasta `supabase/functions/`. Deploy com `supabase functions deploy <nome>`.
 | `admin-create-user` | true       | Cria/atualiza/convida user da empresa (auth.users + company_members)     |
 | `pos-venda-dispatch`| —          | Cron pós-venda                                                           |
 | `whatsapp-webhook`  | —          | Webhook WhatsApp → IA                                                    |
+| `send-email`        | false      | Helper Resend (chamado server-to-server por outras edge functions)       |
+| `first-login-otp-send`   | true  | Fase 2.4 — gera OTP 6 dígitos e dispara email                            |
+| `first-login-otp-verify` | true  | Fase 2.4 — valida código + promove `first_login_otp_done`                |
 
 ### admin-create-user — provisionamento de usuário
 
