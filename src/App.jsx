@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, clearRecoveryUrl } from "./supabase.js";
+import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -16,6 +16,8 @@ import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, c
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
 // Geração de PDF client-side dos documentos de OS/orçamento para envio via WhatsApp
 import html2pdf from "html2pdf.js";
+// QR Code para enrollment do 2FA TOTP (escaneado por Google Authenticator/Authy/1Password)
+import QRCode from "qrcode";
 
 // ─── ErrorBoundary por módulo ────────────────────────────────────────────────
 // Sem isto, qualquer crash em um módulo (Recharts com dado malformado, OS legada
@@ -2410,11 +2412,15 @@ function ForgotPasswordDialog({ initialEmail = "", onClose }) {
 // Renderizada quando app detecta URL de recovery do Supabase (?type=recovery).
 // Supabase já hidratou a sessão temporária via detectSessionInUrl; basta
 // chamar supabase.auth.updateUser({ password }).
-function ResetPasswordScreen({ onDone, addToast }) {
+// mode: "recovery" (esqueci senha — Fase 2.2) | "invite" (1º acesso por convite — Fase 2.3).
+// Ambos terminam chamando supabase.auth.updateUser({password}) — só muda copy.
+function ResetPasswordScreen({ onDone, addToast, mode = "recovery" }) {
   const [pwd, setPwd] = useState("");
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  const isInvite = mode === "invite";
 
   const handleSave = async () => {
     setError("");
@@ -2425,11 +2431,16 @@ function ResetPasswordScreen({ onDone, addToast }) {
     const r = await updatePasswordWithRecoveryToken(pwd);
     setBusy(false);
     if (!r.ok) {
-      setError(r.error || "Falha ao atualizar senha. Link pode ter expirado.");
+      setError(r.error || "Falha ao definir senha. Link pode ter expirado.");
       return;
     }
     clearRecoveryUrl();
-    addToast?.("Senha atualizada! Faça login com a nova senha.", "success");
+    addToast?.(
+      isInvite
+        ? "Conta ativada! Faça login com sua nova senha."
+        : "Senha atualizada! Faça login com a nova senha.",
+      "success"
+    );
     onDone?.();
   };
 
@@ -2438,10 +2449,14 @@ function ResetPasswordScreen({ onDone, addToast }) {
       <div className="w-full max-w-md">
         <div className="bg-gray-800 rounded-2xl shadow-2xl border border-gray-700 p-8">
           <div className="text-center mb-6">
-            <div className="text-4xl mb-2">🔐</div>
-            <h2 className="text-xl font-bold text-white">Definir Nova Senha</h2>
+            <div className="text-4xl mb-2">{isInvite ? "👋" : "🔐"}</div>
+            <h2 className="text-xl font-bold text-white">
+              {isInvite ? "Bem-vindo ao FrostERP" : "Definir Nova Senha"}
+            </h2>
             <p className="text-gray-400 text-sm mt-2">
-              Crie uma senha forte para sua conta.
+              {isInvite
+                ? "Defina uma senha para acessar sua conta. Depois disso, use seu email + essa senha para entrar."
+                : "Crie uma senha forte para sua conta."}
             </p>
           </div>
           <div className="space-y-4">
@@ -2475,7 +2490,11 @@ function ResetPasswordScreen({ onDone, addToast }) {
               disabled={busy}
               className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50"
             >
-              {busy ? "Salvando..." : "Definir nova senha"}
+              {busy
+                ? "Salvando..."
+                : isInvite
+                  ? "Ativar conta"
+                  : "Definir nova senha"}
             </button>
           </div>
         </div>
@@ -2644,12 +2663,17 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
         }
       }
       // Se Supabase Auth passou mas o user legado não foi achado (ex: cadastro novo
-      // sem PBKDF2 ainda), gera um user a partir do company_member.
+      // sem PBKDF2 ainda, ou convidado Fase 2.3 sem senha local), gera um user a
+      // partir do company_member e persiste em erp:user:* pra sincronizar status
+      // ativo de volta no kv_store (admin verá "Ativo" no UserManagement).
       if (!found) {
         const member = getCurrentMember();
         if (member) {
+          const memberLegacyId = member.legacy_user_id || member.user_id;
+          const existingLocal = DB.get("erp:user:" + memberLegacyId);
           found = {
-            id: member.legacy_user_id || member.user_id,
+            ...(existingLocal || {}),
+            id: memberLegacyId,
             nome: member.nome || normalizedEmail,
             email: normalizedEmail,
             avatar: member.avatar || (member.nome || "?").slice(0, 2).toUpperCase(),
@@ -2658,7 +2682,13 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
             companyId: member.company_id,
             customPermissions: member.custom_permissions || null,
             isSuperAdmin: !!member.is_super_admin,
+            authUserId: member.user_id,
           };
+          // Persiste — se era convidado (status pendente local + sem password),
+          // agora vira ativo no kv_store.
+          if (!existingLocal || existingLocal.status !== "ativo") {
+            DB.set("erp:user:" + found.id, found);
+          }
         }
       }
 
@@ -10754,16 +10784,9 @@ function UserManagement({ currentUser, addToast }) {
     if (dup) { addToast("Já existe um usuário com este email.", "error"); return; }
 
     if (!editing) {
-      // Criação exige senha forte (política endurecida — Fase 2.1)
-      const ps = validatePasswordStrength(form.password);
-      if (!ps.ok) {
-        addToast(`Senha fraca: ${ps.reasons[0]}`, "error"); return;
-      }
-      if (form.password !== form.confirmPassword) {
-        addToast("As senhas não conferem.", "error"); return;
-      }
-      // Limite de usuários por empresa (definido pelo Master).
-      // Considera apenas usuários ativos no scope da company atual.
+      // Criação Fase 2.3: admin não digita senha. Convite por email é o único
+      // caminho — usuário recebe link e define própria senha. Limite de usuários
+      // por empresa (definido pelo Master) considera pendentes + ativos.
       if (currentUser?.companyId) {
         const company = DB.get("erp:company:" + currentUser.companyId);
         const limit = company?.maxUsuarios || 0;
@@ -10831,46 +10854,49 @@ function UserManagement({ currentUser, addToast }) {
       DB.set("erp:user:" + updated.id, updated);
       addToast("Usuário atualizado.", "success");
     } else {
+      // Fase 2.3: criação por convite — sem senha local. Usuário recebe email do
+      // Supabase, clica link, define própria senha. status='pendente' até aceitar.
+      if (!companyId) {
+        addToast("Sem empresa ativa — usuário não pode ser criado.", "error");
+        return;
+      }
       const newUser = {
         id: genId(),
         nome,
         email: emailNorm,
-        password: await hashPassword(form.password),
+        // password vazio: login será via Supabase Auth (depois que aceitar convite).
+        // Compatibilidade com legacy hashPassword: campo existe mas vazio.
+        password: "",
         role: form.role,
-        status: form.status,
+        status: "pendente",
         avatar: nome.slice(0, 2).toUpperCase(),
         createdAt: new Date().toISOString(),
         forcePasswordChange: false,
         sessionTokenHash: null,
         customPermissions: form.useCustomPermissions ? form.customPermissions : null,
         comissaoPercentual: comissaoNum,
+        invitedAt: new Date().toISOString(),
       };
-      // Provisiona em auth.users + company_members via edge function antes de
-      // salvar local. Sem isso, o novo usuário não consegue logar (signInWithPassword
-      // retorna 400 porque não existe em auth.users).
-      if (!companyId) {
-        addToast("Sem empresa ativa — usuário não pode ser criado.", "error");
-        return;
-      }
+      const redirectTo = `${window.location.origin}/?type=invite`;
       const provision = await adminCreateUser({
-        mode: "create",
+        mode: "invite",
         legacy_user_id: newUser.id,
         email: emailNorm,
-        password: form.password,
         nome,
         role: form.role,
         company_id: companyId,
         custom_permissions: newUser.customPermissions,
         comissao_percentual: comissaoNum,
         avatar: newUser.avatar,
+        redirect_to: redirectTo,
       });
       if (!provision.ok) {
-        addToast(`Falha ao criar usuário no Auth: ${provision.error}`, "error");
+        addToast(`Falha ao enviar convite: ${provision.error}`, "error");
         return;
       }
       newUser.authUserId = provision.auth_user_id;
       DB.set("erp:user:" + newUser.id, newUser);
-      addToast("Usuário criado.", "success");
+      addToast(`Convite enviado para ${emailNorm}.`, "success");
     }
 
     setModalOpen(false);
@@ -10976,7 +11002,7 @@ function UserManagement({ currentUser, addToast }) {
                     : "Padrão do papel"}
                 </td>
                 <td className="px-3 py-2">
-                  <StatusBadge status={u.status === "ativo" ? "ativo" : "inativo"} />
+                  <StatusBadge status={u.status === "ativo" ? "ativo" : u.status === "pendente" ? "pendente" : "inativo"} />
                 </td>
                 <td className="px-3 py-2 text-right whitespace-nowrap">
                   <button
@@ -11034,30 +11060,40 @@ function UserManagement({ currentUser, addToast }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">
-                Senha {editing && <span className="text-xs text-gray-500">(deixe vazio para manter)</span>}
-              </label>
-              <PasswordInput name="password"
-                autoComplete="new-password"
-                value={form.password}
-                onChange={(e) => setForm({ ...form, password: e.target.value })}
-                placeholder="12+ chars, A-z, 0-9, símbolo"
-                strengthMeter
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-              />
+          {/* Senha: só aparece em edição (admin pode redefinir senha de quem já aceitou convite).
+              Na criação, o usuário recebe convite por email e define própria senha. */}
+          {editing ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                  Senha <span className="text-xs text-gray-500">(deixe vazio para manter)</span>
+                </label>
+                <PasswordInput name="password"
+                  autoComplete="new-password"
+                  value={form.password}
+                  onChange={(e) => setForm({ ...form, password: e.target.value })}
+                  placeholder="12+ chars, A-z, 0-9, símbolo"
+                  strengthMeter
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar senha</label>
+                <PasswordInput name="confirmPassword"
+                  autoComplete="new-password"
+                  value={form.confirmPassword}
+                  onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar senha</label>
-              <PasswordInput name="confirmPassword"
-                autoComplete="new-password"
-                value={form.confirmPassword}
-                onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })}
-                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
-              />
+          ) : (
+            <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg px-4 py-3 text-sm text-blue-200">
+              <strong>📬 Convite por email.</strong>{" "}
+              O usuário receberá um link no email para definir a própria senha — você não digita senha.
+              Status fica <em>pendente</em> até ele aceitar.
             </div>
-          </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -11143,7 +11179,7 @@ function UserManagement({ currentUser, addToast }) {
               Cancelar
             </button>
             <button onClick={handleSave} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700">
-              {editing ? "Salvar alterações" : "Criar usuário"}
+              {editing ? "Salvar alterações" : "Enviar convite"}
             </button>
           </div>
         </div>
@@ -11421,6 +11457,332 @@ function AutoBackupPanel({ addToast }) {
         Backup contém clientes, OS, agenda, funcionários, finanças, configuração e usuários (sem senhas).
         Use o exportar manual em "Backup &amp; Restore" pra restaurar.
       </p>
+    </div>
+  );
+}
+
+// ─── Painel 2FA TOTP (Settings) ─────────────────────────────────────────────
+// Permite ao usuário logado ativar/desativar Two-Factor Authentication usando
+// app autenticador (Google Authenticator/Authy/1Password) via TOTP RFC 6238.
+// Fluxo enroll: gera secret → renderiza QR + chave texto → usuário escaneia →
+// digita código atual → valida → gera 8 backup codes (single-use, exibidos UMA VEZ).
+// Fluxo disable: pede código TOTP atual pra confirmar → zera campos no user.
+// Backup codes: regenerar requer código TOTP. Lista mostra apenas a contagem
+// restante (códigos consumidos no login).
+//
+// Persistência: campos `twoFactorEnabled`, `twoFactorSecret`, `twoFactorBackupCodes`
+// gravados em `erp:user:<id>`. `USER_SECRET_FIELDS` em supabase.js já strip
+// `twoFactorSecret`/`twoFactorBackupCodes` no upload — secrets só no device.
+function TwoFactorAuthPanel({ user, addToast, reloadData }) {
+  // Lê snapshot fresco do user no DB (prop `user` pode estar stale após enable/disable)
+  const freshUser = useMemo(() => DB.get("erp:user:" + user.id) || user, [user, user.id]);
+  const enabled = !!(freshUser.twoFactorEnabled && freshUser.twoFactorSecret);
+  const backupCount = Array.isArray(freshUser.twoFactorBackupCodes) ? freshUser.twoFactorBackupCodes.length : 0;
+
+  const [mode, setMode] = useState("idle"); // idle | enrolling | disabling | regenerating
+  const [secret, setSecret] = useState(null);
+  const [qrDataUrl, setQrDataUrl] = useState(null);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  // Backup codes mostrados UMA VEZ após enroll/regen. Limpos quando user fecha.
+  const [revealedBackupCodes, setRevealedBackupCodes] = useState(null);
+
+  // Gera 8 backup codes de 8 chars cada (alfanumérico maiúsculo). 8^36 ~ keyspace suficiente.
+  const generateBackupCodes = useCallback(() => {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // sem 0/O/1/I pra legibilidade
+    const codes = [];
+    for (let i = 0; i < 8; i++) {
+      const bytes = crypto.getRandomValues(new Uint8Array(8));
+      let c = "";
+      for (let j = 0; j < 8; j++) c += chars[bytes[j] % chars.length];
+      codes.push(c);
+    }
+    return codes;
+  }, []);
+
+  // Inicia enrollment: gera secret + QR code
+  const startEnroll = useCallback(async () => {
+    setError("");
+    setBusy(true);
+    try {
+      const newSecret = generateTotpSecret();
+      const cfg = DB.get("erp:config") || {};
+      const issuer = (cfg.nomeEmpresa || cfg.razaoSocial || "FrostERP").slice(0, 40);
+      const accountName = freshUser.email || freshUser.nome || "usuario";
+      const uri = buildOtpAuthUri({ issuer, accountName, secret: newSecret });
+      const dataUrl = await QRCode.toDataURL(uri, { margin: 1, width: 220 });
+      setSecret(newSecret);
+      setQrDataUrl(dataUrl);
+      setMode("enrolling");
+    } catch (err) {
+      console.error("[2fa] erro ao gerar QR", err);
+      setError("Erro ao gerar QR code. Tente novamente.");
+    } finally {
+      setBusy(false);
+    }
+  }, [freshUser, generateTotpSecret]);
+
+  // Confirma enrollment: valida código + persiste secret + gera backup codes
+  const confirmEnroll = useCallback(async () => {
+    setError("");
+    if (code.length !== 6) { setError("Digite o código de 6 dígitos do app autenticador."); return; }
+    setBusy(true);
+    try {
+      const ok = await verifyTotp(secret, code);
+      if (!ok) { setError("Código inválido. Verifique o horário do dispositivo."); return; }
+      const backupCodes = generateBackupCodes();
+      const updated = {
+        ...freshUser,
+        twoFactorEnabled: true,
+        twoFactorSecret: secret,
+        twoFactorBackupCodes: backupCodes,
+        twoFactorEnabledAt: new Date().toISOString(),
+      };
+      DB.set("erp:user:" + freshUser.id, updated);
+      setRevealedBackupCodes(backupCodes);
+      setMode("idle");
+      setSecret(null);
+      setQrDataUrl(null);
+      setCode("");
+      addToast("2FA ativado com sucesso!", "success");
+      if (typeof reloadData === "function") reloadData();
+    } finally {
+      setBusy(false);
+    }
+  }, [code, secret, freshUser, addToast, reloadData, generateBackupCodes]);
+
+  // Desativa 2FA: precisa código TOTP válido pra evitar que invasor casual desative
+  const confirmDisable = useCallback(async () => {
+    setError("");
+    if (code.length !== 6) { setError("Digite o código TOTP atual pra confirmar."); return; }
+    setBusy(true);
+    try {
+      const ok = await verifyTotp(freshUser.twoFactorSecret, code);
+      if (!ok) { setError("Código inválido."); return; }
+      const updated = { ...freshUser };
+      delete updated.twoFactorEnabled;
+      delete updated.twoFactorSecret;
+      delete updated.twoFactorBackupCodes;
+      delete updated.twoFactorEnabledAt;
+      DB.set("erp:user:" + freshUser.id, updated);
+      setMode("idle");
+      setCode("");
+      addToast("2FA desativado.", "info");
+      if (typeof reloadData === "function") reloadData();
+    } finally {
+      setBusy(false);
+    }
+  }, [code, freshUser, addToast, reloadData]);
+
+  // Regenera backup codes: precisa código TOTP. Lista antiga invalidada.
+  const confirmRegenerate = useCallback(async () => {
+    setError("");
+    if (code.length !== 6) { setError("Digite o código TOTP atual."); return; }
+    setBusy(true);
+    try {
+      const ok = await verifyTotp(freshUser.twoFactorSecret, code);
+      if (!ok) { setError("Código inválido."); return; }
+      const backupCodes = generateBackupCodes();
+      const updated = { ...freshUser, twoFactorBackupCodes: backupCodes };
+      DB.set("erp:user:" + freshUser.id, updated);
+      setRevealedBackupCodes(backupCodes);
+      setMode("idle");
+      setCode("");
+      addToast("Novos códigos de recuperação gerados. Os antigos não funcionam mais.", "success");
+      if (typeof reloadData === "function") reloadData();
+    } finally {
+      setBusy(false);
+    }
+  }, [code, freshUser, addToast, reloadData, generateBackupCodes]);
+
+  const cancelFlow = useCallback(() => {
+    setMode("idle");
+    setSecret(null);
+    setQrDataUrl(null);
+    setCode("");
+    setError("");
+  }, []);
+
+  // Copia backup codes pro clipboard (txt) — usuário pode colar num arquivo seguro
+  const copyBackupCodes = useCallback(() => {
+    if (!revealedBackupCodes) return;
+    const txt = revealedBackupCodes.join("\n");
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(txt).then(
+        () => addToast("Códigos copiados.", "success"),
+        () => addToast("Falha ao copiar.", "error")
+      );
+    }
+  }, [revealedBackupCodes, addToast]);
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <div>
+          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
+            🔐 Autenticação em 2 etapas (2FA)
+            {enabled && (
+              <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">Ativo</span>
+            )}
+          </h3>
+          <p className="text-gray-400 text-sm mt-0.5">
+            Protege o login mesmo se sua senha vazar. Requer app autenticador (Google Authenticator, Authy, 1Password).
+          </p>
+        </div>
+      </div>
+
+      {/* Códigos de backup recém-gerados — exibidos UMA VEZ */}
+      {revealedBackupCodes && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-4 mb-4">
+          <p className="text-sm font-medium text-amber-200 mb-2">⚠️ Códigos de recuperação — guarde agora!</p>
+          <p className="text-xs text-amber-300/80 mb-3">
+            Cada código funciona UMA VEZ pra entrar caso você perca acesso ao app autenticador. Não serão exibidos novamente.
+          </p>
+          <div className="grid grid-cols-2 gap-2 font-mono text-sm text-amber-100 bg-gray-900/60 rounded p-3">
+            {revealedBackupCodes.map((c, i) => (
+              <div key={i} className="tracking-wider">{c}</div>
+            ))}
+          </div>
+          <div className="flex gap-2 mt-3">
+            <button onClick={copyBackupCodes} className="px-3 py-1.5 text-xs rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition">
+              Copiar todos
+            </button>
+            <button onClick={() => setRevealedBackupCodes(null)} className="px-3 py-1.5 text-xs rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition">
+              Já anotei, fechar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Estado: não ativado, idle */}
+      {!enabled && mode === "idle" && !revealedBackupCodes && (
+        <button onClick={startEnroll} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition disabled:opacity-50">
+          Ativar 2FA
+        </button>
+      )}
+
+      {/* Estado: enrolling — mostra QR + secret + input de código */}
+      {mode === "enrolling" && qrDataUrl && (
+        <div className="space-y-4">
+          <ol className="text-sm text-gray-300 list-decimal list-inside space-y-1">
+            <li>Abra seu app autenticador (Google Authenticator, Authy, 1Password).</li>
+            <li>Escaneie o QR code abaixo OU digite a chave manualmente.</li>
+            <li>Digite o código de 6 dígitos gerado pelo app pra confirmar.</li>
+          </ol>
+          <div className="flex flex-col sm:flex-row gap-4 items-center sm:items-start">
+            <div className="bg-white p-2 rounded-lg">
+              <img src={qrDataUrl} alt="QR Code 2FA" className="w-[220px] h-[220px]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs text-gray-400 uppercase mb-1">Chave manual (caso não consiga escanear)</p>
+              <code className="block bg-gray-900/60 border border-gray-700 rounded p-2 text-xs text-gray-200 font-mono break-all">
+                {secret}
+              </code>
+              <p className="text-xs text-gray-500 mt-2">Algoritmo: SHA-1 • 6 dígitos • 30s</p>
+            </div>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">Código de verificação</label>
+            <input
+              type="text"
+              inputMode="numeric"
+              pattern="[0-9]{6}"
+              maxLength={6}
+              autoFocus
+              value={code}
+              onChange={(e) => { setCode(e.target.value.replace(/\D/g, "")); setError(""); }}
+              placeholder="000000"
+              className="w-full sm:w-48 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white text-center text-2xl tracking-widest font-mono focus:outline-none focus:border-blue-500 transition"
+            />
+          </div>
+          {error && <p className="text-sm text-red-400">{error}</p>}
+          <div className="flex gap-2">
+            <button onClick={confirmEnroll} disabled={busy || code.length !== 6} className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition disabled:opacity-50">
+              {busy ? "Verificando..." : "Confirmar e ativar"}
+            </button>
+            <button onClick={cancelFlow} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Estado: ativado, idle */}
+      {enabled && mode === "idle" && (
+        <div className="space-y-3">
+          <div className="text-sm text-gray-300">
+            <p>🛡️ 2FA está ativo. Você precisa do código do app autenticador a cada login.</p>
+            <p className="text-xs text-gray-500 mt-1">
+              Códigos de recuperação restantes: <strong className="text-gray-300">{backupCount}/8</strong>
+              {backupCount < 3 && backupCount > 0 && <span className="text-amber-400"> — gere novos códigos!</span>}
+              {backupCount === 0 && <span className="text-red-400"> — sem códigos! Gere novos.</span>}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => { setMode("regenerating"); setCode(""); setError(""); }} className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition">
+              Gerar novos códigos de recuperação
+            </button>
+            <button onClick={() => { setMode("disabling"); setCode(""); setError(""); }} className="px-3 py-1.5 text-sm rounded-lg bg-red-600/80 hover:bg-red-600 text-white transition">
+              Desativar 2FA
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Estado: disabling — confirma com código TOTP */}
+      {mode === "disabling" && (
+        <div className="space-y-3 border-t border-gray-700 pt-4 mt-3">
+          <p className="text-sm text-gray-300">Pra desativar, digite o código atual do seu app autenticador:</p>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]{6}"
+            maxLength={6}
+            autoFocus
+            value={code}
+            onChange={(e) => { setCode(e.target.value.replace(/\D/g, "")); setError(""); }}
+            placeholder="000000"
+            className="w-full sm:w-48 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white text-center text-2xl tracking-widest font-mono focus:outline-none focus:border-red-500 transition"
+          />
+          {error && <p className="text-sm text-red-400">{error}</p>}
+          <div className="flex gap-2">
+            <button onClick={confirmDisable} disabled={busy || code.length !== 6} className="px-4 py-2 text-sm rounded-lg bg-red-600 hover:bg-red-700 text-white transition disabled:opacity-50">
+              {busy ? "Verificando..." : "Confirmar desativação"}
+            </button>
+            <button onClick={cancelFlow} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Estado: regenerating backup codes — confirma com código TOTP */}
+      {mode === "regenerating" && (
+        <div className="space-y-3 border-t border-gray-700 pt-4 mt-3">
+          <p className="text-sm text-gray-300">Pra gerar novos códigos (e invalidar os antigos), digite o código TOTP atual:</p>
+          <input
+            type="text"
+            inputMode="numeric"
+            pattern="[0-9]{6}"
+            maxLength={6}
+            autoFocus
+            value={code}
+            onChange={(e) => { setCode(e.target.value.replace(/\D/g, "")); setError(""); }}
+            placeholder="000000"
+            className="w-full sm:w-48 bg-gray-700 border border-gray-600 rounded-lg px-4 py-3 text-white text-center text-2xl tracking-widest font-mono focus:outline-none focus:border-blue-500 transition"
+          />
+          {error && <p className="text-sm text-red-400">{error}</p>}
+          <div className="flex gap-2">
+            <button onClick={confirmRegenerate} disabled={busy || code.length !== 6} className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition disabled:opacity-50">
+              {busy ? "Verificando..." : "Gerar novos códigos"}
+            </button>
+            <button onClick={cancelFlow} disabled={busy} className="px-4 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition">
+              Cancelar
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -11983,6 +12345,9 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
 
       {/* Gerenciamento de Usuários (apenas admin) */}
       <UserManagement currentUser={user} addToast={addToast} />
+
+      {/* 2FA TOTP — ativar/desativar autenticador no próprio user logado */}
+      <TwoFactorAuthPanel user={user} addToast={addToast} reloadData={reloadData} />
 
       {/* Auditoria por empresa — admin pode revisar mutações de OS, clientes,
           funcionários, finanças e usuários (quem fez, o quê, quando) */}
@@ -14883,14 +15248,17 @@ export default function App() {
     );
   }
 
-  // Fase 2.2: detecta URL de recovery do Supabase Auth (?type=recovery)
-  // e renderiza tela de redefinição. Após sucesso, volta ao login normal.
-  if (!user && isRecoveryUrl()) {
+  // Fase 2.2/2.3: detecta URL de recovery (?type=recovery) OU convite (?type=invite)
+  // do Supabase Auth. Mesma tela ResetPasswordScreen — só muda o título/copy via prop.
+  // Após sucesso, volta ao login normal.
+  if (!user && (isRecoveryUrl() || isInviteUrl())) {
+    const inviteMode = isInviteUrl();
     return (
       <>
         <StyleSheet />
         <ToastContainer toasts={toasts} removeToast={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
         <ResetPasswordScreen
+          mode={inviteMode ? "invite" : "recovery"}
           addToast={addToast}
           onDone={() => {
             // Limpa hash/query e força re-render — LoginScreen aparece em seguida

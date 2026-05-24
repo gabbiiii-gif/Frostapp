@@ -18,16 +18,17 @@
 //
 // Payload (POST JSON):
 //   {
-//     mode: "create" | "update_password",
+//     mode: "create" | "update_password" | "invite",
 //     legacy_user_id: string,        // id do erp:user no kv_store
 //     email: string,
-//     password: string,
+//     password: string,              // ignorado em mode=invite
 //     nome: string,
 //     role: "admin" | "gerente" | "tecnico" | "atendente",
 //     company_id: string,            // empresa alvo
 //     custom_permissions: string[] | null,
 //     comissao_percentual: number | null,
-//     avatar: string | null
+//     avatar: string | null,
+//     redirect_to: string | null     // só usado em mode=invite (URL pra qual o email aponta)
 //   }
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
@@ -93,12 +94,15 @@ Deno.serve(async (req: Request) => {
     ? null
     : Number(body.comissao_percentual);
   const avatar = body.avatar ? String(body.avatar) : null;
+  const redirectTo = body.redirect_to ? String(body.redirect_to) : null;
 
-  if (!email || !password || !companyId) {
+  if (!email || !companyId) {
     return json({ ok: false, error: "missing_fields" }, 400);
   }
-  if (password.length < 8) {
-    return json({ ok: false, error: "weak_password" }, 400);
+  // Convite não precisa de senha; create/update_password precisam.
+  if (mode !== "invite") {
+    if (!password) return json({ ok: false, error: "missing_fields" }, 400);
+    if (password.length < 8) return json({ ok: false, error: "weak_password" }, 400);
   }
 
   const admin = createClient(SUPABASE_URL, SERVICE_KEY, {
@@ -143,21 +147,42 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true, auth_user_id: target.id });
   }
 
-  // mode === "create"
-  // 1. Cria user em auth.users (email já confirmado — admin provisionou)
-  const { data: created, error: createErr } = await admin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-    user_metadata: { nome, role, legacy_user_id: legacyUserId },
-  });
-  if (createErr || !created?.user) {
-    console.error("admin-create-user createUser:", createErr?.message);
-    return json({ ok: false, error: createErr?.message || "create_failed" }, 400);
+  // mode === "create" | "invite"
+  // 1. Cria user em auth.users.
+  //    - create: senha definida pelo admin, email já confirmado.
+  //    - invite: sem senha; Supabase manda email com link recovery pro técnico
+  //      definir própria senha (mais seguro — admin nunca vê senha do convidado).
+  let newAuthUserId: string;
+  if (mode === "invite") {
+    const inviteOpts: Record<string, unknown> = {
+      data: { nome, role, legacy_user_id: legacyUserId },
+    };
+    if (redirectTo) inviteOpts.redirectTo = redirectTo;
+    const { data: invited, error: inviteErr } = await admin.auth.admin
+      .inviteUserByEmail(email, inviteOpts);
+    if (inviteErr || !invited?.user) {
+      console.error("admin-create-user inviteUser:", inviteErr?.message);
+      return json({ ok: false, error: inviteErr?.message || "invite_failed" }, 400);
+    }
+    newAuthUserId = invited.user.id;
+  } else {
+    const { data: created, error: createErr } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { nome, role, legacy_user_id: legacyUserId },
+    });
+    if (createErr || !created?.user) {
+      console.error("admin-create-user createUser:", createErr?.message);
+      return json({ ok: false, error: createErr?.message || "create_failed" }, 400);
+    }
+    newAuthUserId = created.user.id;
   }
-  const newAuthUserId = created.user.id;
 
-  // 2. Cria company_members vinculando ao tenant
+  // 2. Cria company_members vinculando ao tenant.
+  //    Convidados ficam status='pendente' até aceitar (definir senha pelo email).
+  //    Helper SQL update_member_active_on_signin (ou trigger client-side) promove
+  //    pra 'ativo' no primeiro login bem-sucedido.
   const memberRow = {
     user_id: newAuthUserId,
     company_id: companyId,
@@ -165,7 +190,7 @@ Deno.serve(async (req: Request) => {
     is_super_admin: false,
     legacy_user_id: legacyUserId || null,
     custom_permissions: customPermissions,
-    status: "ativo",
+    status: mode === "invite" ? "pendente" : "ativo",
     nome,
     avatar,
     comissao_percentual: comissaoPercentual,

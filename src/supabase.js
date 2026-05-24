@@ -130,6 +130,16 @@ async function _afterAuth(session) {
   if (error || !member) {
     return { ok: false, error: 'Usuário sem vínculo com empresa. Contate o administrador.' };
   }
+  // Fase 2.3: convidado que acabou de aceitar (definir senha + login) entra com
+  // status='pendente'. Como autenticou com sucesso, promove para 'ativo'.
+  if (member.status === 'pendente') {
+    const { error: upErr } = await supabase
+      .from('company_members')
+      .update({ status: 'ativo' })
+      .eq('user_id', session.user.id)
+      .eq('company_id', member.company_id);
+    if (!upErr) member.status = 'ativo';
+  }
   if (member.status && member.status !== 'ativo') {
     await supabase.auth.signOut();
     return { ok: false, error: 'Usuário inativo.' };
@@ -189,7 +199,20 @@ export function isRecoveryUrl() {
   return false;
 }
 
-// Remove os params/hash de recovery após reset bem-sucedido
+// Detecta se a URL veio do flow de convite (admin.auth.admin.inviteUserByEmail).
+// Supabase usa o mesmo template recovery pra convite mas adiciona type=invite no
+// link. Usado pelo top-level pra mostrar tela de "definir senha inicial" em vez
+// de "redefinir senha".
+export function isInviteUrl() {
+  if (typeof window === 'undefined') return false;
+  const qs = new URLSearchParams(window.location.search);
+  if (qs.get('type') === 'invite') return true;
+  const hash = window.location.hash || '';
+  if (hash.includes('type=invite')) return true;
+  return false;
+}
+
+// Remove os params/hash de recovery/invite após sucesso
 export function clearRecoveryUrl() {
   if (typeof window === 'undefined') return;
   const u = new URL(window.location.href);

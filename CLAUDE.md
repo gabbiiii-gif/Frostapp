@@ -140,6 +140,33 @@ Any new printable artifact should follow the same pattern — don't introduce a 
 
 The app UI is entirely in **Brazilian Portuguese** (pt-BR). All labels, categories, messages, and field names are in Portuguese.
 
+## Convite por email (Fase 2.3)
+
+Admin cria usuário sem digitar senha — sistema envia convite por email pra que o convidado defina a própria senha. Mais seguro: admin nunca vê senha do convidado.
+
+**Fluxo:**
+1. Admin abre Settings → Usuários → "+ Novo Usuário".
+2. Form mostra apenas Nome, Email, Papel, Permissões (sem campo de senha — banner azul explica o convite).
+3. Ao salvar, frontend chama `adminCreateUser({ mode: "invite", redirect_to, ... })`.
+4. Edge function `admin-create-user` (branch invite) chama `admin.auth.admin.inviteUserByEmail(email, { data, redirectTo })`.
+5. Supabase envia email com link `https://app/?type=invite#access_token=...`.
+6. `company_members` é criado com `status='pendente'`.
+7. Convidado clica link → app detecta `isInviteUrl()` → renderiza `ResetPasswordScreen` com `mode="invite"` (título "Bem-vindo ao FrostERP", botão "Ativar conta").
+8. Convidado define senha → `updatePasswordWithRecoveryToken` → redirect ao login.
+9. No primeiro login bem-sucedido, `_afterAuth` em `src/supabase.js` promove `company_members.status` de `pendente` → `ativo`. Local `erp:user:*` é sincronizado quando o convidado loga.
+
+**Setup obrigatório no Supabase Dashboard:**
+- Auth → URL Configuration → **Redirect URLs**: adicionar `https://SEU_DOMINIO/*` (já feito na Fase 2.2 — vale também pra invite).
+- Auth → Email Templates → "Invite User" pode ser customizado em pt-BR. Variáveis: `{{ .ConfirmationURL }}`.
+
+**Edição de usuário existente:** form continua mostrando os campos de senha (admin pode redefinir senha de usuário já ativo). Usa `mode: "update_password"` da própria edge function.
+
+**Status `pendente`:** aparece na listagem de Settings → Usuários como badge amarela. Conta no limite de usuários por empresa (`maxUsuarios`). Admin pode excluir usuário pendente que nunca aceitou.
+
+Helpers em `src/supabase.js`:
+- `isInviteUrl()` → boolean (checa query `?type=invite` ou hash)
+- `clearRecoveryUrl()` → limpa query/hash após aceite
+
 ## Recuperação de senha (Fase 2.2)
 
 Usa Supabase Auth nativo (`resetPasswordForEmail` + `updateUser`). Sem edge function adicional.
@@ -169,7 +196,7 @@ Pasta `supabase/functions/`. Deploy com `supabase functions deploy <nome>`.
 | ------------------- | ---------- | ------------------------------------------------------------------------ |
 | `master-login`      | false      | Valida credencial master via service_role (PBKDF2)                       |
 | `migrate-login`     | false      | Migra user legacy → auth.users (deployed externamente, fora do repo)     |
-| `admin-create-user` | true       | Cria/atualiza user da empresa (auth.users + company_members)             |
+| `admin-create-user` | true       | Cria/atualiza/convida user da empresa (auth.users + company_members)     |
 | `pos-venda-dispatch`| —          | Cron pós-venda                                                           |
 | `whatsapp-webhook`  | —          | Webhook WhatsApp → IA                                                    |
 
@@ -177,13 +204,14 @@ Pasta `supabase/functions/`. Deploy com `supabase functions deploy <nome>`.
 
 `UserManagement` precisa chamar essa function ao criar (ou trocar senha de) usuário. Salvar só em `erp:user:*` deixa o registro órfão (login falha com 400 — user não existe em `auth.users`).
 
-Payload: `{ mode: "create"|"update_password", email, password, nome, role, company_id, legacy_user_id, custom_permissions, comissao_percentual, avatar }`.
+Payload: `{ mode: "create"|"update_password"|"invite", email, password?, nome, role, company_id, legacy_user_id, custom_permissions, comissao_percentual, avatar, redirect_to? }`.
 
 A function:
 1. Valida JWT do caller via `Authorization: Bearer`.
 2. Confere que caller é `admin`/`gerente`/`is_super_admin` em `company_members` da `company_id` alvo.
-3. Em `create`: `admin.auth.admin.createUser` + upsert `company_members`.
+3. Em `create`: `admin.auth.admin.createUser` (email_confirm=true) + upsert `company_members` (status='ativo').
 4. Em `update_password`: `admin.auth.admin.updateUserById`.
+5. Em `invite` (Fase 2.3): `admin.auth.admin.inviteUserByEmail` (sem password) + upsert `company_members` com status='pendente'. Promovido a 'ativo' em `_afterAuth` no primeiro login.
 
 Deploy: `supabase functions deploy admin-create-user`.
 
