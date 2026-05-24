@@ -132,13 +132,12 @@ async function _afterAuth(session) {
   }
   // Fase 2.3: convidado que acabou de aceitar (definir senha + login) entra com
   // status='pendente'. Como autenticou com sucesso, promove para 'ativo'.
+  // RLS bloqueia UPDATE direto pra não-admin, então chama RPC SECURITY DEFINER
+  // que só promove a própria linha quando status='pendente'.
   if (member.status === 'pendente') {
-    const { error: upErr } = await supabase
-      .from('company_members')
-      .update({ status: 'ativo' })
-      .eq('user_id', session.user.id)
-      .eq('company_id', member.company_id);
+    const { error: upErr } = await supabase.rpc('promote_self_member_to_ativo');
     if (!upErr) member.status = 'ativo';
+    else console.error('promote_self_member_to_ativo:', upErr.message);
   }
   if (member.status && member.status !== 'ativo') {
     await supabase.auth.signOut();
