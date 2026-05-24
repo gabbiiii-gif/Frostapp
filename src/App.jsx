@@ -11839,6 +11839,174 @@ function AutoBackupPanel({ addToast }) {
 //
 // Limpa campos legacy (twoFactorEnabled/Secret/BackupCodes) em erp:user no
 // primeiro enroll ou unenroll bem-sucedido. Migração silenciosa.
+// Fase 2.6: painel pra usuário ativar/desativar login biométrico no APK.
+// Hide on web (não dá pra autenticar biometria no browser). Pra ativar, exige
+// senha atual (validamos chamando signInWithFallback) + autenticação biométrica
+// — então salva creds em Preferences. Pra desativar, só confirma + apaga.
+function BiometricLoginPanel({ user, addToast }) {
+  const [supported, setSupported] = useState(false);
+  const [enabled, setEnabled] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [biometryType, setBiometryType] = useState("");
+  const [showEnableModal, setShowEnableModal] = useState(false);
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  // Probe inicial: hardware disponível? Já habilitado nesse device?
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!isNative()) { setSupported(false); return; }
+      const av = await isBiometricAvailable();
+      if (cancelled) return;
+      setSupported(!!av.available);
+      setBiometryType(av.type || "");
+      const en = await isBiometricEnabled();
+      if (cancelled) return;
+      setEnabled(en);
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleEnable = useCallback(async () => {
+    setError("");
+    if (!password) { setError("Digite sua senha atual pra confirmar."); return; }
+    setBusy(true);
+    try {
+      // 1. Valida senha contra Supabase (não persiste sessão pra não trocar a atual)
+      const auth = await signInWithFallback(user.email, password);
+      if (!auth.ok) {
+        setError("Senha incorreta.");
+        return;
+      }
+      // 2. Pede biometria pra confirmar dono do device
+      const okBio = await authenticateBiometric("Confirmar ativação biométrica");
+      if (!okBio) {
+        setError("Autenticação biométrica cancelada.");
+        return;
+      }
+      // 3. Salva creds em Preferences (Capacitor)
+      const saved = await enableBiometricLogin(user.email, password);
+      if (!saved) {
+        setError("Falha ao salvar credenciais biométricas.");
+        return;
+      }
+      setEnabled(true);
+      setShowEnableModal(false);
+      setPassword("");
+      addToast?.("Login biométrico ativado neste dispositivo.", "success");
+    } finally {
+      setBusy(false);
+    }
+  }, [password, user.email, addToast]);
+
+  const handleDisable = useCallback(async () => {
+    const confirmed = window.confirm(
+      "Desativar login biométrico? Você vai precisar digitar email + senha no próximo login."
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      await disableBiometricLogin();
+      setEnabled(false);
+      addToast?.("Login biométrico desativado.", "info");
+    } finally {
+      setBusy(false);
+    }
+  }, [addToast]);
+
+  // Esconde no web — sem hardware biométrico
+  if (!isNative()) return null;
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
+      <h3 className="text-lg font-semibold text-white flex items-center gap-2 mb-1">
+        👆 Login biométrico
+        {enabled && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-400 border border-green-500/30">
+            Ativo
+          </span>
+        )}
+      </h3>
+      <p className="text-gray-400 text-sm mb-4">
+        {supported
+          ? `Use ${biometryType ? biometryType.toLowerCase() : "digital/face"} pra entrar mais rápido neste dispositivo. Funciona junto com 2FA: biometria substitui apenas o passo de senha.`
+          : "Este dispositivo não tem biometria configurada (ou hardware indisponível)."}
+      </p>
+
+      {!supported && (
+        <div className="text-xs text-gray-500">
+          Configure digital/face no sistema do seu celular pra liberar esta opção.
+        </div>
+      )}
+
+      {supported && !enabled && (
+        <button
+          onClick={() => { setShowEnableModal(true); setError(""); setPassword(""); }}
+          disabled={busy}
+          className="px-4 py-2 text-sm rounded-lg bg-blue-600 hover:bg-blue-700 text-white transition disabled:opacity-50"
+        >
+          Ativar biometria
+        </button>
+      )}
+
+      {supported && enabled && (
+        <button
+          onClick={handleDisable}
+          disabled={busy}
+          className="px-4 py-2 text-sm rounded-lg bg-red-600/80 hover:bg-red-600 text-white transition disabled:opacity-50"
+        >
+          {busy ? "Desativando…" : "Desativar biometria"}
+        </button>
+      )}
+
+      {showEnableModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="bg-gray-800 rounded-2xl border border-gray-700 max-w-sm w-full p-6 shadow-2xl">
+            <div className="text-center mb-4">
+              <div className="text-4xl mb-2">👆</div>
+              <h3 className="text-lg font-bold text-white">Confirmar ativação</h3>
+              <p className="text-gray-400 text-sm mt-2">
+                Digite sua senha atual. Após confirmar com biometria, suas credenciais
+                ficam salvas localmente no dispositivo (criptografia padrão do sistema).
+              </p>
+            </div>
+            <PasswordInput
+              value={password}
+              onChange={(e) => { setPassword(e.target.value); setError(""); }}
+              placeholder="Senha atual"
+              autoComplete="current-password"
+              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition mb-3"
+              autoFocus
+            />
+            {error && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-2.5 text-red-400 text-sm mb-3">
+                {error}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={() => { setShowEnableModal(false); setPassword(""); setError(""); }}
+                disabled={busy}
+                className="flex-1 bg-gray-700 hover:bg-gray-600 text-gray-200 py-2.5 rounded-lg font-medium transition disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleEnable}
+                disabled={busy || !password}
+                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-lg font-medium transition disabled:opacity-50"
+              >
+                {busy ? "Validando…" : "Confirmar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function TwoFactorAuthPanel({ user, addToast, reloadData }) {
   // Carrega factors do Supabase MFA. Refresh manual após enroll/unenroll.
   const [factors, setFactors] = useState([]);
@@ -12766,6 +12934,9 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
 
       {/* 2FA TOTP — ativar/desativar autenticador no próprio user logado */}
       <TwoFactorAuthPanel user={user} addToast={addToast} reloadData={reloadData} />
+
+      {/* Fase 2.6: login biométrico (APK only) — toggle por device */}
+      <BiometricLoginPanel user={user} addToast={addToast} />
 
       {/* Auditoria por empresa — admin pode revisar mutações de OS, clientes,
           funcionários, finanças e usuários (quem fez, o quê, quando) */}

@@ -140,6 +140,20 @@ Any new printable artifact should follow the same pattern — don't introduce a 
 
 The app UI is entirely in **Brazilian Portuguese** (pt-BR). All labels, categories, messages, and field names are in Portuguese.
 
+## Biometria (APK) — Fase 2.6
+
+Login biométrico (digital/face) já existia em `src/platform.js` (`isBiometricAvailable`, `enableBiometricLogin`, `authenticateBiometric`, `disableBiometricLogin`, etc.) e era ativado opcionalmente após o 1º login com senha. A Fase 2.6 adicionou um painel dedicado em Settings pra ativar/desativar manualmente sem depender do flow do login.
+
+**`BiometricLoginPanel`** (`src/App.jsx`):
+- Aparece apenas em APK nativo (`isNative()` true). Esconde no web.
+- Mostra status: hardware disponível, tipo de biometria, e se já está ativo no device.
+- Ativar: modal pede senha atual → valida via `signInWithFallback` → exige `authenticateBiometric` (toque/face) → `enableBiometricLogin(email, password)` salva credenciais cifradas em `Preferences`.
+- Desativar: confirm + `disableBiometricLogin()`.
+
+**Storage:** Capacitor `Preferences` (Android SharedPreferences / iOS UserDefaults). TODO em `src/platform.js:127` aponta migração futura pra `@capacitor-community/secure-storage-plugin` (Keystore Android, Keychain iOS) — não feito nesta fase, mas planejado.
+
+**Compatibilidade com 2FA:** biometria substitui apenas o passo de senha. Se a empresa exige MFA, o usuário ainda passa pelo `pendingMfaChallenge` após o auto-login biométrico.
+
 ## 2FA via Supabase MFA built-in (Fase 2.5)
 
 Refactor do 2FA TOTP: usa `supabase.auth.mfa.enroll/challenge/verify/unenroll` em vez do `generateTotpSecret`/`verifyTotp` custom. Factors ficam em `auth.users` → cross-device automático, rate-limit e audit server-side.
