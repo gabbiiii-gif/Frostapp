@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl } from "./supabase.js";
+import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -2421,6 +2421,21 @@ function ResetPasswordScreen({ onDone, addToast, mode = "recovery" }) {
   const [error, setError] = useState("");
 
   const isInvite = mode === "invite";
+
+  // Consome access_token/refresh_token do hash da URL e estabelece sessão.
+  // Sem isso, updateUser falha com "Auth session missing" (client tem
+  // detectSessionInUrl=false). Só roda uma vez no mount.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const ok = await consumeAuthHashSession();
+      if (cancelled) return;
+      if (!ok) {
+        setError("Link inválido ou expirado. Solicite um novo convite/recuperação.");
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
 
   const handleSave = async () => {
     setError("");

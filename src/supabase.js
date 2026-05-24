@@ -188,6 +188,35 @@ export async function updatePasswordWithRecoveryToken(newPassword) {
   }
 }
 
+// Como o client é criado com detectSessionInUrl=false, o access_token/refresh_token
+// que vêm no hash da URL (links de invite/recovery) NÃO são consumidos automaticamente.
+// Esse helper extrai os tokens do hash e estabelece a sessão manualmente — sem isso,
+// updatePasswordWithRecoveryToken falha com "Auth session missing".
+// Retorna true se conseguiu setar sessão.
+export async function consumeAuthHashSession() {
+  if (!supabase || typeof window === 'undefined') return false;
+  const hash = (window.location.hash || '').replace(/^#/, '');
+  if (!hash) return false;
+  const params = new URLSearchParams(hash);
+  const accessToken = params.get('access_token');
+  const refreshToken = params.get('refresh_token');
+  if (!accessToken || !refreshToken) return false;
+  try {
+    const { error } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+    if (error) {
+      console.error('consumeAuthHashSession:', error.message);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('consumeAuthHashSession:', err.message);
+    return false;
+  }
+}
+
 // Detecta se a URL atual veio do flow de recovery do Supabase
 // (Supabase pode enviar como query ?type=recovery OU hash #type=recovery)
 export function isRecoveryUrl() {
