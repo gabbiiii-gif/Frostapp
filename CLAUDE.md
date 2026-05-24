@@ -140,6 +140,39 @@ Any new printable artifact should follow the same pattern — don't introduce a 
 
 The app UI is entirely in **Brazilian Portuguese** (pt-BR). All labels, categories, messages, and field names are in Portuguese.
 
+## Frost WhatsApp Fase 4 — Tools reais + conversation_id real + debounce
+
+Refactor do agente Frost (workflow n8n `0JT2DBuWZwQBaJfl`). Antes da Fase 4 o Frost só conversava — `propose_os`/`handoff_to_human` viviam só no system prompt sem implementação real, conversation_id ia como UUID zerado, e o Wait fixo de 2min travava 1 execução por mensagem mesmo com 3 msgs em sequência.
+
+**Mudanças:**
+
+1. **`conversation_id` real (D):** novo nó `Get/Create Conversation` chama edge function `frost-conversation` antes do AI Agent. ai_messages agora referenciam o uuid real da conversa (não mais `00000000-…`).
+2. **Tools reais (A+B+C+G):** 3 tools subnodes do AI Agent:
+   - `propose_os` → `frost-propose-os`: salva proposta em `ai_os_proposals` com `status='pending_approval'`. NÃO cria OS direta no kv_store (admin precisa aprovar). Notifica admin/gerente por email.
+   - `handoff_to_human` → `frost-handoff`: marca `ai_conversations.status='handoff'` e notifica admin/gerente por email.
+   - `update_client_birthday` → `frost-update-birthday`: localiza cliente no kv_store por telefone normalizado, atualiza `data_nascimento`.
+3. **Debounce (E+F):** Wait reduzido de 2min → 30s + nó `Re-check last_message_at` + If `Sou a msg mais recente?`. Se cliente mandar 3 msgs em sequência, só a última execução chama o Claude — as anteriores morrem no If quando detectam que `last_message_at` mudou. Reduz custo do agent + evita respostas fora de ordem.
+
+**Tabelas tocadas:**
+- `ai_conversations` (existente): conversation_id real + last_message_at bump + unread_count.
+- `ai_messages` (existente): conversation_id real.
+- `ai_os_proposals` (existente): payload pra aprovação.
+
+**Edge functions novas:**
+- `frost-conversation` (verify_jwt=false): get-or-create por (company_id, customer_phone).
+- `frost-propose-os` (verify_jwt=false): insert em ai_os_proposals + notifica admin via send-email.
+- `frost-handoff` (verify_jwt=false): UPDATE ai_conversations + notifica admin.
+- `frost-update-birthday` (verify_jwt=false): localiza cliente em kv_store por telefone, atualiza data_nascimento.
+
+Todas as 4 aceitam header opcional `x-internal-secret` (se `INTERNAL_FUNCTION_SECRET` setado no env, exigem match).
+
+**Setup obrigatório no n8n** (workflow `0JT2DBuWZwQBaJfl`):
+- Credencial `Supabase apikey` (Header Auth: apikey + service_role) — usada pelos 7 HTTP nodes Supabase.
+- Credencial `Evolution apikey` (Header Auth) — pelo nó de envio WhatsApp.
+- Credencial `Anthropic` (API key) — pelo Claude Sonnet.
+- Substituir URL placeholder `https://SEU-EVOLUTION-URL/message/sendText/SUA-INSTANCIA` no nó "Envia resposta WhatsApp".
+- Toggle Active no workflow.
+
 ## Notificação por email quando OS criada (Fase 2.7)
 
 Quando uma nova OS é criada (`DB.set("erp:os:*", value)` com `prev` null), o frontend dispara fire-and-forget a edge function `notify-os-created` que envia email pra:
@@ -312,6 +345,10 @@ Pasta `supabase/functions/`. Deploy com `supabase functions deploy <nome>`.
 | `first-login-otp-verify` | true  | Fase 2.4 — valida código + promove `first_login_otp_done`                |
 | `admin-remove-user-mfa`  | true  | Fase 2.5 — admin/gerente apaga factors MFA de outro user (reset 2FA)     |
 | `notify-os-created`      | true  | Fase 2.7 — email pra admin/gerente + técnico ao criar nova OS            |
+| `frost-conversation`     | false | Frost Fase 4 — get-or-create ai_conversations (chamado pelo n8n)         |
+| `frost-propose-os`       | false | Frost Fase 4 — tool: salva proposta em ai_os_proposals + notifica admin  |
+| `frost-handoff`          | false | Frost Fase 4 — tool: marca ai_conversations.status=handoff + notifica    |
+| `frost-update-birthday`  | false | Frost Fase 4 — tool: atualiza data_nascimento de cliente em kv_store     |
 
 ### admin-create-user — provisionamento de usuário
 
