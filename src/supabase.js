@@ -293,6 +293,37 @@ export async function adminCreateUser(payload) {
   }
 }
 
+// ─── Notificação por email quando OS criada (Fase 2.7) ──────────────────────
+// Fire-and-forget POST pra edge function notify-os-created. Lê emails dos
+// admin/gerente da empresa + técnico atribuído via service_role e dispara via
+// send-email (Resend). Helper retorna promise mas chamadores não devem
+// aguardar — falhas são silenciosas (caso edge function indisponível, a
+// criação da OS no app não pode travar).
+export async function notifyOsCreated(companyId, osData) {
+  if (!supabase || !companyId || !osData) return { ok: false, error: 'params' };
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return { ok: false, error: 'no_session' };
+    const resp = await fetch(`${supabaseUrl}/functions/v1/notify-os-created`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseKey,
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ companyId, osData }),
+      keepalive: true,
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok || !body.ok) {
+      return { ok: false, error: body.error || `HTTP ${resp.status}` };
+    }
+    return { ok: true, sent_to: body.sent_to, skipped: body.skipped };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 // ─── 2FA via Supabase MFA built-in (Fase 2.5) ───────────────────────────────
 // Refactor do 2FA TOTP: usa supabase.auth.mfa.* server-side em vez do
 // generateTotpSecret/verifyTotp custom. Cross-device automaticamente (factors

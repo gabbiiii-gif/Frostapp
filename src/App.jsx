@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa } from "./supabase.js";
+import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -514,6 +514,11 @@ const DB = {
       }
       // Dispara webhook se status da OS mudou (n8n → WhatsApp via Evolution)
       if (isOsKey && prev) notifyOSStatusChange(prev, toStore);
+      // Fase 2.7: email pra admin/gerente + técnico quando OS criada
+      // (prev null = create). Fire-and-forget, falha silenciosa.
+      if (isOsKey && !prev && __activeCompanyId) {
+        notifyOsCreated(__activeCompanyId, toStore).catch(() => { /* silencioso */ });
+      }
       return true;
     } catch {
       return false;
@@ -12237,20 +12242,23 @@ function CompanySecurityPanel({ companyId, addToast }) {
   const [loading, setLoading] = useState(true);
   const [savingOtp, setSavingOtp] = useState(false);
   const [savingMfa, setSavingMfa] = useState(false);
+  const [savingNotify, setSavingNotify] = useState(false);
   const [requireOTP, setRequireOTP] = useState(false);
   const [requireMfa, setRequireMfa] = useState(false);
+  const [notifyOsEmail, setNotifyOsEmail] = useState(true);
 
   const load = useCallback(async () => {
     if (!supabase || !companyId) { setLoading(false); return; }
     try {
       const { data, error } = await supabase
         .from("companies")
-        .select("require_first_login_otp, require_mfa")
+        .select("require_first_login_otp, require_mfa, notify_os_email")
         .eq("id", companyId)
         .maybeSingle();
       if (!error && data) {
         setRequireOTP(!!data.require_first_login_otp);
         setRequireMfa(!!data.require_mfa);
+        setNotifyOsEmail(data.notify_os_email !== false); // default true
       }
     } catch { /* ignora */ }
     setLoading(false);
@@ -12308,6 +12316,32 @@ function CompanySecurityPanel({ companyId, addToast }) {
     }
   }, [companyId, requireMfa, savingMfa, addToast]);
 
+  // Fase 2.7: toggle de notificação por email quando OS é criada
+  const toggleNotify = useCallback(async () => {
+    if (!supabase || !companyId || savingNotify) return;
+    setSavingNotify(true);
+    const newValue = !notifyOsEmail;
+    try {
+      const { error } = await supabase
+        .from("companies")
+        .update({ notify_os_email: newValue })
+        .eq("id", companyId);
+      if (error) {
+        addToast?.(`Falha ao salvar: ${error.message}`, "error");
+        return;
+      }
+      setNotifyOsEmail(newValue);
+      addToast?.(
+        newValue
+          ? "Email de OS nova ativado pra admin/gerente + técnico atribuído."
+          : "Email de OS nova desativado.",
+        "success"
+      );
+    } finally {
+      setSavingNotify(false);
+    }
+  }, [companyId, notifyOsEmail, savingNotify, addToast]);
+
   if (loading) {
     return (
       <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
@@ -12361,6 +12395,26 @@ function CompanySecurityPanel({ companyId, addToast }) {
             Quando ativado, qualquer usuário sem 2FA configurado é obrigado a registrar
             um app autenticador (Google Authenticator, Authy, 1Password) durante o
             login pra prosseguir. Recomendado pra empresas com dados sensíveis.
+          </span>
+        </span>
+      </label>
+
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input
+          type="checkbox"
+          checked={notifyOsEmail}
+          onChange={toggleNotify}
+          disabled={savingNotify}
+          className="mt-1 w-4 h-4 cursor-pointer"
+        />
+        <span>
+          <span className="block text-sm text-white font-medium">
+            Enviar email quando uma nova OS for criada
+          </span>
+          <span className="block text-xs text-gray-400 mt-1">
+            Notifica todos os admin/gerente ativos da empresa + o técnico atribuído
+            (se houver). Usa o sender configurado em SMTP (Resend). Mudanças de
+            status continuam indo pelo webhook WhatsApp (n8n).
           </span>
         </span>
       </label>

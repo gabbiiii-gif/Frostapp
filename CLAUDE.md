@@ -140,6 +140,28 @@ Any new printable artifact should follow the same pattern — don't introduce a 
 
 The app UI is entirely in **Brazilian Portuguese** (pt-BR). All labels, categories, messages, and field names are in Portuguese.
 
+## Notificação por email quando OS criada (Fase 2.7)
+
+Quando uma nova OS é criada (`DB.set("erp:os:*", value)` com `prev` null), o frontend dispara fire-and-forget a edge function `notify-os-created` que envia email pra:
+- Todos os admin/gerente ativos da empresa (`company_members WHERE role IN ('admin','gerente') AND status='ativo'`)
+- Técnico atribuído à OS, se `osData.tecnicoId` mapear em `company_members.legacy_user_id`
+
+Opt-out por empresa via `companies.notify_os_email` (default true). Admin/gerente alterna em Settings → "Segurança da empresa".
+
+**Schema (migração `fase_2_7_notify_os_email`):**
+- `companies.notify_os_email boolean` (default true)
+
+**Edge function nova `notify-os-created`** (verify_jwt=true):
+- Verifica caller pertence à `companyId` alvo
+- Lê flag `notify_os_email` da empresa — skip se OFF
+- Lista emails dos destinatários via `auth.admin.getUserById` (service_role)
+- Monta template HTML pt-BR (número OS, cliente, equipamento, descrição, técnico, valor, agendamento)
+- Chama `send-email` (Resend) com lista de emails
+
+Helper em `src/supabase.js`: `notifyOsCreated(companyId, osData)` → `{ ok, sent_to?, skipped?, error? }`.
+
+Mudanças de status (não criação) continuam indo pelo webhook n8n → WhatsApp (Fase 1.3) — não duplicam por email.
+
 ## Biometria (APK) — Fase 2.6
 
 Login biométrico (digital/face) já existia em `src/platform.js` (`isBiometricAvailable`, `enableBiometricLogin`, `authenticateBiometric`, `disableBiometricLogin`, etc.) e era ativado opcionalmente após o 1º login com senha. A Fase 2.6 adicionou um painel dedicado em Settings pra ativar/desativar manualmente sem depender do flow do login.
@@ -289,6 +311,7 @@ Pasta `supabase/functions/`. Deploy com `supabase functions deploy <nome>`.
 | `first-login-otp-send`   | true  | Fase 2.4 — gera OTP 6 dígitos e dispara email                            |
 | `first-login-otp-verify` | true  | Fase 2.4 — valida código + promove `first_login_otp_done`                |
 | `admin-remove-user-mfa`  | true  | Fase 2.5 — admin/gerente apaga factors MFA de outro user (reset 2FA)     |
+| `notify-os-created`      | true  | Fase 2.7 — email pra admin/gerente + técnico ao criar nova OS            |
 
 ### admin-create-user — provisionamento de usuário
 
