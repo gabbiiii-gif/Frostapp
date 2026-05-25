@@ -116,6 +116,17 @@ async function handleMessage(j: Job) {
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
   );
 
+  // ── Dedupe: Evolution dispara MESSAGES_UPSERT várias vezes por msg (status
+  // updates PENDING/SENT/DELIVERY_ACK). Insere messageId em tabela UNIQUE;
+  // se já existe (23505), retorna sem processar de novo.
+  if (j.messageId) {
+    const { error: dedupeErr } = await supabase
+      .from("whatsapp_processed_messages")
+      .insert({ message_id: j.messageId });
+    if (dedupeErr && (dedupeErr as { code?: string }).code === "23505") return;
+    if (dedupeErr) console.error("[whatsapp-webhook] dedupe:", dedupeErr.message);
+  }
+
   // ── Resolve empresa pela instância ───────────────────────────────────────
   const { data: cfg } = await supabase
     .from("ai_agent_config")
