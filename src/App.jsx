@@ -1191,27 +1191,29 @@ async function scheduleOSPosVenda(os) {
 // casando pelos 8 últimos para tolerar variações de DDI/DDD/9º dígito). Se não
 // encontrar, cadastra um novo cliente em erp:client: com os dados coletados pela
 // IA. Só roda na aprovação da proposta — mantém o gate de revisão humana.
+// Normaliza telefone BR para { ddd, local } onde local = últimos 8 dígitos
+// (drop opcional do "9" mobile prefix). Aceita formatos 10 (DDD+8) e 11 (DDD+9+8).
+// Retorna null se < 10 dígitos.
+function normalizePhoneBR(raw) {
+  const d = String(raw || "").replace(/\D/g, "");
+  if (d.length < 10) return null;
+  // Considera os últimos 11 dígitos (ou todos se < 11). Drop DDI quando presente.
+  const tail = d.length >= 11 ? d.slice(-11) : d.slice(-10);
+  // 11 dígitos = DDD(2) + 9 + 8. 10 dígitos = DDD(2) + 8. DDD sempre nos primeiros 2.
+  return { ddd: tail.slice(0, 2), local: tail.slice(-8) };
+}
+
 function findOrCreateClientFromProposal(p) {
-  const telDigits = String(p.phone || "").replace(/\D/g, "");
   const clients = DB.list("erp:client:");
-  // Matching por DDD+número (10-11 dígitos) elimina colisões entre clientes
-  // de DDDs diferentes com mesmo final. 8 dígitos finais (apenas número local
-  // sem DDD) gerava falso positivo. Estratégia: pega DDI+DDD+número se possível,
-  // mas mínimo DDD+número (10 dígitos). Tolera o "9º dígito" do celular comparando
-  // os últimos 9 quando os 10 não casam — só faz match se DDD bater.
-  if (telDigits.length >= 10) {
-    const alvoFull = telDigits.slice(-11); // DDD+9+8 ou DDD+8
-    const alvoDdd = telDigits.slice(-10, -8); // DDD
-    const alvoLocal = telDigits.slice(-8); // 8 finais
+  // Matching por DDD+últimos-8-dígitos. Tolera mobile "9" prefix (11 vs 10
+  // dígitos do mesmo número). Exige DDD igual pra evitar colisão entre clientes
+  // de cidades diferentes com mesmo final.
+  const alvo = normalizePhoneBR(p.phone);
+  if (alvo) {
     const existente = clients.find((c) => {
-      const d = String(c.telefone || "").replace(/\D/g, "");
-      if (d.length < 10) return false;
-      // Match completo (11 dígitos): mais seguro
-      if (d.length >= 11 && alvoFull.length === 11 && d.slice(-11) === alvoFull) return true;
-      // Match por DDD+número quando um lado tem 9º dígito e outro não
-      const cDdd = d.slice(-10, -8);
-      const cLocal = d.slice(-8);
-      return cDdd === alvoDdd && cLocal === alvoLocal;
+      const cn = normalizePhoneBR(c.telefone);
+      if (!cn) return false;
+      return cn.ddd === alvo.ddd && cn.local === alvo.local;
     });
     if (existente) return existente;
   }

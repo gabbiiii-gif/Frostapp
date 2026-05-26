@@ -100,9 +100,21 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "missing_fields" }, 400);
   }
   // Convite não precisa de senha; create/update_password precisam.
+  // Critérios alinhados com validatePasswordStrength do client (src/utils.js):
+  // 12+ chars, maiúscula, minúscula, número, símbolo, sem espaço. Antes só
+  // checava length>=8, permitindo admin bypassar validação da UI.
   if (mode !== "invite") {
     if (!password) return json({ ok: false, error: "missing_fields" }, 400);
-    if (password.length < 8) return json({ ok: false, error: "weak_password" }, 400);
+    const reasons: string[] = [];
+    if (password.length < 12) reasons.push("min_12_chars");
+    if (!/[a-z]/.test(password)) reasons.push("missing_lowercase");
+    if (!/[A-Z]/.test(password)) reasons.push("missing_uppercase");
+    if (!/\d/.test(password)) reasons.push("missing_digit");
+    if (!/[^\w\s]|_/.test(password)) reasons.push("missing_symbol");
+    if (/\s/.test(password)) reasons.push("contains_whitespace");
+    if (reasons.length > 0) {
+      return json({ ok: false, error: "weak_password", reasons }, 400);
+    }
   }
 
   const admin = createClient(SUPABASE_URL, SERVICE_KEY, {

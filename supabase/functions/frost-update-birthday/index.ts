@@ -88,7 +88,14 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "client_not_found" }, 404);
   }
 
-  const updated = { ...(match.value || {}), data_nascimento: dataNascimento };
+  // Guard contra match.value null/não-objeto. Spreading null gera objeto só com
+  // data_nascimento, sobrescrevendo o record do cliente inteiro no kv_store.
+  // Defensivo mesmo o filtro acima ter eliminado nulls — proteção dupla.
+  if (!match.value || typeof match.value !== "object" || Array.isArray(match.value)) {
+    return json({ ok: false, error: "client_record_invalid" }, 422);
+  }
+
+  const updated = { ...match.value, data_nascimento: dataNascimento };
   const { error: updErr } = await admin
     .from("kv_store")
     .update({ value: updated, updated_at: new Date().toISOString() })

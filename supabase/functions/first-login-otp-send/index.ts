@@ -156,6 +156,7 @@ Deno.serve(async (req: Request) => {
     code_hash: codeHash,
     purpose: "first_login",
     expires_at: expiresAt,
+    attempts: 0,
   });
   if (insertErr) {
     console.error("first-login-otp-send insert:", insertErr.message);
