@@ -639,6 +639,31 @@ function ensureCompanyMigration() {
   }
 }
 
+// Backfill: garante que empresas existentes (criadas antes do módulo Financeiro
+// ser toggleable) ganhem "financeiro" no allowedModules. Sem isso, usuários com
+// permissão custom marcando Financeiro continuam sem o módulo no sidebar
+// porque isModuleEnabledForCompany bloqueia. Idempotente: só toca empresas
+// cujo array existe e não inclui "financeiro".
+function ensureFinanceiroModuleEnabled() {
+  try {
+    const companies = DB.listAll("erp:company:");
+    companies.forEach((c) => {
+      if (!c || !c.id) return;
+      if (Array.isArray(c.allowedModules) && !c.allowedModules.includes("financeiro")) {
+        const updated = {
+          ...c,
+          allowedModules: [...c.allowedModules, "financeiro"],
+          atualizadoEm: new Date().toISOString(),
+        };
+        try {
+          window.storage.setItem("erp:company:" + c.id, JSON.stringify(updated));
+          syncToSupabase("erp:company:" + c.id, updated);
+        } catch { /* ignora */ }
+      }
+    });
+  } catch { /* ignora */ }
+}
+
 // ─── UTILITY FUNCTIONS ─────────────────────────────────────────────────────────
 
 function genId() {
@@ -15077,6 +15102,9 @@ export default function App() {
       await seedDatabase();
       // Multi-tenant: garante company padrão e tagga registros legados
       ensureCompanyMigration();
+      // Backfill: empresas legadas precisam ter "financeiro" em allowedModules
+      // pra que usuários com permissão custom marcando Financeiro vejam o módulo.
+      ensureFinanceiroModuleEnabled();
       // Catálogo global só pode ser semeado quando NÃO há Supabase (app local
       // puro) OU quando o hydrate remoto rodou de fato (sessão válida). Boot sem
       // sessão tinha cache local vazio e re-semeava o catálogo a cada acesso,
