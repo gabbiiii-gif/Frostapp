@@ -513,11 +513,23 @@ const DB = {
         recordAudit(prev ? "update" : "create", key, toStore, prev);
       }
       // Dispara webhook se status da OS mudou (n8n → WhatsApp via Evolution)
-      if (isOsKey && prev) notifyOSStatusChange(prev, toStore);
+      // Log do erro com osId pra facilitar debug se webhook quebrar.
+      if (isOsKey && prev) {
+        try {
+          const r = notifyOSStatusChange(prev, toStore);
+          if (r && typeof r.catch === "function") {
+            r.catch((err) => console.warn("notifyOSStatusChange falhou", { osId: toStore?.id, error: err?.message }));
+          }
+        } catch (err) {
+          console.warn("notifyOSStatusChange sync error", { osId: toStore?.id, error: err?.message });
+        }
+      }
       // Fase 2.7: email pra admin/gerente + técnico quando OS criada
-      // (prev null = create). Fire-and-forget, falha silenciosa.
+      // (prev null = create). Fire-and-forget — log do erro com osId pra debug.
       if (isOsKey && !prev && __activeCompanyId) {
-        notifyOsCreated(__activeCompanyId, toStore).catch(() => { /* silencioso */ });
+        notifyOsCreated(__activeCompanyId, toStore).catch((err) => {
+          console.warn("notifyOsCreated falhou", { osId: toStore?.id, error: err?.message });
+        });
       }
       return true;
     } catch {
@@ -999,15 +1011,21 @@ function syncOSToFinance(os) {
       DB.delete("erp:finance:" + matches[i].id);
     }
     // Mantém status — admin pode ter marcado como "pago" manualmente.
-    // Atualiza apenas dados informativos para refletir a OS atual.
-    const updated = {
-      ...primary,
-      descricao,
-      valor,
-      categoria,
-      data: primary.status === "pago" ? primary.data : dataIso,
-      updatedAt: new Date().toISOString(),
-    };
+    // Se o REC já está pago, preserva TODOS os campos editáveis (descricao,
+    // valor, categoria, data) — admin pode ter ajustado juros/desconto/nome
+    // e não queremos sobrescrever a edição manual. Para REC pendente, atualiza
+    // os campos informativos pra refletir a OS atual.
+    const isPago = primary.status === "pago";
+    const updated = isPago
+      ? { ...primary, updatedAt: new Date().toISOString() }
+      : {
+          ...primary,
+          descricao,
+          valor,
+          categoria,
+          data: dataIso,
+          updatedAt: new Date().toISOString(),
+        };
     DB.set("erp:finance:" + updated.id, updated);
     return;
   }
@@ -1176,11 +1194,24 @@ async function scheduleOSPosVenda(os) {
 function findOrCreateClientFromProposal(p) {
   const telDigits = String(p.phone || "").replace(/\D/g, "");
   const clients = DB.list("erp:client:");
-  if (telDigits.length >= 8) {
-    const alvo = telDigits.slice(-8);
+  // Matching por DDD+número (10-11 dígitos) elimina colisões entre clientes
+  // de DDDs diferentes com mesmo final. 8 dígitos finais (apenas número local
+  // sem DDD) gerava falso positivo. Estratégia: pega DDI+DDD+número se possível,
+  // mas mínimo DDD+número (10 dígitos). Tolera o "9º dígito" do celular comparando
+  // os últimos 9 quando os 10 não casam — só faz match se DDD bater.
+  if (telDigits.length >= 10) {
+    const alvoFull = telDigits.slice(-11); // DDD+9+8 ou DDD+8
+    const alvoDdd = telDigits.slice(-10, -8); // DDD
+    const alvoLocal = telDigits.slice(-8); // 8 finais
     const existente = clients.find((c) => {
       const d = String(c.telefone || "").replace(/\D/g, "");
-      return d.length >= 8 && d.slice(-8) === alvo;
+      if (d.length < 10) return false;
+      // Match completo (11 dígitos): mais seguro
+      if (d.length >= 11 && alvoFull.length === 11 && d.slice(-11) === alvoFull) return true;
+      // Match por DDD+número quando um lado tem 9º dígito e outro não
+      const cDdd = d.slice(-10, -8);
+      const cLocal = d.slice(-8);
+      return cDdd === alvoDdd && cLocal === alvoLocal;
     });
     if (existente) return existente;
   }

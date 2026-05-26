@@ -44,6 +44,19 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// Escapa caracteres HTML perigosos pra prevenir XSS no mailbox do admin.
+// Payload IA vem do WhatsApp do cliente (não confiável) — atacante poderia
+// injetar <img src=x onerror=...> e executar script no email do gestor.
+function escapeHtml(v: unknown): string {
+  const s = v == null ? "" : String(v);
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 async function notifyAdmins(
   admin: ReturnType<typeof createClient>,
   supabaseUrl: string,
@@ -76,20 +89,32 @@ async function notifyAdmins(
     .select("nome")
     .eq("id", companyId)
     .maybeSingle();
-  const empresaNome = company?.nome || "FrostERP";
+  const empresaNome = escapeHtml(company?.nome || "FrostERP");
+
+  // Todos os campos do payload são escapados — vêm do WhatsApp do cliente,
+  // input não-confiável que poderia conter HTML/script malicioso.
+  const nome = escapeHtml(proposalPayload.nome || "—");
+  const telefone = escapeHtml(proposalPayload.telefone || "—");
+  const endereco = escapeHtml(proposalPayload.endereco || "—");
+  const equipamento = `${escapeHtml(proposalPayload.equipamento || "—")} ${escapeHtml(proposalPayload.marca || "")} ${escapeHtml(proposalPayload.modelo || "")}`.trim();
+  const problema = escapeHtml(proposalPayload.problema || "—");
+  const valorEstimado = proposalPayload.valor_estimado
+    ? "R$ " + Number(proposalPayload.valor_estimado).toFixed(2)
+    : "—";
+  const observacoes = proposalPayload.observacoes ? escapeHtml(proposalPayload.observacoes) : "";
 
   const html = `
     <div style="font-family: -apple-system, sans-serif; max-width: 560px; margin: 0 auto; padding: 24px; color: #111;">
       <h2 style="color: #d97706;">🤖 Nova OS proposta pelo Frost (aguardando aprovação)</h2>
       <p>O agente IA recebeu uma solicitação de cliente em <strong>${empresaNome}</strong>. Antes de virar uma OS de verdade, você precisa aprovar.</p>
       <table style="width:100%; border-collapse:collapse; margin:16px 0; font-size:14px;">
-        <tr><td style="padding:6px 0; color:#6b7280;">Cliente</td><td><strong>${proposalPayload.nome || "—"}</strong></td></tr>
-        <tr><td style="padding:6px 0; color:#6b7280;">Telefone</td><td>${proposalPayload.telefone || "—"}</td></tr>
-        <tr><td style="padding:6px 0; color:#6b7280;">Endereço</td><td>${proposalPayload.endereco || "—"}</td></tr>
-        <tr><td style="padding:6px 0; color:#6b7280;">Equipamento</td><td>${proposalPayload.equipamento || "—"} ${proposalPayload.marca || ""} ${proposalPayload.modelo || ""}</td></tr>
-        <tr><td style="padding:6px 0; color:#6b7280;">Problema</td><td>${proposalPayload.problema || "—"}</td></tr>
-        <tr><td style="padding:6px 0; color:#6b7280;">Valor estimado</td><td>${proposalPayload.valor_estimado ? "R$ " + Number(proposalPayload.valor_estimado).toFixed(2) : "—"}</td></tr>
-        ${proposalPayload.observacoes ? `<tr><td style="padding:6px 0; color:#6b7280;">Obs</td><td>${proposalPayload.observacoes}</td></tr>` : ""}
+        <tr><td style="padding:6px 0; color:#6b7280;">Cliente</td><td><strong>${nome}</strong></td></tr>
+        <tr><td style="padding:6px 0; color:#6b7280;">Telefone</td><td>${telefone}</td></tr>
+        <tr><td style="padding:6px 0; color:#6b7280;">Endereço</td><td>${endereco}</td></tr>
+        <tr><td style="padding:6px 0; color:#6b7280;">Equipamento</td><td>${equipamento}</td></tr>
+        <tr><td style="padding:6px 0; color:#6b7280;">Problema</td><td>${problema}</td></tr>
+        <tr><td style="padding:6px 0; color:#6b7280;">Valor estimado</td><td>${valorEstimado}</td></tr>
+        ${observacoes ? `<tr><td style="padding:6px 0; color:#6b7280;">Obs</td><td>${observacoes}</td></tr>` : ""}
       </table>
       <p style="color:#6b7280; font-size:13px;">Abra o FrostERP → Conversas IA pra aprovar/recusar.</p>
     </div>

@@ -128,14 +128,21 @@ Deno.serve(async (req: Request) => {
   }
 
   if (mode === "update_password") {
-    // Procura auth user pelo email; atualiza senha
-    const { data: existingUser, error: lookupErr } = await admin.auth.admin
-      .listUsers({ page: 1, perPage: 200 });
-    if (lookupErr) {
-      console.error("admin-create-user listUsers:", lookupErr.message);
-      return json({ ok: false, error: "internal" }, 500);
+    // Procura auth user pelo email paginando todas as páginas — paginação fixa
+    // em 200 quebrava em empresas com 201+ users (target sumia além da página 1).
+    const PER_PAGE = 200;
+    let target: { id: string; email: string | null } | undefined;
+    for (let page = 1; page <= 50 && !target; page++) {
+      const { data: existingUser, error: lookupErr } = await admin.auth.admin
+        .listUsers({ page, perPage: PER_PAGE });
+      if (lookupErr) {
+        console.error("admin-create-user listUsers:", lookupErr.message);
+        return json({ ok: false, error: "internal" }, 500);
+      }
+      const users = existingUser?.users || [];
+      target = users.find((u) => (u.email || "").toLowerCase() === email);
+      if (users.length < PER_PAGE) break;
     }
-    const target = existingUser?.users?.find((u) => (u.email || "").toLowerCase() === email);
     if (!target) {
       return json({ ok: false, error: "auth_user_not_found" }, 404);
     }
