@@ -1221,6 +1221,7 @@ const ALL_MODULES = [
   { id: "dashboard", label: "Dashboard" },
   { id: "processos", label: "Ordens de Serviço" },
   { id: "agenda", label: "Agenda" },
+  { id: "financeiro", label: "Financeiro" },
   { id: "cadastro", label: "Cadastros" },
   { id: "ia", label: "IA / Atendimento" },
   { id: "pos-venda", label: "Pós-Venda" },
