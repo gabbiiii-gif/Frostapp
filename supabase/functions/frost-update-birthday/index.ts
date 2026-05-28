@@ -91,8 +91,11 @@ Deno.serve(async (req: Request) => {
   // Guard contra match.value null/não-objeto. Spreading null gera objeto só com
   // data_nascimento, sobrescrevendo o record do cliente inteiro no kv_store.
   // Defensivo mesmo o filtro acima ter eliminado nulls — proteção dupla.
+  // Retorna 200 com ok:false (em vez de 422) pra não halt workflow n8n que
+  // não tem "Continue On Fail" configurado — o agente Claude recebe o tool_result
+  // com erro estruturado e responde graciosamente ao cliente.
   if (!match.value || typeof match.value !== "object" || Array.isArray(match.value)) {
-    return json({ ok: false, error: "client_record_invalid" }, 422);
+    return json({ ok: false, error: "client_record_invalid" }, 200);
   }
 
   const updated = { ...match.value, data_nascimento: dataNascimento };

@@ -285,12 +285,32 @@ export async function adminCreateUser(payload) {
     });
     const body = await resp.json().catch(() => ({}));
     if (!resp.ok || !body.ok) {
-      return { ok: false, error: body.error || `HTTP ${resp.status}` };
+      // Forward reasons[] da edge function pra UI mostrar detalhe específico
+      // (ex.: "Mínimo 12 caracteres" em vez de "weak_password" cryptic).
+      return {
+        ok: false,
+        error: body.error || `HTTP ${resp.status}`,
+        reasons: Array.isArray(body.reasons) ? body.reasons : null,
+      };
     }
     return { ok: true, auth_user_id: body.auth_user_id };
   } catch (err) {
     return { ok: false, error: err.message };
   }
+}
+
+// Traduz reasons[] da edge function pra pt-BR humano. Alinhado com
+// validatePasswordStrength do utils.js.
+export function passwordReasonToPtBr(reason) {
+  const map = {
+    min_12_chars: "Mínimo 12 caracteres",
+    missing_lowercase: "Incluir letra minúscula",
+    missing_uppercase: "Incluir letra maiúscula",
+    missing_digit: "Incluir número",
+    missing_symbol: "Incluir símbolo (!@#$...)",
+    contains_whitespace: "Não pode conter espaço",
+  };
+  return map[reason] || reason;
 }
 
 // ─── Notificação por email quando OS criada (Fase 2.7) ──────────────────────

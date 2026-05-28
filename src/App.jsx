@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated } from "./supabase.js";
+import { supabase, hydrateFromSupabase, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -457,16 +457,18 @@ function notifyOSStatusChange(prev, next) {
       horaAgendada: next.horaAgendada || null,
       endereco: next.endereco || null,
     };
-    // Fire-and-forget: não aguarda resposta para não travar DB.set
+    // Fire-and-forget: não aguarda resposta para não travar DB.set.
+    // Retorna a Promise pra o caller logar erro com osId (debuggability).
     if (typeof fetch === "function") {
-      fetch(url, {
+      return fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         keepalive: true,
-      }).catch(() => { /* silencioso */ });
+      });
     }
   } catch { /* não-crítico */ }
+  return undefined;
 }
 
 const DB = {
@@ -656,9 +658,15 @@ function ensureCompanyMigration() {
 // permissão custom marcando Financeiro continuam sem o módulo no sidebar
 // porque isModuleEnabledForCompany bloqueia. Idempotente: só toca empresas
 // cujo array existe e não inclui "financeiro".
+// Marker no localStorage evita re-scan a cada boot — após primeira execução
+// bem-sucedida, vira no-op (também previne race com hydrate offline que
+// sobrescreveria local com cloud stale).
+const FINANCEIRO_BACKFILL_MARKER = "erp:_financeiroBackfilled_v1";
 function ensureFinanceiroModuleEnabled() {
   try {
+    if (window.storage.getItem(FINANCEIRO_BACKFILL_MARKER) === "true") return;
     const companies = DB.listAll("erp:company:");
+    let touched = 0;
     companies.forEach((c) => {
       if (!c || !c.id) return;
       if (Array.isArray(c.allowedModules) && !c.allowedModules.includes("financeiro")) {
@@ -670,9 +678,15 @@ function ensureFinanceiroModuleEnabled() {
         try {
           window.storage.setItem("erp:company:" + c.id, JSON.stringify(updated));
           syncToSupabase("erp:company:" + c.id, updated);
+          touched++;
         } catch { /* ignora */ }
       }
     });
+    // Marca como concluído mesmo se touched=0 (nada pra fazer = backfill OK).
+    window.storage.setItem(FINANCEIRO_BACKFILL_MARKER, "true");
+    if (touched > 0) {
+      console.info(`[financeiro-backfill] ${touched} empresa(s) atualizada(s)`);
+    }
   } catch { /* ignora */ }
 }
 
@@ -1011,21 +1025,21 @@ function syncOSToFinance(os) {
       DB.delete("erp:finance:" + matches[i].id);
     }
     // Mantém status — admin pode ter marcado como "pago" manualmente.
-    // Se o REC já está pago, preserva TODOS os campos editáveis (descricao,
-    // valor, categoria, data) — admin pode ter ajustado juros/desconto/nome
-    // e não queremos sobrescrever a edição manual. Para REC pendente, atualiza
-    // os campos informativos pra refletir a OS atual.
+    // Estratégia balanceada:
+    // - descricao + categoria: sempre re-sincronizadas (informativas; refletem
+    //   reclassificação de tipo da OS e correção de clienteNome). Backfill
+    //   continua idempotente self-healing.
+    // - valor + data: preservados se REC pago — admin pode ter ajustado
+    //   juros/desconto/data-de-pagamento manualmente. Em pendente, atualiza.
     const isPago = primary.status === "pago";
-    const updated = isPago
-      ? { ...primary, updatedAt: new Date().toISOString() }
-      : {
-          ...primary,
-          descricao,
-          valor,
-          categoria,
-          data: dataIso,
-          updatedAt: new Date().toISOString(),
-        };
+    const updated = {
+      ...primary,
+      descricao,
+      categoria,
+      valor: isPago ? primary.valor : valor,
+      data: isPago ? primary.data : dataIso,
+      updatedAt: new Date().toISOString(),
+    };
     DB.set("erp:finance:" + updated.id, updated);
     return;
   }
@@ -1205,9 +1219,12 @@ function normalizePhoneBR(raw) {
 
 function findOrCreateClientFromProposal(p) {
   const clients = DB.list("erp:client:");
-  // Matching por DDD+últimos-8-dígitos. Tolera mobile "9" prefix (11 vs 10
-  // dígitos do mesmo número). Exige DDD igual pra evitar colisão entre clientes
-  // de cidades diferentes com mesmo final.
+  const telDigits = String(p.phone || "").replace(/\D/g, "");
+  // Estratégia em camadas pra maximizar match correto sem colisão entre DDDs:
+  // 1. Strict: DDD+local idênticos (normalizePhoneBR ambos os lados)
+  // 2. Fallback last-8: quando registros legados não têm DDD (< 10 dígitos)
+  //    OU quando alvo é curto (< 10 dígitos). Evita criar duplicata pra
+  //    clientes cadastrados em sistema antigo.
   const alvo = normalizePhoneBR(p.phone);
   if (alvo) {
     const existente = clients.find((c) => {
@@ -1217,16 +1234,35 @@ function findOrCreateClientFromProposal(p) {
     });
     if (existente) return existente;
   }
-  if (!p.customer_name) return null;
+  // Fallback last-8: cobre clientes legados sem DDD ou phone curto.
+  if (telDigits.length >= 8) {
+    const tail = telDigits.slice(-8);
+    const existenteLegacy = clients.find((c) => {
+      const d = String(c.telefone || "").replace(/\D/g, "");
+      // Só ativa fallback quando pelo menos um dos lados é "curto" (< 10) —
+      // se ambos são completos (10+), match strict acima já teria casado.
+      // Isso previne colisão entre clientes de DDDs diferentes mas mesmo final.
+      if (d.length >= 10 && telDigits.length >= 10) return false;
+      return d.length >= 8 && d.slice(-8) === tail;
+    });
+    if (existenteLegacy) return existenteLegacy;
+  }
+  // Sem cliente. Sempre cria — mesmo sem nome usa telefone como identificador.
+  // Antes retornava null pra !customer_name, gerando "OS fantasma" com
+  // clienteId=null que quebrava notify-os-created, syncOSToFinance, etc.
+  const nomeInicial = String(p.customer_name || "").trim()
+    || (p.phone ? `Cliente ${p.phone}` : "Cliente sem nome");
   const newClient = {
     id: genId(),
-    nome: String(p.customer_name).trim(),
+    nome: nomeInicial,
     tipo: "pf",
     cpf: "", rg: "", cnpj: "",
     telefone: p.phone || "",
     email: "",
     endereco: { rua: String(p.address || "").trim(), numero: "", bairro: "", cidade: "", estado: "", cep: "" },
-    observacoes: "Cadastrado automaticamente via IA WhatsApp.",
+    observacoes: p.customer_name
+      ? "Cadastrado automaticamente via IA WhatsApp."
+      : "Cadastrado automaticamente via IA WhatsApp (nome a confirmar).",
     status: "ativo",
     origem: "ia_whatsapp",
     createdAt: new Date().toISOString(),
@@ -11246,7 +11282,13 @@ function UserManagement({ currentUser, addToast }) {
             avatar: updated.avatar || nome.slice(0, 2).toUpperCase(),
           });
           if (!r.ok) {
-            addToast(`Falha ao atualizar senha no Auth: ${r.error}`, "error");
+            // Mostra reasons[] detalhado quando edge function rejeita por
+            // weak_password — admin vê motivo específico (ex.: "Mínimo 12
+            // caracteres") em vez de cryptic "weak_password".
+            const detalhe = Array.isArray(r.reasons) && r.reasons.length > 0
+              ? r.reasons.map(passwordReasonToPtBr).join("; ")
+              : r.error;
+            addToast(`Falha ao atualizar senha: ${detalhe}`, "error");
             return;
           }
         }
@@ -11294,7 +11336,10 @@ function UserManagement({ currentUser, addToast }) {
         redirect_to: redirectTo,
       });
       if (!provision.ok) {
-        addToast(`Falha ao enviar convite: ${provision.error}`, "error");
+        const detalhe = Array.isArray(provision.reasons) && provision.reasons.length > 0
+          ? provision.reasons.map(passwordReasonToPtBr).join("; ")
+          : provision.error;
+        addToast(`Falha ao enviar convite: ${detalhe}`, "error");
         return;
       }
       newUser.authUserId = provision.auth_user_id;
