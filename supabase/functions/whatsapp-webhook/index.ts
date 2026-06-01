@@ -91,7 +91,11 @@ Deno.serve(async (req) => {
 
   const data = body?.data;
   const key = data?.key;
-  if (!key || key.fromMe === true) return ok();
+  if (!key) return ok();
+  // fromMe = mensagem SAINDO do número do negócio. Antes era ignorada; agora é
+  // usada pro handoff humano: se o operador responde manual pelo WhatsApp, a IA
+  // pausa naquele cliente (ver handleOperatorMessage).
+  const fromMe = key.fromMe === true;
   const remoteJid: string = key.remoteJid || "";
   if (remoteJid.endsWith("@g.us")) return ok(); // grupo
 
@@ -108,6 +112,7 @@ Deno.serve(async (req) => {
     pushName: data?.pushName || "",
     text,
     hasImage,
+    fromMe,
     messageId: key.id || "",
   });
   // @ts-ignore EdgeRuntime existe no runtime Supabase
@@ -121,8 +126,13 @@ interface Job {
   pushName: string;
   text: string;
   hasImage: boolean;
+  fromMe: boolean;
   messageId: string;
 }
+
+// Comando que o operador manda no chat pra DEVOLVER o atendimento à IA.
+// Qualquer outra mensagem do operador (fromMe) faz a IA pausar naquele cliente.
+const REENABLE_COMMAND = "#ia";
 
 async function handleMessage(j: Job) {
   const supabase = createClient(
@@ -158,13 +168,22 @@ async function handleMessage(j: Job) {
     company_id: cfg.company_id,
     customer_phone: j.phone,
   };
-  if (j.pushName) convRow.customer_name = j.pushName;
+  // Só usa pushName pra nomear o cliente em mensagens DELE (não nas do operador).
+  if (j.pushName && !j.fromMe) convRow.customer_name = j.pushName;
   const { data: conv, error: convErr } = await supabase
     .from("ai_conversations")
     .upsert(convRow, { onConflict: "company_id,customer_phone" })
     .select("id, status")
     .single();
   if (convErr || !conv) { console.error("[whatsapp-webhook] upsert conversa:", convErr); return; }
+
+  // ── Mensagem SAINDO do número do negócio (fromMe) ────────────────────────
+  // Pode ser: (a) eco da própria IA/sistema → ignora; (b) comando #ia do
+  // operador → religa a IA; (c) operador respondendo manual → pausa a IA.
+  if (j.fromMe) {
+    await handleOperatorMessage(supabase, cfg.company_id, conv.id, j.text);
+    return;
+  }
 
   // ── Imagem: baixa da Evolution → Storage ─────────────────────────────────
   let mediaUrl: string | null = null;
@@ -278,6 +297,47 @@ async function handleMessage(j: Job) {
 
   if (handoff) {
     await supabase.from("ai_conversations").update({ status: "pending_human" }).eq("id", conv.id);
+  }
+}
+
+// Trata mensagem que SAIU do número do negócio (fromMe). Decide entre eco,
+// comando de religar a IA, ou handoff humano (operador assumiu a conversa).
+async function handleOperatorMessage(
+  supabase: SupabaseClient, companyId: string, conversationId: string, text: string,
+) {
+  const limpo = (text || "").trim();
+
+  // Comando explícito pra devolver o atendimento à IA.
+  if (limpo.toLowerCase() === REENABLE_COMMAND) {
+    await supabase.from("ai_conversations")
+      .update({ status: "active", ai_handoff_reason: null })
+      .eq("id", conversationId);
+    return;
+  }
+
+  // Eco da própria IA/sistema: a mensagem já foi gravada como role=agent ANTES
+  // de ser enviada (e a msg de aprovação também). Se o texto bate com uma das
+  // últimas respostas do agente, é eco — não é o operador. Não pausa.
+  const { data: recentAgent } = await supabase
+    .from("ai_messages")
+    .select("content")
+    .eq("conversation_id", conversationId)
+    .eq("role", "agent")
+    .order("created_at", { ascending: false })
+    .limit(5);
+  if ((recentAgent || []).some((m: { content: string | null }) => (m.content || "").trim() === limpo)) {
+    return; // eco, ignora
+  }
+
+  // Operador respondeu manualmente → pausa a IA naquele cliente e registra a
+  // fala do humano na timeline da conversa (pro app mostrar).
+  await supabase.from("ai_conversations")
+    .update({ status: "pending_human" })
+    .eq("id", conversationId);
+  if (limpo) {
+    await supabase.from("ai_messages").insert({
+      conversation_id: conversationId, company_id: companyId, role: "agent", content: limpo,
+    });
   }
 }
 

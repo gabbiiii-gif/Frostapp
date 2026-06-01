@@ -130,3 +130,10 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - testes: utils.test.js +2 (discount_note); 60/60 verdes. build Vite OK.
 - touched: modules/ia-atendimento.md, CLAUDE.md (tabela Edge Functions), src/utils.js, src/utils.test.js, src/App.jsx, supabase/functions/whatsapp-webhook, supabase/functions/frost-notify-approval
 - PENDENTE OPERADOR: deploy do frontend na Vercel (mudanças em App.jsx/utils.js não estão num repo git aqui). Edge functions + system_prompt já estão live.
+
+## [2026-06-01] ingest | handoff humano pelo WhatsApp (sem app)
+- gatilho: usuário quer que o operador assuma a conversa respondendo direto no WhatsApp, sem entrar no app, sem conflito de resposta com a IA
+- mecanismo: webhook passou a tratar eventos fromMe (handleOperatorMessage). Operador responde manual → status='pending_human' (Gate 1 já pausava a IA). Comando '#ia' (REENABLE_COMMAND) → status='active'. Eco da própria IA/aprovação reconhecido por comparação de texto com as últimas 5 msgs role=agent (a resposta é gravada antes do envio → eco chega depois, sem race).
+- sem mudança de schema: reusa ai_conversations.status + whatsapp_processed_messages. Backup: botão "Reativar IA" no app.
+- deploy: whatsapp-webhook v10. commit/push main.
+- touched: supabase/functions/whatsapp-webhook/index.ts, modules/ia-atendimento.md

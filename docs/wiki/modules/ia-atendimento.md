@@ -47,3 +47,13 @@ O agente roda na Edge Function `whatsapp-webhook` (não mais n8n). Mudanças des
 - **Descontos:** aniversariante e 1º serviço, ambos **15% em pagamento à vista**, não acumulam. A IA sinaliza via campo `discount_note` no `propose_os` → vira nota na `observacoes` da OS (`createOSFromProposal`) pro técnico aplicar.
 - **Fix de prefixo kv_store:** `get_recent_os`/`get_customer` usam `kvList()` que tenta o prefixo escopado (`<company_id>:erp:...`) e cai pro legado sem prefixo (`erp:...`). Os dados de prod são legados (bare) — o `get_recent_os` antigo (`${company_id}:erp:os:`) nunca achava nada.
 - **Aviso ao aprovar (Edge `frost-notify-approval`, verify_jwt=true):** ao aprovar uma proposta, `approveProposal` chama a function que manda WhatsApp ao cliente ("solicitação verificada por um atendente, contato humano em seguida") e grava a msg em `ai_messages`. Valida que o caller é admin/gerente ativo da empresa.
+
+## Handoff humano pelo WhatsApp (sem abrir o app)
+
+O Gate 1 do webhook (`status != 'active' → return`) já pausa a IA. O webhook agora usa os eventos `fromMe` (mensagens que saem do número do negócio) pra automatizar o handoff (`handleOperatorMessage`):
+
+- **Operador responde manual no WhatsApp** → IA pausa naquele cliente (`status='pending_human'`), a fala do humano é gravada em `ai_messages`. Cliente continua mandando msg (registradas), mas a IA não responde.
+- **Operador manda `#ia`** (constante `REENABLE_COMMAND`) → IA reassume (`status='active'`). O comando não é repassado ao cliente.
+- **Distinção IA vs humano (eco):** todo `fromMe` é comparado com as últimas 5 msgs `role=agent` da conversa; se o texto bate, é eco da própria IA/aprovação → ignora (não pausa). A resposta da IA é gravada antes de enviar, então o eco sempre chega depois (sem race).
+- **Backup:** botão "Reativar IA" no app (`status='active'`) continua valendo.
+- Sem mudança de schema — reusa `ai_conversations.status` e `whatsapp_processed_messages` (dedupe).
