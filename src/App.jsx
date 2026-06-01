@@ -1297,7 +1297,12 @@ function createOSFromProposal(p) {
     dataAgendada: null,
     horaAgendada: "",
     dataConclusao: null,
-    observacoes: `Telefone WhatsApp: ${p.phone || ""}`,
+    // Anexa a observação de desconto sinalizada pela IA (aniversariante /
+    // primeiro serviço, 15% à vista) pra o técnico aplicar na hora do orçamento.
+    observacoes: [
+      `Telefone WhatsApp: ${p.phone || ""}`,
+      p.discount_note ? `💸 DESCONTO: ${p.discount_note}` : "",
+    ].filter(Boolean).join("\n"),
     valor: 0,
     itensUtilizados: [],
     fotos: Array.isArray(p.media_urls) ? p.media_urls : [],
@@ -2645,10 +2650,13 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
   const [bioBusy, setBioBusy] = useState(false);
   // Diálogo "Esqueci minha senha" (recovery via Supabase Auth — Fase 2.2)
   const [showForgot, setShowForgot] = useState(false);
-  // Inicializa a partir do sessionStorage para que o lockout persista entre recargas
-  const initial = readLoginAttempts();
-  const [failedAttempts, setFailedAttempts] = useState(initial.count);
-  const [lockoutUntil, setLockoutUntil] = useState(initial.lockoutUntil > Date.now() ? initial.lockoutUntil : null);
+  // Inicializa a partir do sessionStorage para que o lockout persista entre recargas.
+  // Lazy init (callback) — evita ler/computar Date.now em cada render.
+  const [failedAttempts, setFailedAttempts] = useState(() => readLoginAttempts().count);
+  const [lockoutUntil, setLockoutUntil] = useState(() => {
+    const i = readLoginAttempts();
+    return i.lockoutUntil > Date.now() ? i.lockoutUntil : null;
+  });
   const [lockoutSeconds, setLockoutSeconds] = useState(0);
 
   // Countdown do lockout — atualiza a cada segundo enquanto bloqueado
@@ -14100,6 +14108,18 @@ function IAAtendimentoModule({ user, addToast }) {
     if (prop.conversation_id) {
       await supabase.from("ai_conversations").update({ linked_os_id: os.id }).eq("id", prop.conversation_id);
     }
+    // Avisa o cliente no WhatsApp que a solicitação foi verificada por um humano
+    // e que o contato humanizado vem em seguida. Fire-and-forget: não bloqueia a
+    // aprovação nem falha a UI se o envio der erro (edge function frost-notify-approval).
+    supabase.functions.invoke("frost-notify-approval", {
+      body: {
+        company_id: companyId,
+        conversation_id: prop.conversation_id || null,
+        customer_phone: prop.payload?.phone || "",
+        customer_name: prop.payload?.customer_name || "",
+        os_numero: os.numero,
+      },
+    }).catch((err) => console.error("frost-notify-approval:", err?.message));
     addToast?.(`OS ${os.numero} criada a partir da proposta.`, "success");
     loadProposals();
   };

@@ -1,7 +1,7 @@
 // Edge Function: whatsapp-webhook
 // ─────────────────────────────────────────────────────────────────────────────
 // Recebe o webhook MESSAGES_UPSERT da Evolution API, persiste a conversa e roda
-// o agente de IA (Claude Haiku 4.5). Substitui o orquestrador n8n.
+// o agente de IA (Claude Sonnet 4.6). Substitui o orquestrador n8n.
 //
 // Auth: query param ?token= comparado ao secret WEBHOOK_TOKEN.
 // Resposta: 200 imediato; processamento da IA em background (waitUntil).
@@ -12,7 +12,10 @@
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-haiku-4-5";
+// Sonnet 4.6: raciocínio bem melhor que o Haiku pra conduzir o atendimento,
+// seguir o fluxo (nome primeiro, reconhecer cliente, regras de desconto) e
+// interpretar imagens. Custo/latência maiores, aceitos pra qualidade do bot.
+const MODEL = "claude-sonnet-4-6";
 const MAX_TOOL_ITERS = 5;
 const HISTORY_LIMIT = 20;
 
@@ -32,10 +35,21 @@ const TOOLS = [
         equipment_model: { type: "string", description: "Modelo (opcional, se o cliente souber)" },
         problem: { type: "string", description: "Descrição do problema" },
         phone: { type: "string", description: "Telefone de contato (opcional; usa o número do WhatsApp se omitido)" },
+        discount_note: { type: "string", description: "Observação de desconto a aplicar, quando o cliente tem direito (ex: '15% à vista — aniversariante' ou '15% à vista — primeiro serviço'). Deixe vazio se não houver desconto." },
       },
       // Só o essencial é obrigatório. Marca/modelo e telefone são opcionais —
       // o cliente nem sempre sabe a marca/modelo, e o telefone vem do WhatsApp.
       required: ["customer_name", "address", "equipment_type", "problem"],
+    },
+  },
+  {
+    name: "get_customer",
+    description:
+      "Verifica se o número de WhatsApp já é um CLIENTE CADASTRADO. Use no INÍCIO da conversa (o telefone é automático, não peça). Retorna {found, nome, primeiro_nome, data_nascimento, aniversario_mes_atual, ja_cliente}. Se found=false é cliente NOVO (oferecer desconto de primeiro serviço). Se aniversario_mes_atual=true, o cliente faz aniversário neste mês (desconto de aniversariante).",
+    input_schema: {
+      type: "object",
+      properties: { phone: { type: "string", description: "Telefone do cliente (opcional; usa o número do WhatsApp se omitido)" } },
+      required: [],
     },
   },
   {
@@ -226,11 +240,14 @@ async function handleMessage(j: Job) {
   });
 
   // ── Loop do agente Claude ────────────────────────────────────────────────
+  // Injeta a data de hoje no prompt: a IA não tem relógio e errava o mês do
+  // aniversário (dava desconto fora do mês). Agora tem a referência explícita.
+  const systemPrompt = `${cfg.system_prompt}\n\n== CONTEXTO ATUAL ==\n${contextoData()}`;
   let resposta = "";
   let handoff = false;
   try {
     for (let iter = 0; iter < MAX_TOOL_ITERS; iter++) {
-      const ai = await chamarClaude(cfg.system_prompt, messages);
+      const ai = await chamarClaude(systemPrompt, messages);
       const toolUses = (ai.content || []).filter((c: any) => c.type === "tool_use");
       const textos = (ai.content || []).filter((c: any) => c.type === "text").map((c: any) => c.text);
       if (textos.length) resposta = textos.join("\n").trim();
@@ -265,6 +282,67 @@ async function handleMessage(j: Job) {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+// Data/hora de hoje no fuso de Brasília (UTC-3) — injetada no system prompt pra
+// a IA ter referência ao decidir desconto de aniversário (mês corrente).
+function brasiliaNow(): Date {
+  return new Date(Date.now() - 3 * 3600 * 1000);
+}
+function contextoData(): string {
+  const br = brasiliaNow();
+  const meses = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+  const d = String(br.getUTCDate()).padStart(2, "0");
+  const m = br.getUTCMonth(); // 0-11
+  const y = br.getUTCFullYear();
+  return `Data de hoje: ${d}/${String(m + 1).padStart(2, "0")}/${y}. Mês atual: ${meses[m]} (${m + 1}). Use isso para decidir o desconto de aniversário — só vale se o aniversário do cliente cair NESTE mês.`;
+}
+
+// Só dígitos
+function normDigits(s: unknown): string {
+  return String(s ?? "").replace(/\D/g, "");
+}
+
+// Remove DDI 55 quando presente (números BR de WhatsApp vêm como 55DDXXXXXXXXX)
+function stripDDI(d: string): string {
+  return d.length > 11 && d.startsWith("55") ? d.slice(2) : d;
+}
+
+// Compara dois telefones tolerando DDI/máscara. Igualdade total ou sufixo de 8
+// dígitos (número do assinante) — cobre cadastros legados sem DDD/DDI.
+function phonesMatch(a: unknown, b: unknown): boolean {
+  const x = stripDDI(normDigits(a));
+  const y = stripDDI(normDigits(b));
+  if (!x || !y) return false;
+  if (x === y) return true;
+  return x.length >= 8 && y.length >= 8 && x.slice(-8) === y.slice(-8);
+}
+
+// O telefone aparece dentro de um texto livre (ex: observações da OS)?
+function phoneInText(text: unknown, tel: unknown): boolean {
+  const hay = normDigits(text);
+  const needle = stripDDI(normDigits(tel));
+  return needle.length >= 8 && hay.includes(needle.slice(-8));
+}
+
+// O aniversário (YYYY-MM-DD) cai no mês corrente de Brasília?
+function aniversarioMesAtual(dataNasc: string): boolean {
+  const m = parseInt(String(dataNasc).slice(5, 7), 10);
+  return m >= 1 && m <= 12 && m === brasiliaNow().getUTCMonth() + 1;
+}
+
+// Lista registros do kv_store por sufixo de chave, tolerando os dois formatos:
+// escopado (`<company_id>:erp:...`) e legado sem prefixo (`erp:...`). Os dados
+// atuais são legados (bare); o fallback garante que funcione em ambos.
+async function kvList(
+  supabase: SupabaseClient, companyId: string, suffix: string,
+): Promise<Array<{ key: string; value: unknown }>> {
+  const scoped = await supabase
+    .from("kv_store").select("key, value").like("key", `${companyId}:${suffix}%`).limit(2000);
+  if (scoped.data && scoped.data.length) return scoped.data as Array<{ key: string; value: unknown }>;
+  const bare = await supabase
+    .from("kv_store").select("key, value").like("key", `${suffix}%`).limit(2000);
+  return (bare.data || []) as Array<{ key: string; value: unknown }>;
+}
 
 function dentroDoHorario(bh: any): boolean {
   if (!bh) return true;
@@ -314,6 +392,8 @@ async function executarTool(
       problem: String(input.problem || "").trim(),
       phone: String(input.phone || phone).replace(/\D/g, ""),
       media_urls: mediaUrl ? [mediaUrl] : [],
+      // Observação de desconto sinalizada pela IA (vira nota na OS pro técnico).
+      discount_note: String(input.discount_note || "").trim(),
     };
     const { error } = await supabase.from("ai_os_proposals").insert({
       company_id: cfg.company_id, conversation_id: conversationId, payload,
@@ -322,19 +402,33 @@ async function executarTool(
     return "Proposta registrada com sucesso. Um atendente vai analisar.";
   }
 
+  if (name === "get_customer") {
+    const tel = String(input.phone || phone);
+    const rows = await kvList(supabase, cfg.company_id, "erp:client:");
+    const cli = rows
+      .map((r) => r.value as Record<string, unknown> | null)
+      .find((v) => v && [v.telefone, v.celular, v.whatsapp, v.fone].some((c) => phonesMatch(c, tel)));
+    if (!cli) return JSON.stringify({ found: false, ja_cliente: false });
+    const nome = String(cli.nome || cli.razaoSocial || "").trim();
+    const dn = (cli.data_nascimento || cli.dataNascimento || null) as string | null;
+    return JSON.stringify({
+      found: true,
+      ja_cliente: true,
+      nome,
+      primeiro_nome: nome.split(/\s+/)[0] || "",
+      data_nascimento: dn,
+      aniversario_mes_atual: dn ? aniversarioMesAtual(dn) : false,
+    });
+  }
+
   if (name === "get_recent_os") {
-    const tel = String(input.phone || phone).replace(/\D/g, "");
-    const { data: rows } = await supabase
-      .from("kv_store")
-      .select("value")
-      .like("key", `${cfg.company_id}:erp:os:%`)
-      .limit(200);
-    const matched = (rows || [])
-      .map((r: any) => r.value)
-      .filter((os: any) => String(os?.observacoes || "").replace(/\D/g, "").includes(tel)
-        || String(os?.telefone || "").replace(/\D/g, "").includes(tel))
+    const tel = String(input.phone || phone);
+    const rows = await kvList(supabase, cfg.company_id, "erp:os:");
+    const matched = rows
+      .map((r) => r.value as Record<string, unknown>)
+      .filter((os) => os && (phonesMatch(os.telefone, tel) || phoneInText(os.observacoes, tel)))
       .slice(0, 5)
-      .map((os: any) => ({ numero: os.numero, status: os.status, descricao: os.descricao }));
+      .map((os) => ({ numero: os.numero, status: os.status, descricao: os.descricao }));
     return matched.length ? JSON.stringify(matched) : "Nenhuma OS encontrada para este telefone.";
   }
 

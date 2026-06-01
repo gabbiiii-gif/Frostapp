@@ -156,6 +156,9 @@ export function validateOSProposal(input) {
     problem: String(src.problem ?? "").trim(),
     phone: String(src.phone ?? "").replace(/\D/g, ""),
     media_urls: Array.isArray(src.media_urls) ? src.media_urls.filter(Boolean) : [],
+    // Observação de desconto sinalizada pela IA (aniversariante / primeiro
+    // serviço). Vira nota na OS pro técnico aplicar — a IA nunca fecha valor.
+    discount_note: String(src.discount_note ?? "").trim(),
   };
   return { valid: missing.length === 0, missing, payload };
 }

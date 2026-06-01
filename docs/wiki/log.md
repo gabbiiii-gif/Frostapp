@@ -117,3 +117,16 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
   TOGGLEABLE_MODULES + filtro navItems + fallback activeModule (App.jsx);
   checkboxes no formulário de empresa do MasterApp
 - touched: concepts/role-permissions.md
+
+## [2026-06-01] ingest | IA WhatsApp: Sonnet 4.6 + reconhecer cliente + descontos + aviso de aprovação
+- gatilho: usuário pediu (1) nome primeiro + primeiro nome sempre; (2) corrigir desconto de aniversário dado fora do mês; (3) saber se cliente já contatou antes; (4) WhatsApp ao aprovar OS; (5) desconto p/ cliente novo. Também: subir versão do modelo.
+- modelo: whatsapp-webhook MODEL claude-haiku-4-5 → claude-sonnet-4-6 (deploy v9)
+- tools: nova get_customer (lookup cliente por telefone no kv_store); discount_note no propose_os
+- fix kv_store: get_recent_os/get_customer usam kvList() (escopado + fallback bare). Prefixo antigo `${company_id}:erp:os:` nunca achava nada (dados de prod são bare `erp:os:`). frost-update-birthday tem o mesmo bug de prefixo (cmp_cmp_default) — marcado, não corrigido (órfão).
+- desconto aniversário (bug): calculado em código (aniversarioMesAtual, fuso Brasília) + data de hoje injetada no prompt (== CONTEXTO ATUAL ==). Prompt só oferece se aniversario_mes_atual=true.
+- descontos: aniversariante e 1º serviço, ambos 15% à vista, não acumulam. discount_note → observacoes da OS (createOSFromProposal).
+- system_prompt (ai_agent_config, cmp_default): reescrito — nome primeiro, get_customer no início, regras de desconto corretas.
+- aprovação: nova Edge frost-notify-approval (verify_jwt=true, valida admin/gerente ativo) envia WhatsApp ao cliente + grava em ai_messages. approveProposal (App.jsx) invoca fire-and-forget.
+- testes: utils.test.js +2 (discount_note); 60/60 verdes. build Vite OK.
+- touched: modules/ia-atendimento.md, CLAUDE.md (tabela Edge Functions), src/utils.js, src/utils.test.js, src/App.jsx, supabase/functions/whatsapp-webhook, supabase/functions/frost-notify-approval
+- PENDENTE OPERADOR: deploy do frontend na Vercel (mudanças em App.jsx/utils.js não estão num repo git aqui). Edge functions + system_prompt já estão live.

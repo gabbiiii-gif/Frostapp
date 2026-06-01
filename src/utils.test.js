@@ -231,6 +231,14 @@ describe("validateOSProposal", () => {
     const r = validateOSProposal({ ...base, media_urls: ["http://x/a.jpg"] });
     expect(r.payload.media_urls).toEqual(["http://x/a.jpg"]);
   });
+  it("preserva discount_note quando informado pela IA", () => {
+    const r = validateOSProposal({ ...base, discount_note: "15% à vista (aniversariante)" });
+    expect(r.payload.discount_note).toBe("15% à vista (aniversariante)");
+  });
+  it("discount_note vazio por padrão", () => {
+    const r = validateOSProposal({ ...base });
+    expect(r.payload.discount_note).toBe("");
+  });
 });
 
 describe("buildOSWhatsAppResumo", () => {

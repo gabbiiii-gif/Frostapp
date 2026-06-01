@@ -348,7 +348,8 @@ Pasta `supabase/functions/`. Deploy com `supabase functions deploy <nome>`.
 | `frost-conversation`     | false | Frost Fase 4 — get-or-create ai_conversations (chamado pelo n8n)         |
 | `frost-propose-os`       | false | Frost Fase 4 — tool: salva proposta em ai_os_proposals + notifica admin  |
 | `frost-handoff`          | false | Frost Fase 4 — tool: marca ai_conversations.status=handoff + notifica    |
-| `frost-update-birthday`  | false | Frost Fase 4 — tool: atualiza data_nascimento de cliente em kv_store     |
+| `frost-update-birthday`  | false | Frost Fase 4 — tool: atualiza data_nascimento de cliente em kv_store (⚠️ prefixo kv_store provavelmente quebrado — ver wiki ia-atendimento) |
+| `frost-notify-approval`  | true  | Avisa o cliente por WhatsApp quando o atendente aprova a proposta de OS  |
 
 ### admin-create-user — provisionamento de usuário
 

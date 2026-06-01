@@ -8,8 +8,6 @@
 //
 // O manifest de precache é injetado pelo vite-plugin-pwa em build time
 // no placeholder self.__WB_MANIFEST.
-/* eslint-env serviceworker */
-/* global self */
 
 import { precacheAndRoute, cleanupOutdatedCaches } from 'workbox-precaching';
 import { registerRoute } from 'workbox-routing';
@@ -32,7 +30,7 @@ registerRoute(
 // ─── 3. Push handler ─────────────────────────────────────────────────────────
 // Payload esperado (JSON): { title, body, url, ts }
 self.addEventListener('push', (event) => {
-  let data = {};
+  let data;
   try {
     data = event.data ? event.data.json() : {};
   } catch {
