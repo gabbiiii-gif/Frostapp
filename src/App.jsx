@@ -102,6 +102,15 @@ import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
 import { FrostIcon } from "./FrostIcons.jsx";
 import AnimatedLogo from "./AnimatedLogo.jsx";
 import PosVendaModule from "./modules/PosVendaModule.jsx";
+// ─── Módulos verticais novos (2026-06) ───
+// Ponto Eletrônico: registro de jornada via biometria/facial/PIN + banco de
+// horas + ocorrências/justificativas.
+import PontoModule from "./modules/PontoModule.jsx";
+// Escola: módulo isolado para demandas da cliente Vanda (sem integração com
+// OS comuns ou financeiro).
+import EscolaModule from "./modules/EscolaModule.jsx";
+// Portal externo da Vanda — shell completamente separado do ERP.
+import EscolaPortalVanda from "./modules/EscolaPortalVanda.jsx";
 // Catálogos de seed (serviços + produtos) são carregados sob demanda via dynamic
 // import dentro das funções de seed — evita inflar o bundle inicial com ~96KB
 // de JSON que só roda no primeiro boot do dispositivo.
@@ -258,6 +267,17 @@ const SCOPED_PREFIXES = [
   "erp:service:",
   "erp:audit:",
   "erp:autoBackup:",
+  // ─── Módulo Ponto Eletrônico ───
+  // Registros de batidas (entrada/saída/intervalos), config de jornada por
+  // funcionário e ocorrências (atestados, faltas justificadas, etc.).
+  "erp:ponto:",
+  "erp:jornada:",
+  "erp:ocorrencia:",
+  // ─── Módulo Escola (Vanda) ───
+  // Demandas enviadas pela Vanda e timeline interna de eventos. ISOLADO
+  // do financeiro: nada aqui gera OS comum ou transação financeira.
+  "erp:escola:",
+  "erp:evento_escola:",
 ];
 
 // Usuário ativo — para que DB consiga registrar autoria nos logs de auditoria.
@@ -375,6 +395,12 @@ function ensureAutoBackup(companyId) {
 // vê. Skipa silenciosamente keys não auditadas e a própria entrada de auditoria.
 const AUDITED_PREFIXES = [
   "erp:os:", "erp:client:", "erp:employee:", "erp:finance:", "erp:user:",
+  // Ponto: toda inclusão/edição manual de registro precisa de rastro auditável,
+  // e mudanças de status de ocorrências (aprovado/rejeitado) também.
+  "erp:ponto:", "erp:ocorrencia:",
+  // Escola: transições de status (assumido, concluído) ficam no log
+  // — útil para SLA e relatórios de auditoria do contrato Vanda.
+  "erp:escola:",
 ];
 function shouldAudit(key) {
   if (!key) return false;
@@ -388,6 +414,11 @@ function summarizeRecord(prefix, value) {
   if (prefix === "erp:employee:") return value.nome || value.id || "";
   if (prefix === "erp:user:") return `${value.nome || ""} <${value.email || ""}>`;
   if (prefix === "erp:finance:") return `${value.tipo || ""} R$${value.valor || 0} — ${value.descricao || ""}`.trim();
+  // Ponto: descreve o registro (tipo + datahora) ou o motivo da edição manual.
+  if (prefix === "erp:ponto:") return `${value.tipo || "registro"} ${value.datahora || ""} ${value.manual_motivo ? "(manual: " + value.manual_motivo + ")" : ""}`.trim();
+  if (prefix === "erp:ocorrencia:") return `${value.tipo || ""} ${value.data_ref || ""} → ${value.status || "pendente"}`.trim();
+  // Escola: identifica a demanda pelo nome da escola + status atual.
+  if (prefix === "erp:escola:") return `${value.escola_nome || "Demanda"} — ${value.status || ""} (${value.urgencia || ""})`.trim();
   return value.id || "";
 }
 function recordAudit(action, key, value, prevValue) {
@@ -1325,6 +1356,9 @@ const ALL_MODULES = [
   { id: "ia", label: "IA / Atendimento" },
   { id: "pos-venda", label: "Pós-Venda" },
   { id: "folha", label: "Folha de Pagamento" },
+  // Novos módulos verticais
+  { id: "ponto", label: "Ponto Eletrônico" },
+  { id: "escola", label: "Escola (Vanda)" },
   { id: "config", label: "Configurações (admin)" },
 ];
 
@@ -1338,6 +1372,8 @@ const TOGGLEABLE_MODULES = [
   { id: "ia", label: "IA / Atendimento" },
   { id: "pos-venda", label: "Pós-Venda" },
   { id: "folha", label: "Folha de Pagamento" },
+  { id: "ponto", label: "Ponto Eletrônico" },
+  { id: "escola", label: "Escola (Vanda)" },
 ];
 
 // hasPermission respeita customPermissions quando o array está definido (mesmo vazio,
@@ -15806,6 +15842,11 @@ export default function App() {
       { id: "ia", label: "IA / Atendimento", iconName: "agenda", module: "ia" },
       { id: "pos-venda", label: "Pós-Venda", iconName: "agenda", module: "pos-venda" },
       { id: "folha", label: "Folha de Pagamento", iconName: "financeiro", module: "folha" },
+      // Ponto: acessível por todos os roles internos (cada um vê o que lhe cabe
+      // no próprio PontoModule). Escola: apenas admin/gerente no painel interno;
+      // a Vanda usa portal isolado (não passa pelo sidebar).
+      { id: "ponto", label: "Ponto Eletrônico", iconName: "agenda", module: "ponto" },
+      { id: "escola", label: "Escola", iconName: "cadastros", module: "escola" },
       { id: "config", label: "Configurações", iconName: "config", module: "config" },
     ];
 
@@ -16059,6 +16100,18 @@ export default function App() {
       <>
         <ToastContainer toasts={toasts} removeToast={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
         <TecnicoMobileApp user={user} onLogout={handleLogout} addToast={addToast} theme={theme} setTheme={setTheme} />
+      </>
+    );
+  }
+
+  // ─── Roteamento por role: cliente_escola (Vanda) vê portal isolado ───
+  // Portal externo para a cliente Vanda solicitar e acompanhar demandas.
+  // NÃO tem sidebar, NÃO tem acesso a OS, financeiro nem cadastros.
+  if (user.role === "cliente_escola") {
+    return (
+      <>
+        <ToastContainer toasts={toasts} removeToast={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
+        <EscolaPortalVanda user={user} onLogout={handleLogout} addToast={addToast} db={DB} />
       </>
     );
   }
@@ -16403,6 +16456,12 @@ export default function App() {
             )}
             {activeModule === "folha" && (
               <FolhaModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} />
+            )}
+            {activeModule === "ponto" && (
+              <PontoModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} db={DB} />
+            )}
+            {activeModule === "escola" && (
+              <EscolaModule user={user} addToast={addToast} reloadData={loadAllData} db={DB} />
             )}
             {activeModule === "config" && (
               <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} theme={theme} setTheme={setTheme} />

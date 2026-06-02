@@ -32,11 +32,20 @@ export const STATUS_MAP = {
 };
 
 // Matriz de permissões por role — inclui módulo financeiro
+// Módulos novos:
+//   ponto  — Ponto Eletrônico (todos os usuários internos batem o próprio
+//            ponto; admin/gerente veem painel da equipe).
+//   escola — Demandas escolares (Vanda) — isolado do financeiro.
+//   cliente_escola é a role do portal externo da Vanda: vê APENAS o portal
+//   de solicitação. Não tem acesso a nenhum outro módulo do ERP.
 export const ROLE_PERMISSIONS = {
   admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha", "pos-venda"],
-  tecnico: ["dashboard", "os", "agenda"],
-  atendente: ["dashboard", "clientes", "os", "agenda", "ia", "pos-venda"],
+  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha", "pos-venda", "ponto", "escola"],
+  tecnico: ["dashboard", "os", "agenda", "ponto"],
+  atendente: ["dashboard", "clientes", "os", "agenda", "ia", "pos-venda", "ponto"],
+  // Role exclusiva do portal da Vanda. Único módulo: "escola-portal".
+  // Render branch em App.jsx detecta esta role e mostra EscolaPortalVanda.
+  cliente_escola: ["escola-portal"],
 };
 
 // ─── CARGOS de funcionários ──────────────────────────────────────────────────

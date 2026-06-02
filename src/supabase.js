@@ -344,6 +344,51 @@ export async function notifyOsCreated(companyId, osData) {
   }
 }
 
+// ─── Notificação de eventos do módulo Escola (Vanda) ────────────────────────
+// Fire-and-forget POST pra edge function notify-escola-event. Dispara emails
+// via send-email (Resend) conforme o evento:
+//   criada     → equipe interna (admin/gerente/tecnico) + confirmação Vanda
+//   concluida  → Vanda
+//   cancelada  → Vanda
+//   reaberta   → equipe interna
+//   assumida   → (sem email — config futura)
+//
+// Falhas são silenciosas: a transição de status no client NÃO pode travar por
+// causa de email indisponível. Caller passa fire-and-forget (sem await que
+// bloqueie a UI), igual ao notifyOsCreated.
+export async function notifyEscolaEvent(companyId, evento, demanda) {
+  if (!supabase || !companyId || !evento || !demanda) {
+    return { ok: false, error: 'params' };
+  }
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return { ok: false, error: 'no_session' };
+    const resp = await fetch(`${supabaseUrl}/functions/v1/notify-escola-event`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseKey,
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ companyId, evento, demanda }),
+      keepalive: true,
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok || !body.ok) {
+      return { ok: false, error: body.error || `HTTP ${resp.status}` };
+    }
+    return {
+      ok: true,
+      sent_to: body.sent_to,
+      total_recipients: body.total_recipients,
+      skipped: body.skipped,
+      errors: body.errors,
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 // ─── 2FA via Supabase MFA built-in (Fase 2.5) ───────────────────────────────
 // Refactor do 2FA TOTP: usa supabase.auth.mfa.* server-side em vez do
 // generateTotpSecret/verifyTotp custom. Cross-device automaticamente (factors
