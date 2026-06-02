@@ -33,6 +33,10 @@ import {
   getOuCriarDeviceId,
 } from "../lib/ponto.js";
 import { formatDate } from "../utils.js";
+// Biometria nativa (Capacitor) — funciona só em APK Android/iOS.
+// authenticateBiometric: prompt do OS (Touch/Face ID). Retorna boolean.
+// isBiometricAvailable: checa sensor + cadastro no device.
+import { isNative, isBiometricAvailable, authenticateBiometric } from "../platform.js";
 
 // Componentes faciais lazy — o chunk só baixa quando o usuário abre o modal
 // pela primeira vez. Mantém o bundle inicial leve para quem usa apenas PIN.
@@ -136,6 +140,22 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
   // Facial: descritor 128-dim médio gravado em ponto_face_descriptor.
   const temFacial = Array.isArray(userRecord?.ponto_face_descriptor)
     && userRecord.ponto_face_descriptor.length === 128;
+  // Biometria nativa: flag opt-in por user. Diferente da facial, NÃO armazenamos
+  // template — o OS (Android/iOS) gerencia. Apenas validamos quem está no
+  // device naquele momento. Vetor de risco: dois funcionários compartilhando
+  // device — ver doc de riscos em CLAUDE.md/wiki.
+  const temBiometria = !!userRecord?.ponto_biometria_enabled;
+
+  // Disponibilidade de biometria neste device — assíncrono, atualiza estado.
+  const [biometriaDisp, setBiometriaDisp] = useState({ checked: false, available: false, type: null });
+  useEffect(() => {
+    let cancelled = false;
+    if (!isNative()) { setBiometriaDisp({ checked: true, available: false, type: null }); return; }
+    isBiometricAvailable().then((r) => {
+      if (!cancelled) setBiometriaDisp({ checked: true, available: !!r?.available, type: r?.type || null });
+    });
+    return () => { cancelled = true; };
+  }, []);
 
   // Dia de hoje (em ISO local — sem timezone shift).
   const hojeISO = new Date().toISOString().slice(0, 10);
@@ -195,6 +215,39 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
     refresh();
   }, [userRecord, temFacial, db, user, addToast, refresh]);
 
+  // Habilita biometria nativa: testa o sensor pedindo autenticação uma vez
+  // (UX explícita — usuário confirma o toque/face antes de "ativar"). Salva
+  // a flag em erp:user para o fluxo de bater ponto detectar.
+  const handleToggleBiometria = useCallback(async () => {
+    if (!userRecord) return;
+    if (temBiometria) {
+      // Desabilitar — sem prompt extra (operação local, não invasiva).
+      const atualizado = { ...userRecord, ponto_biometria_enabled: false };
+      delete atualizado.ponto_biometria_enabled_at;
+      db.set(`erp:user:${user.id}`, atualizado);
+      addToast?.({ type: "info", message: "Biometria desabilitada." });
+      refresh();
+      return;
+    }
+    if (!biometriaDisp.available) {
+      addToast?.({ type: "error", message: "Sensor biométrico indisponível neste device." });
+      return;
+    }
+    const ok = await authenticateBiometric("Habilitar biometria para o ponto");
+    if (!ok) {
+      addToast?.({ type: "warning", message: "Autenticação biométrica falhou." });
+      return;
+    }
+    const atualizado = {
+      ...userRecord,
+      ponto_biometria_enabled: true,
+      ponto_biometria_enabled_at: new Date().toISOString(),
+    };
+    db.set(`erp:user:${user.id}`, atualizado);
+    addToast?.({ type: "success", message: "Biometria habilitada para o ponto." });
+    refresh();
+  }, [userRecord, temBiometria, biometriaDisp, db, user, addToast, refresh]);
+
   return (
     <div className="space-y-5">
       {/* Card principal */}
@@ -250,10 +303,26 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
               Remover facial
             </button>
           )}
+          {/* Toggle biometria nativa — só aparece em APK quando o sensor existe. */}
+          {biometriaDisp.checked && biometriaDisp.available && (
+            <button
+              type="button"
+              onClick={handleToggleBiometria}
+              className="text-xs text-gray-400 hover:text-white px-3 py-2"
+              title={temBiometria ? "Desabilitar biometria" : "Habilitar biometria nativa (impressão ou face)"}
+            >
+              {temBiometria ? "Desabilitar biometria" : "+ Habilitar biometria"}
+            </button>
+          )}
         </div>
         {temFacial && (
           <p className="mt-2 text-[11px] text-green-300/80">
             ✓ Reconhecimento facial ativo · cadastrado em {formatDate(userRecord.ponto_face_enrolled_at)}
+          </p>
+        )}
+        {temBiometria && (
+          <p className="mt-1 text-[11px] text-green-300/80">
+            ✓ Biometria nativa habilitada ({biometriaDisp.type || "sensor do device"}) · {formatDate(userRecord.ponto_biometria_enabled_at)}
           </p>
         )}
       </section>
@@ -312,6 +381,7 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
           addToast={addToast}
           proxima={proxima}
           temFacial={temFacial}
+          temBiometria={temBiometria}
           onClose={() => setShowBater(false)}
           onRegistrado={() => { setShowBater(false); refresh(); }}
         />
@@ -441,15 +511,17 @@ function SetupPinModal({ user, userRecord, db, addToast, temPin, onClose, onSave
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// BaterPontoModal — fluxo: facial (se cadastrado) com fallback PIN
+// BaterPontoModal — prioridade: biometria > facial > PIN
 // ────────────────────────────────────────────────────────────────────────────
 // Estados internos:
-//   "escolha"  — usuário escolhe método (mostra só se temFacial)
-//   "facial"   — abre FaceVerifyModal; sucesso registra direto, falha 2x cai para PIN
-//   "pin"      — entrada de PIN
-function BaterPontoModal({ user, userRecord, db, addToast, proxima, temFacial, onClose, onRegistrado }) {
-  // Modo inicial: facial se cadastrado, senão PIN.
-  const [modo, setModo] = useState(temFacial ? "facial" : "pin");
+//   "biometria" — dispara prompt nativo do OS (Capacitor). Sucesso → grava direto.
+//                 Falha → cai para facial (se temFacial) ou PIN.
+//   "facial"    — abre FaceVerifyModal; falha 2x cai para PIN
+//   "pin"       — entrada de PIN
+function BaterPontoModal({ user, userRecord, db, addToast, proxima, temFacial, temBiometria, onClose, onRegistrado }) {
+  // Modo inicial: respeita prioridade biometria > facial > PIN.
+  const modoInicial = temBiometria ? "biometria" : (temFacial ? "facial" : "pin");
+  const [modo, setModo] = useState(modoInicial);
   const [pin, setPin] = useState("");
   const [erro, setErro] = useState("");
   const [loading, setLoading] = useState(false);
@@ -474,6 +546,64 @@ function BaterPontoModal({ user, userRecord, db, addToast, proxima, temFacial, o
     });
     onRegistrado?.();
   }, [db, user, proxima, addToast, onRegistrado]);
+
+  // ─── Sub-fluxo: biometria nativa ───
+  // Prompt do OS abre direto (sem UI extra). Sucesso → grava. Falha → próximo
+  // método disponível. Auto-trigger ao entrar nesse modo: useEffect dispara
+  // imediatamente para não exigir clique adicional.
+  useEffect(() => {
+    if (modo !== "biometria") return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ok = await authenticateBiometric(`Registrar ponto — ${labelTipo(proxima)}`);
+        if (cancelled) return;
+        if (ok) {
+          await gravarRegistro("biometria");
+        } else {
+          // Falha (cancelado pelo usuário, sem cadastro ou sensor inacessível).
+          // Cai para próximo método disponível na ordem facial → PIN.
+          addToast?.({
+            type: "warning",
+            message: temFacial ? "Biometria falhou. Tente facial." : "Biometria falhou. Use PIN.",
+          });
+          setModo(temFacial ? "facial" : "pin");
+        }
+      } catch (err) {
+        if (cancelled) return;
+        addToast?.({ type: "error", message: err?.message || "Erro na biometria." });
+        setModo(temFacial ? "facial" : "pin");
+      }
+    })();
+    return () => { cancelled = true; };
+  // gravarRegistro/labelTipo são estáveis suficiente; dependência só do modo
+  // para evitar re-disparos.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modo]);
+
+  if (modo === "biometria") {
+    return (
+      <div
+        className="fixed inset-0 z-50 bg-black/70 backdrop-blur flex items-center justify-center p-4"
+        role="dialog"
+        aria-modal="true"
+        onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      >
+        <div className="w-full max-w-sm bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl p-6 text-center">
+          <p className="text-xs text-gray-400 uppercase tracking-wide">Próxima ação</p>
+          <h3 className="text-2xl font-bold text-white mt-1">{labelTipo(proxima)}</h3>
+          <p className="text-sm text-gray-300 mt-4">Aguardando autenticação biométrica…</p>
+          <button
+            type="button"
+            onClick={() => setModo(temFacial ? "facial" : "pin")}
+            className="mt-4 text-xs text-blue-400 hover:text-blue-300"
+          >
+            Usar {temFacial ? "facial" : "PIN"} em vez disso
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ─── Sub-fluxo: facial ───
   if (modo === "facial") {
@@ -552,16 +682,27 @@ function BaterPontoModal({ user, userRecord, db, addToast, proxima, temFacial, o
               {erro}
             </div>
           )}
-          <div className="flex items-center justify-between gap-2">
-            {temFacial && (
-              <button
-                type="button"
-                onClick={() => { setModo("facial"); setErro(""); setPin(""); }}
-                className="text-xs text-blue-400 hover:text-blue-300"
-              >
-                ← Tentar facial
-              </button>
-            )}
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div className="flex items-center gap-3">
+              {temBiometria && (
+                <button
+                  type="button"
+                  onClick={() => { setModo("biometria"); setErro(""); setPin(""); }}
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                >
+                  ← Tentar biometria
+                </button>
+              )}
+              {temFacial && (
+                <button
+                  type="button"
+                  onClick={() => { setModo("facial"); setErro(""); setPin(""); }}
+                  className="text-xs text-blue-400 hover:text-blue-300"
+                >
+                  ← Tentar facial
+                </button>
+              )}
+            </div>
             <div className="flex items-center gap-2 ml-auto">
               <button type="button" onClick={onClose} className="px-3 py-2 text-sm text-gray-300 hover:text-white" disabled={loading}>
                 Cancelar
