@@ -344,6 +344,71 @@ export async function notifyOsCreated(companyId, osData) {
   }
 }
 
+// ─── Upload de anexo de ocorrência de ponto ─────────────────────────────────
+// Sobe o arquivo no bucket privado `ponto-docs` (criado em
+// supabase/migrations/2026_06_02_ponto_escola.sql) sob o path
+// `<companyId>/<userId>/<timestamp>_<filename-saneado>`. A RLS isola por
+// company_member (caller só vê arquivos da própria empresa).
+//
+// Retorno:
+//   { ok: true, path, signedUrl? }   — caminho do bucket + URL temporária (1h)
+//   { ok: false, error }
+//
+// Fallback offline: sem Supabase configurado retorna ok:false. A UI deve
+// permitir prosseguir sem anexo apenas para tipos que não exigem documento.
+export async function uploadOcorrenciaDoc(file, companyId, userId, opts = {}) {
+  if (!supabase) return { ok: false, error: 'no_supabase' };
+  if (!file || !companyId || !userId) return { ok: false, error: 'params' };
+  try {
+    // Sanitiza filename: remove espaços/caracteres especiais (evita conflito
+    // com o path do Storage, que usa folders por separação de /).
+    const raw = file.name || 'documento';
+    const cleanName = raw.replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 80);
+    const path = `${companyId}/${userId}/${Date.now()}_${cleanName}`;
+
+    const { error: upErr } = await supabase
+      .storage
+      .from('ponto-docs')
+      .upload(path, file, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: file.type || 'application/octet-stream',
+      });
+    if (upErr) return { ok: false, error: upErr.message };
+
+    // URL assinada de 1h para preview imediato (admin geralmente avalia logo
+    // após o upload). Acessos posteriores buscam nova URL via getSignedUrl.
+    let signedUrl;
+    if (opts.signed !== false) {
+      const { data } = await supabase
+        .storage
+        .from('ponto-docs')
+        .createSignedUrl(path, 60 * 60);
+      signedUrl = data?.signedUrl;
+    }
+
+    return { ok: true, path, signedUrl, filename: cleanName };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'upload_failed' };
+  }
+}
+
+// Devolve URL assinada para um path já existente em ponto-docs.
+// Usado pelo admin ao abrir uma ocorrência para preview do anexo.
+export async function getOcorrenciaDocUrl(path, ttlSeconds = 3600) {
+  if (!supabase || !path) return null;
+  try {
+    const { data, error } = await supabase
+      .storage
+      .from('ponto-docs')
+      .createSignedUrl(path, ttlSeconds);
+    if (error) return null;
+    return data?.signedUrl || null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Notificação de eventos do módulo Escola (Vanda) ────────────────────────
 // Fire-and-forget POST pra edge function notify-escola-event. Dispara emails
 // via send-email (Resend) conforme o evento:

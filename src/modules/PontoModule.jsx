@@ -50,6 +50,9 @@ const PontoFaceLazy = {
 // então o chunk reaproveita.
 const PontoBancoHorasLazy = lazy(() => import("./PontoBancoHoras.jsx"));
 
+// Ocorrências/justificativas lazy — usa Supabase Storage para anexos.
+const PontoOcorrenciasLazy = lazy(() => import("./PontoOcorrencias.jsx"));
+
 // Coleta GPS de forma não-bloqueante. Resolve sempre — null em caso de erro
 // ou ausência de permissão. A captura roda em paralelo ao registro: se demorar
 // mais de 4s, segue sem GPS.
@@ -118,6 +121,13 @@ export default function PontoModule({ user, addToast, employees, reloadData, db 
           >
             Banco de horas
           </button>
+          <button
+            type="button"
+            onClick={() => setTab("ocorrencias")}
+            className={`px-3 py-1.5 text-xs font-semibold rounded whitespace-nowrap ${tab === "ocorrencias" ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}
+          >
+            Ocorrências
+          </button>
           {isAdminView && (
             <button
               type="button"
@@ -136,6 +146,17 @@ export default function PontoModule({ user, addToast, employees, reloadData, db 
       {tab === "banco" && (
         <Suspense fallback={<div className="text-sm text-gray-400 px-4 py-8 text-center">Carregando banco de horas…</div>}>
           <PontoBancoHorasLazy
+            user={user}
+            addToast={addToast}
+            db={db}
+            employees={employees}
+            isAdminView={isAdminView}
+          />
+        </Suspense>
+      )}
+      {tab === "ocorrencias" && (
+        <Suspense fallback={<div className="text-sm text-gray-400 px-4 py-8 text-center">Carregando ocorrências…</div>}>
+          <PontoOcorrenciasLazy
             user={user}
             addToast={addToast}
             db={db}
