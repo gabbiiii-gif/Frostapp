@@ -45,6 +45,11 @@ const PontoFaceLazy = {
   Verify: lazy(() => import("./PontoFaceComponents.jsx").then((m) => ({ default: m.FaceVerifyModal }))),
 };
 
+// Banco de horas lazy — Recharts não é pequeno; só carrega se o user abrir
+// a tab. Recharts já está no bundle de outros módulos (Dashboard, Finance),
+// então o chunk reaproveita.
+const PontoBancoHorasLazy = lazy(() => import("./PontoBancoHoras.jsx"));
+
 // Coleta GPS de forma não-bloqueante. Resolve sempre — null em caso de erro
 // ou ausência de permissão. A captura roda em paralelo ao registro: se demorar
 // mais de 4s, segue sem GPS.
@@ -82,7 +87,7 @@ export default function PontoModule({ user, addToast, employees, reloadData, db 
     [user]
   );
 
-  // Tab principal (admin/gerente alterna entre o próprio ponto e a visão da equipe)
+  // Tabs: "meu" (sempre), "banco" (sempre), "equipe" (admin/gerente).
   const [tab, setTab] = useState(isAdminView ? "equipe" : "meu");
 
   // Toda mudança em registros bumpa esse contador para reler caches memoizados.
@@ -98,28 +103,46 @@ export default function PontoModule({ user, addToast, employees, reloadData, db 
             Registre sua jornada e acompanhe o histórico.
           </p>
         </div>
-        {isAdminView && (
-          <nav className="flex gap-1 rounded-lg border border-gray-700 bg-gray-800/40 p-1">
-            <button
-              type="button"
-              onClick={() => setTab("meu")}
-              className={`px-3 py-1.5 text-xs font-semibold rounded ${tab === "meu" ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}
-            >
-              Meu ponto
-            </button>
+        <nav className="flex gap-1 rounded-lg border border-gray-700 bg-gray-800/40 p-1 overflow-x-auto">
+          <button
+            type="button"
+            onClick={() => setTab("meu")}
+            className={`px-3 py-1.5 text-xs font-semibold rounded whitespace-nowrap ${tab === "meu" ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}
+          >
+            Meu ponto
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab("banco")}
+            className={`px-3 py-1.5 text-xs font-semibold rounded whitespace-nowrap ${tab === "banco" ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}
+          >
+            Banco de horas
+          </button>
+          {isAdminView && (
             <button
               type="button"
               onClick={() => setTab("equipe")}
-              className={`px-3 py-1.5 text-xs font-semibold rounded ${tab === "equipe" ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}
+              className={`px-3 py-1.5 text-xs font-semibold rounded whitespace-nowrap ${tab === "equipe" ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}
             >
               Equipe
             </button>
-          </nav>
-        )}
+          )}
+        </nav>
       </header>
 
       {tab === "meu" && (
         <MeuPontoView user={user} addToast={addToast} db={db} refresh={refresh} tick={tick} />
+      )}
+      {tab === "banco" && (
+        <Suspense fallback={<div className="text-sm text-gray-400 px-4 py-8 text-center">Carregando banco de horas…</div>}>
+          <PontoBancoHorasLazy
+            user={user}
+            addToast={addToast}
+            db={db}
+            employees={employees}
+            isAdminView={isAdminView}
+          />
+        </Suspense>
       )}
       {tab === "equipe" && isAdminView && (
         <EquipeView user={user} addToast={addToast} db={db} employees={employees} refresh={refresh} tick={tick} reloadData={reloadData} />
