@@ -7,6 +7,10 @@ dev-dist
 
 .vercel
 
+# Supabase CLI — cache local (.temp/), branches state, etc.
+supabase/.temp/
+supabase/.branches/
+
 # Configurações locais do Claude Code (não devem ir pro repo)
 .claude/settings.local.json
 
