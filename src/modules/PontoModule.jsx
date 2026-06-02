@@ -16,7 +16,7 @@
 // .ponto_pin_hash. Cada user gerencia o próprio PIN. Admin pode resetar
 // editando user em UserManagement (fora deste módulo nesta fase).
 
-import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, lazy, Suspense } from "react";
 import {
   registrarPonto,
   hashPin,
@@ -33,6 +33,13 @@ import {
   getOuCriarDeviceId,
 } from "../lib/ponto.js";
 import { formatDate } from "../utils.js";
+
+// Componentes faciais lazy — o chunk só baixa quando o usuário abre o modal
+// pela primeira vez. Mantém o bundle inicial leve para quem usa apenas PIN.
+const PontoFaceLazy = {
+  Enrollment: lazy(() => import("./PontoFaceComponents.jsx").then((m) => ({ default: m.FaceEnrollmentModal }))),
+  Verify: lazy(() => import("./PontoFaceComponents.jsx").then((m) => ({ default: m.FaceVerifyModal }))),
+};
 
 // Coleta GPS de forma não-bloqueante. Resolve sempre — null em caso de erro
 // ou ausência de permissão. A captura roda em paralelo ao registro: se demorar
@@ -126,6 +133,9 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
   const userKey = `erp:user:${user?.id || ""}`;
   const userRecord = useMemo(() => (db ? db.get(userKey) : null), [db, userKey, tick]);
   const temPin = !!userRecord?.ponto_pin_hash;
+  // Facial: descritor 128-dim médio gravado em ponto_face_descriptor.
+  const temFacial = Array.isArray(userRecord?.ponto_face_descriptor)
+    && userRecord.ponto_face_descriptor.length === 128;
 
   // Dia de hoje (em ISO local — sem timezone shift).
   const hojeISO = new Date().toISOString().slice(0, 10);
@@ -145,6 +155,8 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
   const [showSetup, setShowSetup] = useState(false);
   // Modal de bater ponto
   const [showBater, setShowBater] = useState(false);
+  // Setup facial (enrollment)
+  const [showFaceEnroll, setShowFaceEnroll] = useState(false);
 
   // Quando user não tem PIN, força setup ao abrir o módulo (em ambiente real
   // seria via convite/onboarding, mas isso resolve a Fase A).
@@ -153,6 +165,35 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
       setShowSetup(true);
     }
   }, [userRecord, temPin, showSetup]);
+
+  // ─── Callback ao concluir o enrollment facial ───
+  // Recebe descritor médio (128 floats), grava em erp:user:<id>.
+  const handleFaceEnrolled = useCallback((descriptor) => {
+    if (!userRecord) return;
+    const atualizado = {
+      ...userRecord,
+      ponto_face_descriptor: descriptor,
+      ponto_face_enrolled_at: new Date().toISOString(),
+    };
+    db.set(`erp:user:${user.id}`, atualizado);
+    addToast?.({ type: "success", message: "Reconhecimento facial cadastrado." });
+    setShowFaceEnroll(false);
+    refresh();
+  }, [userRecord, db, user, addToast, refresh]);
+
+  // Remove cadastro facial (LGPD: usuário pode revogar a qualquer momento).
+  const handleRemoveFacial = useCallback(() => {
+    if (!userRecord || !temFacial) return;
+    if (typeof window !== "undefined" && !window.confirm("Remover seus dados faciais? Você poderá cadastrar de novo depois.")) {
+      return;
+    }
+    const atualizado = { ...userRecord };
+    delete atualizado.ponto_face_descriptor;
+    delete atualizado.ponto_face_enrolled_at;
+    db.set(`erp:user:${user.id}`, atualizado);
+    addToast?.({ type: "info", message: "Cadastro facial removido." });
+    refresh();
+  }, [userRecord, temFacial, db, user, addToast, refresh]);
 
   return (
     <div className="space-y-5">
@@ -172,7 +213,7 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
           </div>
         </div>
 
-        <div className="mt-5 flex flex-wrap gap-3">
+        <div className="mt-5 flex flex-wrap gap-3 items-center">
           <button
             type="button"
             onClick={() => {
@@ -190,7 +231,31 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
           >
             {temPin ? "Trocar PIN" : "Definir PIN"}
           </button>
+          {temPin && (
+            <button
+              type="button"
+              onClick={() => setShowFaceEnroll(true)}
+              className="text-xs text-gray-400 hover:text-white px-3 py-2"
+              title="Cadastrar reconhecimento facial para bater ponto sem digitar PIN"
+            >
+              {temFacial ? "Atualizar facial" : "+ Cadastrar facial"}
+            </button>
+          )}
+          {temFacial && (
+            <button
+              type="button"
+              onClick={handleRemoveFacial}
+              className="text-[11px] text-red-400/80 hover:text-red-300 px-2 py-1"
+            >
+              Remover facial
+            </button>
+          )}
         </div>
+        {temFacial && (
+          <p className="mt-2 text-[11px] text-green-300/80">
+            ✓ Reconhecimento facial ativo · cadastrado em {formatDate(userRecord.ponto_face_enrolled_at)}
+          </p>
+        )}
       </section>
 
       {/* Histórico do dia */}
@@ -246,10 +311,31 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
           db={db}
           addToast={addToast}
           proxima={proxima}
+          temFacial={temFacial}
           onClose={() => setShowBater(false)}
           onRegistrado={() => { setShowBater(false); refresh(); }}
         />
       )}
+      {showFaceEnroll && (
+        <Suspense fallback={<LoadingOverlay msg="Carregando módulo facial…" />}>
+          <PontoFaceLazy.Enrollment
+            onClose={() => setShowFaceEnroll(false)}
+            onSaved={handleFaceEnrolled}
+            samplesNeeded={3}
+          />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+
+// Overlay leve enquanto o chunk facial está sendo baixado.
+function LoadingOverlay({ msg }) {
+  return (
+    <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur flex items-center justify-center">
+      <div className="px-5 py-3 rounded-xl bg-gray-900 border border-gray-700 text-white text-sm">
+        {msg}
+      </div>
     </div>
   );
 }
@@ -355,16 +441,71 @@ function SetupPinModal({ user, userRecord, db, addToast, temPin, onClose, onSave
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// BaterPontoModal — pede PIN e registra
+// BaterPontoModal — fluxo: facial (se cadastrado) com fallback PIN
 // ────────────────────────────────────────────────────────────────────────────
-function BaterPontoModal({ user, userRecord, db, addToast, proxima, onClose, onRegistrado }) {
+// Estados internos:
+//   "escolha"  — usuário escolhe método (mostra só se temFacial)
+//   "facial"   — abre FaceVerifyModal; sucesso registra direto, falha 2x cai para PIN
+//   "pin"      — entrada de PIN
+function BaterPontoModal({ user, userRecord, db, addToast, proxima, temFacial, onClose, onRegistrado }) {
+  // Modo inicial: facial se cadastrado, senão PIN.
+  const [modo, setModo] = useState(temFacial ? "facial" : "pin");
   const [pin, setPin] = useState("");
   const [erro, setErro] = useState("");
   const [loading, setLoading] = useState(false);
   // Cache do deviceId em ref pra não recriar a cada render.
   const deviceIdRef = useRef(getOuCriarDeviceId());
 
-  const handleSubmit = useCallback(async (e) => {
+  // Helper compartilhado: grava o registro de ponto com método informado.
+  const gravarRegistro = useCallback(async (metodo, extras = {}) => {
+    const gps = await tryGetGps(4000);
+    const reg = registrarPonto(db, {
+      funcionario_id: user.id,
+      tipo: proxima,
+      metodo,
+      gps,
+      user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
+      device_id: deviceIdRef.current,
+      ...extras,
+    });
+    addToast?.({
+      type: "success",
+      message: `${labelTipo(reg.tipo)} registrada às ${new Date(reg.datahora).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`,
+    });
+    onRegistrado?.();
+  }, [db, user, proxima, addToast, onRegistrado]);
+
+  // ─── Sub-fluxo: facial ───
+  if (modo === "facial") {
+    return (
+      <Suspense fallback={<LoadingOverlay msg="Abrindo câmera…" />}>
+        <PontoFaceLazy.Verify
+          storedDescriptor={userRecord?.ponto_face_descriptor}
+          onClose={onClose}
+          onMatch={async ({ distance, score }) => {
+            try {
+              await gravarRegistro("facial", { face_score: score, face_distance: distance });
+            } catch (err) {
+              addToast?.({ type: "error", message: err?.message || "Erro ao registrar." });
+            }
+          }}
+          onFail={(motivo) => {
+            // Após 2 falhas (no_face ou no_match), cai pra PIN.
+            addToast?.({
+              type: "warning",
+              message: motivo === "no_face"
+                ? "Rosto não detectado. Use PIN como fallback."
+                : "Reconhecimento falhou. Use PIN como fallback.",
+            });
+            setModo("pin");
+          }}
+        />
+      </Suspense>
+    );
+  }
+
+  // ─── Sub-fluxo: PIN ───
+  const handleSubmit = async (e) => {
     e?.preventDefault();
     setErro("");
     setLoading(true);
@@ -375,27 +516,13 @@ function BaterPontoModal({ user, userRecord, db, addToast, proxima, onClose, onR
         setLoading(false);
         return;
       }
-      // GPS em paralelo — não bloqueia se demorar.
-      const gps = await tryGetGps(4000);
-      const reg = registrarPonto(db, {
-        funcionario_id: user.id,
-        tipo: proxima,
-        metodo: "pin",
-        gps,
-        user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
-        device_id: deviceIdRef.current,
-      });
-      addToast?.({
-        type: "success",
-        message: `${labelTipo(reg.tipo)} registrada às ${new Date(reg.datahora).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`,
-      });
-      onRegistrado?.();
+      await gravarRegistro("pin");
     } catch (err) {
       setErro(err?.message || "Erro ao registrar ponto.");
     } finally {
       setLoading(false);
     }
-  }, [pin, user, userRecord, db, proxima, addToast, onRegistrado]);
+  };
 
   return (
     <div
@@ -425,17 +552,28 @@ function BaterPontoModal({ user, userRecord, db, addToast, proxima, onClose, onR
               {erro}
             </div>
           )}
-          <div className="flex items-center justify-end gap-2">
-            <button type="button" onClick={onClose} className="px-3 py-2 text-sm text-gray-300 hover:text-white" disabled={loading}>
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              disabled={loading || pin.length < 4}
-              className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? "Registrando…" : "Confirmar"}
-            </button>
+          <div className="flex items-center justify-between gap-2">
+            {temFacial && (
+              <button
+                type="button"
+                onClick={() => { setModo("facial"); setErro(""); setPin(""); }}
+                className="text-xs text-blue-400 hover:text-blue-300"
+              >
+                ← Tentar facial
+              </button>
+            )}
+            <div className="flex items-center gap-2 ml-auto">
+              <button type="button" onClick={onClose} className="px-3 py-2 text-sm text-gray-300 hover:text-white" disabled={loading}>
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                disabled={loading || pin.length < 4}
+                className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? "Registrando…" : "Confirmar"}
+              </button>
+            </div>
           </div>
         </form>
       </div>
