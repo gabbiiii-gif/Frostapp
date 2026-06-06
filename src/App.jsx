@@ -4945,7 +4945,9 @@ function Dashboard({ user, dateFilter, onNavigate }) {
             <h3 className="text-white font-semibold">OS Concluídas por Semana</h3>
             <span className="text-xs text-gray-400">{osConcluidasMes} este mês</span>
           </div>
-          <ResponsiveContainer width="100%" height={280}>
+          {/* minWidth/minHeight + debounce evitam o warning de tamanho -1 quando o
+              ModuleSwitcher renderiza o gráfico durante o crossfade (container ainda 0px). */}
+          <ResponsiveContainer width="100%" height={280} minWidth={0} minHeight={280} debounce={50}>
             <LineChart data={lineChartData}>
               {/* Stroke do grid lê variável do tema — visível em dark e light */}
               <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-default)" />
@@ -11630,6 +11632,8 @@ function UserManagement({ currentUser, addToast }) {
                 <option value="gerente">Gerente</option>
                 <option value="tecnico">Técnico</option>
                 <option value="atendente">Atendente</option>
+                {/* Role da cliente externa Vanda: cai no portal isolado EscolaPortalVanda (sem ERP). */}
+                <option value="cliente_escola">Cliente Escola (Portal Vanda)</option>
               </select>
             </div>
             <div>
@@ -14123,6 +14127,30 @@ function IAAtendimentoModule({ user, addToast }) {
     addToast?.("IA reativada para essa conversa", "success");
   };
 
+  // Devolve TODAS as conversas da empresa para a IA de uma vez. Reativa as que
+  // estão em handoff/pending_human/closed (status != 'active') — útil após o
+  // atendente terminar de intervir em várias conversas e quer religar o bot em lote.
+  const [reactivatingAll, setReactivatingAll] = useState(false);
+  const reactivateAllAI = async () => {
+    if (!supabase || !companyId) return;
+    const pendentes = conversations.filter((c) => c.status !== "active");
+    if (pendentes.length === 0) { addToast?.("Todas as conversas já estão com a IA ativa.", "info"); return; }
+    if (!window.confirm(`Devolver ${pendentes.length} conversa(s) para a IA? O bot volta a responder todas elas.`)) return;
+    setReactivatingAll(true);
+    try {
+      const { error } = await supabase
+        .from("ai_conversations")
+        .update({ status: "active", ai_handoff_reason: null })
+        .eq("company_id", companyId)
+        .neq("status", "active");
+      if (error) { addToast?.(`Erro ao reativar: ${error.message}`, "error"); return; }
+      addToast?.(`${pendentes.length} conversa(s) devolvida(s) para a IA.`, "success");
+      await loadConversations();
+    } finally {
+      setReactivatingAll(false);
+    }
+  };
+
   // Salva config do agente
   const saveConfig = async () => {
     if (!supabase || !companyId) return;
@@ -14251,8 +14279,21 @@ function IAAtendimentoModule({ user, addToast }) {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4 flex-1 min-h-0">
         {/* Lista de conversas */}
         <div className="bg-slate-800 rounded-lg overflow-hidden flex flex-col">
-          <div className="px-3 py-2 border-b border-slate-700 text-xs uppercase text-slate-400 font-semibold">
-            Conversas ({conversations.length})
+          <div className="px-3 py-2 border-b border-slate-700 flex items-center justify-between gap-2">
+            <span className="text-xs uppercase text-slate-400 font-semibold">
+              Conversas ({conversations.length})
+            </span>
+            {/* Botão em lote: devolve todas as conversas em handoff/encerradas para a IA */}
+            {conversations.some((c) => c.status !== "active") && (
+              <button
+                onClick={reactivateAllAI}
+                disabled={reactivatingAll}
+                title="Reativa a IA em todas as conversas que estão em atendimento humano ou encerradas"
+                className="text-[11px] px-2 py-1 rounded bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-50 whitespace-nowrap"
+              >
+                {reactivatingAll ? "Devolvendo..." : "↩ Devolver todas à IA"}
+              </button>
+            )}
           </div>
           <div className="overflow-y-auto flex-1">
             {loading && <div className="p-4 text-slate-500 text-sm">Carregando...</div>}
@@ -15374,8 +15415,17 @@ export default function App() {
   // ─── Add Toast ───
   // Timer de remoção fica apenas no componente Toast (via useEffect com clearTimeout)
   const addToast = useCallback((message, type = "info") => {
+    // Normaliza chamadas no formato objeto — addToast({ type, message }) —
+    // usadas pelos módulos novos (Ponto, Escola). Sem isso, o objeto viraria
+    // toast.message e o Toast tentaria renderizar { type, message } como filho
+    // React, disparando o erro #31 ("Objects are not valid as a React child").
+    if (message && typeof message === "object") {
+      const obj = message;
+      message = obj.message ?? "";
+      type = obj.type || type;
+    }
     const id = genId();
-    setToasts((prev) => [...prev, { id, message, type, duration: 4000 }]);
+    setToasts((prev) => [...prev, { id, message: String(message), type, duration: 4000 }]);
   }, []);
 
   const removeToast = useCallback((id) => {

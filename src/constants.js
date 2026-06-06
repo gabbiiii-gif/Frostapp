@@ -55,13 +55,16 @@ export const ROLE_PERMISSIONS = {
 export const CARGOS_FUNCIONARIO = [
   "Técnico em Refrigeração",
   "Técnico de Central",
+  "Técnico Auxiliar",
   "Ajudante",
   "Motorista",
   "Administrativo",
   "Gerente",
 ];
-// Cargos considerados "técnicos" para gating de UI/relatórios
-export const CARGOS_TECNICOS = ["Técnico em Refrigeração", "Técnico de Central", "Técnico", "Ajudante"];
+// Cargos considerados "técnicos" para gating de UI/relatórios.
+// "Técnico Auxiliar" entra aqui → funcionário com esse cargo deriva tipo="tecnico"
+// (vê o app do técnico e conta no relatório de produtividade).
+export const CARGOS_TECNICOS = ["Técnico em Refrigeração", "Técnico de Central", "Técnico Auxiliar", "Técnico", "Ajudante"];
 export const CARGOS_GERENCIA = ["Gerente"];
 
 // Categorias separadas em receita (entradas) e despesa (saídas) para evitar
