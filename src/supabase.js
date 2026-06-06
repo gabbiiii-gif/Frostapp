@@ -709,7 +709,23 @@ export async function hydrateFromSupabase() {
       // que uma versao stripada do servidor apague o password do device).
       allRows.forEach((row) => {
         if (isSensitive(row.key)) return;
-        window.storage.setItem(row.key, JSON.stringify(row.value));
+        let value = row.value;
+        // erp:user:* sobe SEM segredos (sanitizeForSync remove password,
+        // sessionTokenHash, 2FA). Ao hidratar, preserva esses campos da cópia
+        // LOCAL — senão o hydrate apaga o sessionTokenHash e a sessão cai a cada
+        // reload (a restauração compara savedUser.sessionTokenHash === hash).
+        if (value && typeof value === 'object' && row.key.startsWith('erp:user:')) {
+          try {
+            const localRaw = window.storage.getItem(row.key);
+            if (localRaw) {
+              const local = JSON.parse(localRaw);
+              const preserved = {};
+              USER_SECRET_FIELDS.forEach((f) => { if (local[f] !== undefined) preserved[f] = local[f]; });
+              value = { ...value, ...preserved };
+            }
+          } catch { /* mantém value remoto puro */ }
+        }
+        window.storage.setItem(row.key, JSON.stringify(value));
       });
     }
     console.log(`Sync completo: ${allRows.length} chaves do Supabase em ${pagesFetched} página(s), ${keysToRemove.length} removidas localmente${completou ? '' : ' [INCOMPLETO — cleanup pulado por segurança]'}`);
