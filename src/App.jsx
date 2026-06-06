@@ -11215,8 +11215,13 @@ function UserManagement({ currentUser, addToast }) {
     useCustomPermissions: false,
     customPermissions: [],
     comissaoPercentual: "", // só usado quando role === "tecnico"
+    cargo: "Técnico em Refrigeração", // cargo do funcionário vinculado (só técnico escolhe)
   };
   const [form, setForm] = useState(emptyForm);
+
+  // Cargos oferecidos quando o papel é técnico — distingue técnico de auxiliar.
+  // Derivado de CARGOS_TECNICOS para manter alinhado com a derivação de tipo.
+  const CARGOS_TECNICO_OPCOES = CARGOS_FUNCIONARIO.filter((c) => CARGOS_TECNICOS.includes(c));
 
   const loadUsers = useCallback(() => {
     const list = DB.list("erp:user:").sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
@@ -11243,6 +11248,8 @@ function UserManagement({ currentUser, addToast }) {
       useCustomPermissions: Array.isArray(u.customPermissions),
       customPermissions: Array.isArray(u.customPermissions) ? u.customPermissions : [],
       comissaoPercentual: u.comissaoPercentual != null ? String(u.comissaoPercentual) : "",
+      // Cargo vem do próprio user (round-trip) ou do funcionário vinculado (erp:employee:<id>).
+      cargo: u.cargo || DB.get("erp:employee:" + u.id)?.cargo || "Técnico em Refrigeração",
     });
     setModalOpen(true);
   }, []);
@@ -11301,6 +11308,44 @@ function UserManagement({ currentUser, addToast }) {
 
     const companyId = currentUser?.companyId || null;
 
+    // Cria/atualiza o funcionário vinculado (erp:employee com o MESMO id do
+    // usuário). Liga Usuário↔Funcionário por id — assim a OS atribuída ao
+    // funcionário (tecnicoId = id) casa com o login (user.id) no app do técnico.
+    // cliente_escola é externa (Vanda) e NÃO vira funcionário.
+    const syncLinkedEmployee = (userId) => {
+      const cargoPorPapel = { gerente: "Gerente", admin: "Administrativo", atendente: "Administrativo" };
+      const cargoFunc = form.role === "tecnico"
+        ? (form.cargo || "Técnico em Refrigeração")
+        : (cargoPorPapel[form.role] || null);
+      const prevEmp = DB.get("erp:employee:" + userId);
+      if (!cargoFunc) {
+        // Papel sem funcionário (ex.: cliente_escola). Se havia um vinculado de
+        // um papel anterior, desativa pra sumir dos dropdowns de técnico.
+        if (prevEmp) DB.set("erp:employee:" + userId, { ...prevEmp, status: "inativo", updatedAt: new Date().toISOString() });
+        return;
+      }
+      const nowIso = new Date().toISOString();
+      DB.set("erp:employee:" + userId, {
+        ...(prevEmp || {}),
+        id: userId,
+        linkedUserId: userId,
+        nome,
+        email: emailNorm,
+        cargo: cargoFunc,
+        // Mesma derivação de tipo usada no cadastro manual de funcionário.
+        tipo: CARGOS_TECNICOS.includes(cargoFunc) ? "tecnico"
+            : CARGOS_GERENCIA.includes(cargoFunc) ? "gerente"
+            : "administrativo",
+        status: form.status === "inativo" ? "inativo" : "ativo",
+        comissaoPercentual: comissaoNum,
+        cpf: prevEmp?.cpf || "",
+        telefone: prevEmp?.telefone || "",
+        especialidades: prevEmp?.especialidades || [],
+        createdAt: prevEmp?.createdAt || nowIso,
+        updatedAt: nowIso,
+      });
+    };
+
     if (editing) {
       const updated = {
         ...editing,
@@ -11310,6 +11355,7 @@ function UserManagement({ currentUser, addToast }) {
         status: form.status,
         customPermissions: form.useCustomPermissions ? form.customPermissions : null,
         comissaoPercentual: comissaoNum,
+        cargo: form.role === "tecnico" ? form.cargo : (editing.cargo || null),
         updatedAt: new Date().toISOString(),
       };
       if (form.password) {
@@ -11343,6 +11389,7 @@ function UserManagement({ currentUser, addToast }) {
         updated.sessionTokenHash = null;
       }
       DB.set("erp:user:" + updated.id, updated);
+      syncLinkedEmployee(updated.id);
       addToast("Usuário atualizado.", "success");
     } else {
       // Fase 2.3: criação por convite — sem senha local. Usuário recebe email do
@@ -11366,6 +11413,7 @@ function UserManagement({ currentUser, addToast }) {
         sessionTokenHash: null,
         customPermissions: form.useCustomPermissions ? form.customPermissions : null,
         comissaoPercentual: comissaoNum,
+        cargo: form.role === "tecnico" ? form.cargo : null,
         invitedAt: new Date().toISOString(),
       };
       const redirectTo = `${window.location.origin}/?type=invite`;
@@ -11390,6 +11438,7 @@ function UserManagement({ currentUser, addToast }) {
       }
       newUser.authUserId = provision.auth_user_id;
       DB.set("erp:user:" + newUser.id, newUser);
+      syncLinkedEmployee(newUser.id);
       addToast(`Convite enviado para ${emailNorm}.`, "success");
     }
 
@@ -11414,6 +11463,10 @@ function UserManagement({ currentUser, addToast }) {
   const executeDelete = useCallback(() => {
     if (!confirmDelete) return;
     DB.delete("erp:user:" + confirmDelete.id);
+    // Não apaga o funcionário vinculado (preserva histórico de OS) — apenas
+    // desativa, pra sair dos dropdowns de atribuição.
+    const linkedEmp = DB.get("erp:employee:" + confirmDelete.id);
+    if (linkedEmp) DB.set("erp:employee:" + confirmDelete.id, { ...linkedEmp, status: "inativo", updatedAt: new Date().toISOString() });
     addToast(`Usuário ${confirmDelete.nome} excluído.`, "success");
     setConfirmDelete(null);
     loadUsers();
@@ -11648,6 +11701,28 @@ function UserManagement({ currentUser, addToast }) {
               </select>
             </div>
           </div>
+
+          {/* ─── Cargo do técnico (distingue Técnico de Técnico Auxiliar) ─── */}
+          {/* Vira o cargo do funcionário vinculado criado automaticamente. */}
+          {form.role === "tecnico" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                Cargo (funcionário)
+              </label>
+              <select name="cargo"
+                value={form.cargo}
+                onChange={(e) => setForm({ ...form, cargo: e.target.value })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
+              >
+                {CARGOS_TECNICO_OPCOES.map((c) => (
+                  <option key={c} value={c}>{c}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500 mt-1">
+                Define o cargo do funcionário criado junto com este usuário. "Técnico Auxiliar" também conta como técnico.
+              </p>
+            </div>
+          )}
 
           {/* ─── Comissão (somente técnico). Aparece no dashboard pessoal do técnico ─── */}
           {form.role === "tecnico" && (
