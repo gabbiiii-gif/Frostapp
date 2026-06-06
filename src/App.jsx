@@ -11317,12 +11317,29 @@ function UserManagement({ currentUser, addToast }) {
       const cargoFunc = form.role === "tecnico"
         ? (form.cargo || "Técnico em Refrigeração")
         : (cargoPorPapel[form.role] || null);
-      const prevEmp = DB.get("erp:employee:" + userId);
+      let prevEmp = DB.get("erp:employee:" + userId);
       if (!cargoFunc) {
         // Papel sem funcionário (ex.: cliente_escola). Se havia um vinculado de
         // um papel anterior, desativa pra sumir dos dropdowns de técnico.
         if (prevEmp) DB.set("erp:employee:" + userId, { ...prevEmp, status: "inativo", updatedAt: new Date().toISOString() });
         return;
+      }
+      // Adoção: se ainda não há funcionário com o id deste usuário, tenta
+      // reaproveitar um funcionário já cadastrado com o MESMO nome (criado à mão
+      // antes deste vínculo) — re-keya pro id do usuário e migra as referências
+      // de OS/agenda (tecnicoId). Evita duplicar o funcionário.
+      if (!prevEmp) {
+        const alvo = (nome || "").trim().toLowerCase();
+        const existente = DB.list("erp:employee:").find(
+          (e) => e && !e.linkedUserId && e.id !== userId && (e.nome || "").trim().toLowerCase() === alvo
+        );
+        if (existente) {
+          const oldId = existente.id;
+          DB.list("erp:os:").forEach((os) => { if (os && os.tecnicoId === oldId) DB.set("erp:os:" + os.id, { ...os, tecnicoId: userId }); });
+          DB.list("erp:schedule:").forEach((s) => { if (s && s.tecnicoId === oldId) DB.set("erp:schedule:" + s.id, { ...s, tecnicoId: userId }); });
+          DB.delete("erp:employee:" + oldId);
+          prevEmp = { ...existente };
+        }
       }
       const nowIso = new Date().toISOString();
       DB.set("erp:employee:" + userId, {
