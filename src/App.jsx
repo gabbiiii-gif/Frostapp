@@ -15649,6 +15649,32 @@ export default function App() {
     return () => { alive = false; clearInterval(poll); try { supabase.removeChannel(ch); } catch { /* noop */ } };
   }, [user]);
 
+  // ─── Vigia da sessão Supabase ───────────────────────────────────────────────
+  // O frost_session local pode sobreviver enquanto a sessão Supabase expira/cai.
+  // Aí o usuário vira "anon": gravações falham (permission denied) e os dados
+  // param de sincronizar (vão pra fila offline). Aqui detectamos isso quando
+  // online e avisamos pra reentrar — senão acontece silenciosamente.
+  const [sessionLost, setSessionLost] = useState(false);
+  useEffect(() => {
+    if (!user || !supabase) { setSessionLost(false); return; }
+    let alive = true;
+    const check = async () => {
+      if (typeof navigator !== "undefined" && navigator.onLine === false) return; // offline é esperado
+      try {
+        let { data } = await supabase.auth.getSession();
+        let sess = data?.session || null;
+        if (!sess) { const r = await supabase.auth.refreshSession(); sess = r?.data?.session || null; }
+        if (alive) setSessionLost(!sess);
+      } catch { /* rede instável — não marca */ }
+    };
+    check();
+    const onWake = () => check();
+    window.addEventListener("online", onWake);
+    document.addEventListener("visibilitychange", onWake);
+    const iv = setInterval(check, 120000);
+    return () => { alive = false; window.removeEventListener("online", onWake); document.removeEventListener("visibilitychange", onWake); clearInterval(iv); };
+  }, [user]);
+
   // ─── Add Toast ───
   // Timer de remoção fica apenas no componente Toast (via useEffect com clearTimeout)
   const addToast = useCallback((message, type = "info") => {
@@ -16418,6 +16444,16 @@ export default function App() {
   return (
     <div className="flex h-screen bg-gray-900 text-gray-100 font-['DM_Sans'] fade-in">
       <StyleSheet />
+
+      {/* Aviso de sessão Supabase caída — gravações não estão sincronizando */}
+      {sessionLost && (
+        <div className="fixed top-0 inset-x-0 z-[70] bg-red-600 text-white text-sm px-4 py-2 flex items-center justify-center gap-3 shadow-lg">
+          <span>⚠️ Sua sessão expirou — alterações <strong>não estão sincronizando</strong>.</span>
+          <button onClick={handleLogout} className="px-3 py-1 rounded-md bg-white text-red-700 font-semibold text-xs hover:bg-red-50">
+            Entrar novamente
+          </button>
+        </div>
+      )}
 
       {/* Sidebar */}
       <aside
