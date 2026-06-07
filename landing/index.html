@@ -204,8 +204,12 @@
     .panel[data-side] .col{margin:0 auto;}
     .mod-grid{grid-template-columns:1fr;}
     .h-hero{font-size:clamp(34px,11vw,52px);}
-    /* blur reblura a cada frame no scroll → pesado no celular. Troca por fundo sólido. */
-    .topbar{backdrop-filter:none; background:rgba(10,22,40,.92);}
+    /* blur reblura a cada frame no scroll → pesado no celular. Sem backdrop-filter (perf).
+       Gradiente que esvai pra transparente em vez de bloco sólido — não destoa do hero. */
+    .topbar{
+      backdrop-filter:none;
+      background:linear-gradient(180deg, rgba(10,22,40,.95) 0%, rgba(10,22,40,.82) 50%, rgba(10,22,40,0) 100%);
+    }
     .glass, .mod-detail{backdrop-filter:none;}
   }
   @media (prefers-reduced-motion:reduce){
