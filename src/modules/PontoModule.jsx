@@ -32,7 +32,7 @@ import {
   TIPOS_PONTO,
   getOuCriarDeviceId,
 } from "../lib/ponto.js";
-import { formatDate } from "../utils.js";
+import { formatDate, toISODate } from "../utils.js";
 // Biometria nativa (Capacitor) — funciona só em APK Android/iOS.
 // authenticateBiometric: prompt do OS (Touch/Face ID). Retorna boolean.
 // isBiometricAvailable: checa sensor + cadastro no device.
@@ -201,8 +201,9 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
     return () => { cancelled = true; };
   }, []);
 
-  // Dia de hoje (em ISO local — sem timezone shift).
-  const hojeISO = new Date().toISOString().slice(0, 10);
+  // Dia de hoje no fuso LOCAL — toISODate usa getFullYear/Month/Date (não UTC),
+  // senão à noite no Brasil a data pulava pro dia seguinte.
+  const hojeISO = toISODate(new Date());
   const jornada = useMemo(() => {
     if (!db || !user?.id) return null;
     return db.get(`erp:jornada:${user.id}`);
@@ -770,7 +771,7 @@ function BaterPontoModal({ user, userRecord, db, addToast, proxima, temFacial, t
 // EquipeView — painel admin/gerente
 // ────────────────────────────────────────────────────────────────────────────
 function EquipeView({ user, addToast, db, employees, refresh, tick, reloadData }) {
-  const [dataRef, setDataRef] = useState(new Date().toISOString().slice(0, 10));
+  const [dataRef, setDataRef] = useState(toISODate(new Date()));
   const [filtroFunc, setFiltroFunc] = useState("");
 
   const registros = useMemo(() => {

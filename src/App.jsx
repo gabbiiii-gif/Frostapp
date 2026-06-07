@@ -1387,9 +1387,14 @@ function hasPermission(user, module) {
   return perms.includes("all") || perms.includes(module);
 }
 
+// "YYYY-MM-DD" no fuso LOCAL (getFullYear/Month/Date), não UTC. Evita que à
+// noite no Brasil (UTC-3) a data avance um dia (06/06 22h não pode virar 07/06).
 function toISODate(date) {
   const d = date instanceof Date ? date : new Date(date);
-  return d.toISOString().split("T")[0];
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function daysFromNow(n) {

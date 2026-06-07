@@ -28,7 +28,7 @@ import {
   listarTodas,
 } from "../lib/ocorrencias.js";
 import { uploadOcorrenciaDoc, getOcorrenciaDocUrl } from "../supabase.js";
-import { formatDate } from "../utils.js";
+import { formatDate, toISODate } from "../utils.js";
 
 // Labels e cores para badges.
 const STATUS_INFO = {
@@ -211,7 +211,7 @@ export default function PontoOcorrencias({ user, addToast, db, employees, isAdmi
 // NovaOcorrenciaModal — funcionário cria justificativa
 // ────────────────────────────────────────────────────────────────────────────
 function NovaOcorrenciaModal({ user, db, addToast, onClose, onSalvo }) {
-  const hoje = new Date().toISOString().slice(0, 10);
+  const hoje = toISODate(new Date());
   const [tipo, setTipo] = useState("atestado_medico");
   const [dataRef, setDataRef] = useState(hoje);
   const [descricao, setDescricao] = useState("");

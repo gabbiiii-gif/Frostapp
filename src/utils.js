@@ -120,10 +120,16 @@ export function filterByDate(items, dateField, dateFilter) {
   });
 }
 
-// Date → "YYYY-MM-DD"
+// Date → "YYYY-MM-DD" no fuso LOCAL do dispositivo.
+// IMPORTANTE: usa getFullYear/getMonth/getDate (locais), NÃO toISOString (UTC).
+// Com toISOString, à noite no Brasil (UTC-3) a data pulava para o dia seguinte
+// (ex.: 06/06 22h → "2026-06-07"), bagunçando "hoje", agendamentos e filtros.
 export function toISODate(date) {
   const d = date instanceof Date ? date : new Date(date);
-  return d.toISOString().split("T")[0];
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 // Daqui +N dias em "YYYY-MM-DD"

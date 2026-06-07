@@ -175,12 +175,19 @@ describe('filterByDate', () => {
 });
 
 describe('toISODate', () => {
-  it('extrai YYYY-MM-DD de Date', () => {
-    expect(toISODate(new Date('2026-05-06T18:30:00Z'))).toBe('2026-05-06');
+  // toISODate usa o fuso LOCAL (getFullYear/Month/Date). Datas abaixo são
+  // construídas em horário local para o teste ser determinístico em qualquer TZ.
+  it('extrai YYYY-MM-DD de Date no fuso local', () => {
+    expect(toISODate(new Date(2026, 4, 6, 18, 30))).toBe('2026-05-06');
   });
 
-  it('aceita string como entrada', () => {
-    expect(toISODate('2026-05-06T00:00:00Z')).toBe('2026-05-06');
+  it('não desloca o dia à noite (sem bug de UTC)', () => {
+    // 06/06 22:00 local não pode virar 07/06.
+    expect(toISODate(new Date(2026, 5, 6, 22, 0))).toBe('2026-06-06');
+  });
+
+  it('aceita string (datetime local) como entrada', () => {
+    expect(toISODate('2026-05-06T12:00:00')).toBe('2026-05-06');
   });
 });
 
