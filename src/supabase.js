@@ -698,7 +698,9 @@ export async function hydrateFromSupabase() {
         if (!key || !key.startsWith('erp:')) continue;
         if (isSensitive(key)) continue;
         if (key === 'erp:seeded' || key === 'erp:lastBackup') continue;
-        if (!remoteKeys.has(key)) keysToRemove.push(key);
+        // Não apaga chave ainda pendente de envio (feita offline) — senão um
+        // registro de ponto criado sem rede seria perdido antes de sincronizar.
+        if (!remoteKeys.has(key) && !outboxHasKey(key)) keysToRemove.push(key);
       }
       keysToRemove.forEach(key => window.storage.removeItem(key));
     }
@@ -771,18 +773,80 @@ export async function uploadAllToSupabase() {
 
 // ─── Sync unitário (chamado por DB.set) ──────────────────────────────────────
 // Sanitiza secrets de usuário antes do upsert — NUNCA enviar password/2FA pro Supabase.
+// ─── Outbox offline ──────────────────────────────────────────────────────────
+// Fila persistente de escritas que falharam por falta de rede. Cada item:
+// { op:'set'|'del', key, value? }. Dedupe por key (mantém a última). É esvaziada
+// no evento 'online' e no boot (antes do hydrate). hydrateFromSupabase preserva
+// chaves ainda na fila — senão um registro feito offline (ex.: ponto) seria
+// apagado pela limpeza do hydrate antes de chegar ao servidor.
+const OUTBOX_KEY = 'erp:syncOutbox';
+function _loadOutbox() {
+  try { return JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]'); } catch { return []; }
+}
+function _saveOutbox(arr) {
+  try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(arr)); } catch { /* noop */ }
+}
+function enqueueOutbox(op, key, value) {
+  if (isSensitive(key)) return;
+  const arr = _loadOutbox().filter((e) => e.key !== key);
+  arr.push(op === 'del' ? { op, key } : { op, key, value });
+  _saveOutbox(arr);
+}
+// Usada pelo hydrate pra NÃO apagar chaves locais ainda pendentes de envio.
+export function outboxHasKey(key) {
+  return _loadOutbox().some((e) => e.key === key);
+}
+export function outboxSize() { return _loadOutbox().length; }
+
+let _flushing = false;
+// Reenvia a fila ao servidor. Chamada no boot e no evento 'online'.
+export async function flushOutbox() {
+  if (_flushing || !supabase) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+  const companyId = getCompanyId();
+  if (!companyId) return;
+  const arr = _loadOutbox();
+  if (arr.length === 0) return;
+  _flushing = true;
+  const remaining = [];
+  for (const e of arr) {
+    try {
+      if (e.op === 'del') {
+        const { error } = await supabase.from('kv_store').delete().eq('key', e.key).eq('company_id', companyId);
+        if (error) remaining.push(e);
+      } else {
+        const safeValue = sanitizeForSync(e.key, e.value);
+        const { error } = await supabase.from('kv_store').upsert({ key: e.key, value: safeValue, company_id: companyId, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+        if (error) remaining.push(e);
+      }
+    } catch { remaining.push(e); }
+  }
+  _saveOutbox(remaining);
+  _flushing = false;
+}
+
+if (typeof window !== 'undefined') {
+  // Ao reconectar, tenta esvaziar a fila automaticamente.
+  window.addEventListener('online', () => { flushOutbox(); });
+}
+
 export function syncToSupabase(key, value) {
   if (!supabase) return;
   if (isSensitive(key)) return;
   const companyId = getCompanyId();
   if (!companyId) return; // sem auth → fica só local; será uploaded no próximo login
+  // Offline: enfileira direto sem tentar (evita erro de rede e garante reenvio).
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    enqueueOutbox('set', key, value);
+    return;
+  }
   const safeValue = sanitizeForSync(key, value);
   supabase
     .from('kv_store')
     .upsert({ key, value: safeValue, company_id: companyId, updated_at: new Date().toISOString() }, { onConflict: 'key' })
     .then(({ error }) => {
-      if (error) console.warn('Sync error:', key, error.message);
-    });
+      if (error) { console.warn('Sync error:', key, error.message); enqueueOutbox('set', key, value); }
+    }, () => enqueueOutbox('set', key, value)); // rejeição (rede) → fila
 }
 
 // ─── Delete unitário (chamado por DB.delete) ─────────────────────────────────
@@ -790,14 +854,18 @@ export function deleteFromSupabase(key) {
   if (!supabase) return;
   const companyId = getCompanyId();
   if (!companyId) return;
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    enqueueOutbox('del', key);
+    return;
+  }
   supabase
     .from('kv_store')
     .delete()
     .eq('key', key)
     .eq('company_id', companyId)
     .then(({ error }) => {
-      if (error) console.warn('Delete sync error:', key, error.message);
-    });
+      if (error) { console.warn('Delete sync error:', key, error.message); enqueueOutbox('del', key); }
+    }, () => enqueueOutbox('del', key));
 }
 
 // ─── Master users: sync via RPCs SECURITY DEFINER ───────────────────────────
