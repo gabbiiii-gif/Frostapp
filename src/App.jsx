@@ -3279,7 +3279,8 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
           <div className="text-center mb-8">
             {/* Logo principal da tela de login */}
             {/* Login: floco animado (SVG com animacoes CSS) + titulo + subtitulo */}
-            <AnimatedSnowflake className="mx-auto mb-3 w-32 sm:w-40 aspect-square drop-shadow-[0_4px_12px_rgba(96,165,250,0.35)]" />
+            {/* Mobile: floco desfocado + opacidade 45% pra não roubar atenção; desktop volta ao normal */}
+            <AnimatedSnowflake className="mx-auto mb-3 w-32 sm:w-40 aspect-square drop-shadow-[0_4px_12px_rgba(96,165,250,0.35)] blur-[2px] opacity-45 sm:blur-0 sm:opacity-100" />
             <h2 className="text-2xl font-bold text-white tracking-tight">FrostERP</h2>
             <p className="text-gray-400 text-sm mt-1">Sistema de Gestão Integrada</p>
           </div>
