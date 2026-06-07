@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FrostERP — Landing (scroll 3D)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0A1628; --surface:#0F1E36; --surface2:#13243f;
+    --blue:#3B82F6; --cyan:#06B6D4; --cyan2:#22D3EE;
+    --ink:#F8FAFC; --muted:#94A3B8; --ok:#10B981; --warn:#F59E0B;
+    --line:rgba(255,255,255,.10);
+    --display:"Space Grotesk", system-ui, sans-serif;
+    --body:"Geist", system-ui, sans-serif;
+    --mono:"Geist Mono", ui-monospace, monospace;
+    --maxw:1240px;
+  }
+  *{box-sizing:border-box;}
+  html{scroll-behavior:smooth;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:var(--body); line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+    overflow-x:hidden;
+  }
+  /* fundo atmosférico fixo */
+  body::before{
+    content:""; position:fixed; inset:0; z-index:0; pointer-events:none;
+    background:
+      radial-gradient(1200px 700px at 82% -8%, rgba(34,211,238,.14), transparent 60%),
+      radial-gradient(1000px 600px at -8% 30%, rgba(59,130,246,.13), transparent 60%),
+      radial-gradient(900px 700px at 50% 120%, rgba(34,211,238,.08), transparent 60%);
+  }
+  /* canvas 3D fixo atrás de tudo */
+  #bg-canvas{
+    position:fixed; inset:0; width:100vw; height:100vh; z-index:1;
+    pointer-events:none; display:block;
+  }
+  main{position:relative; z-index:2;}
+
+  /* ---------- NAV ---------- */
+  .topbar{
+    position:fixed; top:0; left:0; right:0; z-index:20;
+    display:flex; align-items:center; justify-content:space-between;
+    padding:18px clamp(20px,5vw,56px);
+    backdrop-filter:blur(10px);
+    background:linear-gradient(180deg, rgba(10,22,40,.7), rgba(10,22,40,0));
+  }
+  .brand{display:flex; align-items:center; gap:11px;}
+  .brand-logo{height:64px; width:auto; display:block;}
+  @media (max-width:820px){ .brand-logo{height:52px;} }
+  .brand b{font-family:var(--display); font-weight:700; font-size:20px; letter-spacing:-.02em;}
+  .brand b span{color:var(--cyan2);}
+  .topnav{display:flex; gap:30px; font-size:14px; color:var(--muted);}
+  .topnav a{color:inherit; text-decoration:none; transition:color .2s;}
+  .topnav a:hover{color:var(--ink);}
+  .btn{
+    font-family:var(--body); font-weight:600; font-size:14px;
+    border-radius:11px; padding:11px 18px; cursor:pointer; border:1px solid transparent;
+    text-decoration:none; display:inline-flex; align-items:center; gap:8px; transition:.2s;
+  }
+  .btn-primary{background:linear-gradient(135deg,var(--cyan2),var(--blue)); color:#04121f;}
+  .btn-primary:hover{filter:brightness(1.08); transform:translateY(-1px);}
+  .btn-ghost{border-color:var(--line); color:var(--ink); background:rgba(255,255,255,.03);}
+  .btn-ghost:hover{background:rgba(255,255,255,.07);}
+  .topbar .btn{padding:9px 16px;}
+
+
+  /* ---------- PAINÉIS ---------- */
+  .panel{
+    position:relative; min-height:100vh;
+    display:flex; align-items:center;
+    padding:120px clamp(20px,7vw,120px);
+  }
+  .panel-inner{width:100%; max-width:var(--maxw); margin:0 auto; display:flex;}
+  .col{max-width:560px;}
+  .panel[data-side="left"]  .col{margin-right:auto;}
+  .panel[data-side="right"] .col{margin-left:auto;}
+  .panel[data-side="center"] .col{margin:0 auto; text-align:center; max-width:760px;}
+  .panel[data-side="center"] .cta-row{justify-content:center;}
+
+  h1,h2,h3{font-family:var(--display); font-weight:700; letter-spacing:-.02em; line-height:1.06; margin:0;}
+  .h-hero{font-size:clamp(40px,6vw,76px); text-wrap:balance;}
+  .h-sec{font-size:clamp(32px,4.6vw,56px); text-wrap:balance;}
+  .lead{color:#cdd9ea; font-size:clamp(16px,1.4vw,19px); margin-top:20px; max-width:48ch; text-wrap:pretty;}
+  .panel[data-side="center"] .lead{margin-left:auto; margin-right:auto;}
+  .muted{color:var(--muted);}
+
+  .cta-row{display:flex; gap:14px; margin-top:34px; flex-wrap:wrap;}
+  .badge{display:inline-flex; align-items:center; gap:8px; font-size:12.5px; color:var(--muted);
+    border:1px solid var(--line); background:rgba(255,255,255,.03); padding:7px 14px; border-radius:999px; margin-bottom:24px;}
+  .dot-live{width:7px; height:7px; border-radius:50%; background:var(--ok); box-shadow:0 0 8px var(--ok); animation:pulse 2s infinite;}
+  @keyframes pulse{50%{opacity:.4;}}
+
+  /* hero word animation */
+  [data-hero-title] .word{display:inline-block; overflow:hidden; vertical-align:top;}
+  [data-hero-title] .w-in{display:inline-block; will-change:transform;}
+
+  .scroll-hint{position:absolute; bottom:34px; left:50%; transform:translateX(-50%);
+    font-family:var(--mono); font-size:11px; letter-spacing:.2em; color:var(--muted); text-transform:uppercase;
+    display:flex; flex-direction:column; align-items:center; gap:10px;}
+  .scroll-hint .mouse{width:22px; height:36px; border:1.5px solid var(--muted); border-radius:12px; position:relative;}
+  .scroll-hint .mouse::after{content:""; position:absolute; top:6px; left:50%; transform:translateX(-50%);
+    width:3px; height:7px; border-radius:2px; background:var(--cyan2); animation:wheel 1.6s infinite;}
+  @keyframes wheel{0%{opacity:1; top:6px;}70%{opacity:0; top:16px;}100%{opacity:0;}}
+
+  /* cards genéricos */
+  .glass{backdrop-filter:blur(14px); background:rgba(13,26,46,.55); border:1px solid var(--line); border-radius:18px;}
+  .pain-list{display:flex; flex-direction:column; gap:14px; margin-top:30px;}
+  .pain{padding:18px 20px; border-radius:14px; border:1px solid var(--line);
+    background:rgba(255,255,255,.025); display:flex; gap:15px; align-items:flex-start;}
+  .pain .x{flex:0 0 30px; height:30px; border-radius:9px; display:grid; place-items:center;
+    background:rgba(245,158,11,.14); color:var(--warn); font-weight:700;}
+  .pain h3{font-family:var(--display); font-weight:600; font-size:16.5px; line-height:1.3;}
+  .pain p{margin:5px 0 0; font-size:14.5px; color:var(--muted);}
+
+  .mod-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:13px; margin-top:30px;}
+  .mod{padding:18px; border-radius:14px; border:1px solid var(--line); background:rgba(255,255,255,.025);}
+  .mod .ico{width:34px; height:34px; border-radius:10px; display:grid; place-items:center; margin-bottom:12px;
+    background:linear-gradient(135deg,rgba(34,211,238,.18),rgba(59,130,246,.18)); color:var(--cyan2);}
+  .mod h3{font-family:var(--display); font-weight:600; font-size:15.5px; line-height:1.3; display:block;}
+  .mod p{margin:6px 0 0; font-size:13.5px; color:var(--muted);}
+
+
+  /* ---------- CARROSSEL DE MÓDULOS ---------- */
+  .carousel{position:relative; display:flex; align-items:center; gap:10px; margin-top:34px;}
+  .car-track{
+    display:flex; gap:14px; flex:1; overflow-x:auto; scroll-behavior:smooth;
+    scroll-snap-type:x mandatory; padding:6px 4px 16px; scrollbar-width:thin;
+    scrollbar-color:rgba(34,211,238,.4) transparent;
+  }
+  .car-track::-webkit-scrollbar{height:6px;}
+  .car-track::-webkit-scrollbar-thumb{background:rgba(34,211,238,.35); border-radius:99px;}
+  .mod-card{
+    scroll-snap-align:center; flex:0 0 188px; text-align:left; cursor:pointer;
+    padding:20px 18px; border-radius:16px; border:1px solid var(--line);
+    background:rgba(255,255,255,.025); color:var(--ink); transition:.25s;
+    display:flex; flex-direction:column; gap:10px; position:relative;
+  }
+  .mod-card:hover{transform:translateY(-4px); border-color:rgba(34,211,238,.4); background:rgba(34,211,238,.06);}
+  .mod-card.active{border-color:var(--cyan2); background:rgba(34,211,238,.1); box-shadow:0 0 0 1px var(--cyan2), 0 18px 40px -20px rgba(34,211,238,.5);}
+  .mod-card .ico{
+    width:42px; height:42px; border-radius:12px; display:grid; place-items:center; font-size:20px;
+    background:linear-gradient(135deg,rgba(34,211,238,.18),rgba(59,130,246,.18)); color:var(--cyan2);
+  }
+  .mod-card h3{font-family:var(--display); font-weight:600; font-size:16px; line-height:1.25;}
+  .mod-card .tag{
+    font-family:var(--mono); font-size:10px; letter-spacing:.12em; text-transform:uppercase;
+    padding:3px 8px; border-radius:99px; align-self:flex-start;
+  }
+  .tag.core{color:var(--muted); border:1px solid var(--line);}
+  .tag.add{color:var(--cyan2); border:1px solid rgba(34,211,238,.4); background:rgba(34,211,238,.08);}
+  .tag.custom{color:#04121f; background:linear-gradient(135deg,var(--cyan2),var(--blue)); font-weight:600;}
+  .car-arrow{
+    flex:0 0 auto; width:44px; height:44px; border-radius:50%; cursor:pointer;
+    border:1px solid var(--line); background:rgba(13,26,46,.7); color:var(--ink);
+    font-size:22px; line-height:1; display:grid; place-items:center; transition:.2s;
+  }
+  .car-arrow:hover{border-color:var(--cyan2); color:var(--cyan2); background:rgba(34,211,238,.1);}
+
+  .mod-detail{
+    margin-top:20px; padding:26px 28px; border-radius:18px; min-height:150px;
+    display:grid; grid-template-columns:auto 1fr; gap:22px; align-items:start;
+  }
+  .mod-detail .d-ico{
+    width:64px; height:64px; border-radius:16px; display:grid; place-items:center; font-size:30px;
+    background:linear-gradient(135deg,rgba(34,211,238,.2),rgba(59,130,246,.2)); color:var(--cyan2);
+  }
+  .mod-detail .d-head{display:flex; align-items:center; gap:12px; flex-wrap:wrap;}
+  .mod-detail h3{font-size:24px;}
+  .mod-detail .d-desc{color:#cdd9ea; font-size:15.5px; margin:10px 0 0; max-width:62ch;}
+  .mod-detail .d-feats{list-style:none; padding:0; margin:16px 0 0; display:flex; flex-wrap:wrap; gap:10px 22px;}
+  .mod-detail .d-feats li{display:flex; gap:8px; font-size:14px; color:var(--muted);}
+  .mod-detail .d-feats .ck{color:var(--cyan2);}
+  @media (max-width:820px){
+    .mod-detail{grid-template-columns:1fr;}
+    .mod-card{flex-basis:160px;}
+  }
+
+  /* faq */
+  .faq-list{margin-top:30px; max-width:600px; display:flex; flex-direction:column; gap:10px;}
+  .faq-item{border:1px solid var(--line); border-radius:13px; background:rgba(255,255,255,.025); overflow:hidden;}
+  .faq-q{width:100%; padding:17px 20px; font-family:var(--display); font-weight:500; font-size:16px; cursor:pointer;
+    background:transparent; border:0; color:var(--ink); text-align:left;
+    display:flex; justify-content:space-between; align-items:center; gap:14px;}
+  .faq-q .pm{color:var(--cyan2); font-size:20px; transition:transform .25s; flex:0 0 auto;}
+  .faq-item.open .pm{transform:rotate(45deg);}
+  .faq-a{max-height:0; overflow:hidden; transition:max-height .3s ease; color:var(--muted); font-size:14.5px;}
+  .faq-item.open .faq-a{max-height:240px;}
+  .faq-a div{padding:0 20px 18px;}
+
+  /* footer mini */
+  .foot{margin-top:46px; padding-top:26px; border-top:1px solid var(--line); display:flex; gap:30px; flex-wrap:wrap;
+    font-size:13px; color:var(--muted); justify-content:center;}
+  .foot a{color:var(--muted); text-decoration:none;}
+  .foot a:hover{color:var(--ink);}
+
+  @media (max-width:820px){
+    .topnav{display:none;}
+    .panel{padding:110px 22px;}
+    .panel[data-side] .col{margin:0 auto;}
+    .mod-grid{grid-template-columns:1fr;}
+    .h-hero{font-size:clamp(34px,11vw,52px);}
+  }
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto;}
+  }
+</style>
+</head>
+<body>
+
+<!-- ===== SPLASH DE ENTRADA (igual ao do app antes do login) ===== -->
+<style>
+  #splash{
+    position:fixed; inset:0; z-index:9999;
+    display:flex; align-items:center; justify-content:center; overflow:hidden;
+    background:linear-gradient(135deg,#0b1120 0%,#0f172a 40%,#0c1425 100%);
+    transition:opacity .6s ease-out;
+  }
+  #splash svg{ width:95vmin; height:auto; filter:drop-shadow(0 8px 24px rgba(96,165,250,.45)); }
+  @media (prefers-reduced-motion:reduce){ #splash *{ animation:none !important; } }
+  /* animações do AnimatedLogo.jsx */
+  #frosterp-floco-group{ transform-origin:340px 170px; animation:fr-spin 14s linear infinite; }
+  @keyframes fr-spin{ from{transform:rotate(0)} to{transform:rotate(360deg)} }
+  .fr-arm-main{ stroke-dasharray:240; stroke-dashoffset:240; animation:fr-draw .7s ease forwards; }
+  .fr-b1{animation-delay:.1s}.fr-b2{animation-delay:.15s}.fr-b3{animation-delay:.2s}.fr-b4{animation-delay:.25s}.fr-b5{animation-delay:.3s}.fr-b6{animation-delay:.35s}
+  .fr-branch{ stroke-dasharray:50; stroke-dashoffset:50; animation:fr-draw .5s ease forwards; }
+  .fr-br1{animation-delay:.55s}.fr-br2{animation-delay:.6s}.fr-br3{animation-delay:.65s}.fr-br4{animation-delay:.7s}.fr-br5{animation-delay:.75s}.fr-br6{animation-delay:.8s}.fr-br7{animation-delay:.85s}.fr-br8{animation-delay:.9s}.fr-br9{animation-delay:.95s}.fr-br10{animation-delay:1s}.fr-br11{animation-delay:1.05s}.fr-br12{animation-delay:1.1s}
+  .fr-sub-branch{ stroke-dasharray:30; stroke-dashoffset:30; animation:fr-draw .4s ease forwards; }
+  .fr-sb1{animation-delay:1.1s}.fr-sb2{animation-delay:1.15s}.fr-sb3{animation-delay:1.2s}.fr-sb4{animation-delay:1.25s}.fr-sb5{animation-delay:1.3s}.fr-sb6{animation-delay:1.35s}.fr-sb7{animation-delay:1.4s}.fr-sb8{animation-delay:1.45s}.fr-sb9{animation-delay:1.5s}.fr-sb10{animation-delay:1.55s}.fr-sb11{animation-delay:1.6s}.fr-sb12{animation-delay:1.65s}
+  @keyframes fr-draw{ to{stroke-dashoffset:0} }
+  .fr-tip{ opacity:0; animation:fr-pop .35s ease forwards; }
+  .fr-td1{animation-delay:1.5s}.fr-td2{animation-delay:1.55s}.fr-td3{animation-delay:1.6s}.fr-td4{animation-delay:1.65s}.fr-td5{animation-delay:1.7s}.fr-td6{animation-delay:1.75s}
+  .fr-diamond{ opacity:0; animation:fr-pop .35s ease forwards; }
+  .fr-dm1{animation-delay:1.3s}.fr-dm2{animation-delay:1.35s}.fr-dm3{animation-delay:1.4s}.fr-dm4{animation-delay:1.45s}.fr-dm5{animation-delay:1.5s}.fr-dm6{animation-delay:1.55s}
+  @keyframes fr-pop{ 0%{opacity:0;transform:scale(0)} 70%{opacity:1;transform:scale(1.4)} 100%{opacity:1;transform:scale(1)} }
+  .fr-center-hex{ opacity:0; animation:fr-pop .4s ease forwards; animation-delay:1.7s; transform-origin:340px 170px; }
+  .fr-center-dot{ opacity:0; animation:fr-pop .4s ease forwards; transform-origin:340px 170px; }
+  .fr-center-dot.d1{animation-delay:1.85s}.fr-center-dot.d2{animation-delay:1.85s}
+  .fr-center-pulse{ transform-origin:340px 170px; animation:fr-pulse 2.8s ease-in-out infinite; animation-delay:2.2s; opacity:0; }
+  @keyframes fr-pulse{ 0%{opacity:.3;transform:scale(.9)} 50%{opacity:.8;transform:scale(1.15)} 100%{opacity:.3;transform:scale(.9)} }
+  .fr-wordmark{ opacity:0; animation:fr-fade-up .7s ease forwards; animation-delay:2s; }
+  .fr-tagline{ opacity:0; animation:fr-fade-up .6s ease forwards; animation-delay:2.3s; }
+  .fr-ruleline{ opacity:0; stroke-dasharray:300; stroke-dashoffset:300; animation:fr-draw .6s ease forwards; animation-delay:2.15s; }
+  @keyframes fr-fade-up{ from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+</style>
+<div id="splash">
+  <svg viewBox="0 0 680 440" preserveAspectRatio="xMidYMid meet" role="img" aria-label="FrostERP — Refrigerações" xmlns="http://www.w3.org/2000/svg">
+    <g id="frosterp-floco-group">
+      <g stroke="#1B8FE8" stroke-linecap="round" fill="none">
+        <line class="fr-arm-main fr-b1" x1="340" y1="170" x2="340" y2="55" stroke-width="3"/>
+        <line class="fr-arm-main fr-b2" x1="340" y1="170" x2="440" y2="112" stroke-width="3"/>
+        <line class="fr-arm-main fr-b3" x1="340" y1="170" x2="440" y2="228" stroke-width="3"/>
+        <line class="fr-arm-main fr-b4" x1="340" y1="170" x2="340" y2="285" stroke-width="3"/>
+        <line class="fr-arm-main fr-b5" x1="340" y1="170" x2="240" y2="228" stroke-width="3"/>
+        <line class="fr-arm-main fr-b6" x1="340" y1="170" x2="240" y2="112" stroke-width="3"/>
+        <line class="fr-branch fr-br1" x1="340" y1="118" x2="317" y2="95" stroke-width="1.8"/>
+        <line class="fr-branch fr-br2" x1="340" y1="118" x2="363" y2="95" stroke-width="1.8"/>
+        <line class="fr-branch fr-br3" x1="390" y1="141" x2="390" y2="114" stroke-width="1.8"/>
+        <line class="fr-branch fr-br4" x1="390" y1="141" x2="413" y2="154" stroke-width="1.8"/>
+        <line class="fr-branch fr-br5" x1="390" y1="199" x2="413" y2="186" stroke-width="1.8"/>
+        <line class="fr-branch fr-br6" x1="390" y1="199" x2="390" y2="226" stroke-width="1.8"/>
+        <line class="fr-branch fr-br7" x1="340" y1="222" x2="363" y2="245" stroke-width="1.8"/>
+        <line class="fr-branch fr-br8" x1="340" y1="222" x2="317" y2="245" stroke-width="1.8"/>
+        <line class="fr-branch fr-br9" x1="290" y1="199" x2="290" y2="226" stroke-width="1.8"/>
+        <line class="fr-branch fr-br10" x1="290" y1="199" x2="267" y2="186" stroke-width="1.8"/>
+        <line class="fr-branch fr-br11" x1="290" y1="141" x2="267" y2="154" stroke-width="1.8"/>
+        <line class="fr-branch fr-br12" x1="290" y1="141" x2="290" y2="114" stroke-width="1.8"/>
+        <line class="fr-sub-branch fr-sb1" x1="340" y1="92" x2="325" y2="77" stroke-width="1.3"/>
+        <line class="fr-sub-branch fr-sb2" x1="340" y1="92" x2="355" y2="77" stroke-width="1.3"/>
+        <line class="fr-sub-branch fr-sb3" x1="406" y1="132" x2="406" y2="110" stroke-width="1.3"/>
+        <line class="fr-sub-branch fr-sb4" x1="406" y1="132" x2="423" y2="142" stroke-width="1.3"/>
+        <line class="fr-sub-branch fr-sb5" x1="406" y1="208" x2="423" y2="198" stroke-width="1.3"/>
+        <line class="fr-sub-branch fr-sb6" x1="406" y1="208" x2="406" y2="230" stroke-width="1.3"/>
+        <line class="fr-sub-branch fr-sb7" x1="340" y1="248" x2="355" y2="263" stroke-width="1.3"/>
+        <line class="fr-sub-branch fr-sb8" x1="340" y1="248" x2="325" y2="263" stroke-width="1.3"/>
+        <line class="fr-sub-branch fr-sb9" x1="274" y1="208" x2="274" y2="230" stroke-width="1.3"/>
+        <line class="fr-sub-branch fr-sb10" x1="274" y1="208" x2="257" y2="198" stroke-width="1.3"/>
+        <line class="fr-sub-branch fr-sb11" x1="274" y1="132" x2="257" y2="142" stroke-width="1.3"/>
+        <line class="fr-sub-branch fr-sb12" x1="274" y1="132" x2="274" y2="110" stroke-width="1.3"/>
+      </g>
+      <circle class="fr-tip fr-td1" cx="340" cy="53" r="3.5" fill="#1B8FE8" style="transform-origin:340px 53px"/>
+      <circle class="fr-tip fr-td2" cx="442" cy="110" r="3.5" fill="#1B8FE8" style="transform-origin:442px 110px"/>
+      <circle class="fr-tip fr-td3" cx="442" cy="230" r="3.5" fill="#1B8FE8" style="transform-origin:442px 230px"/>
+      <circle class="fr-tip fr-td4" cx="340" cy="287" r="3.5" fill="#1B8FE8" style="transform-origin:340px 287px"/>
+      <circle class="fr-tip fr-td5" cx="238" cy="230" r="3.5" fill="#1B8FE8" style="transform-origin:238px 230px"/>
+      <circle class="fr-tip fr-td6" cx="238" cy="110" r="3.5" fill="#1B8FE8" style="transform-origin:238px 110px"/>
+      <polygon class="fr-diamond fr-dm1" points="340,96 335,104 340,112 345,104" fill="#4A90D9" style="transform-origin:340px 104px"/>
+      <polygon class="fr-diamond fr-dm2" points="396,130 391,138 396,146 401,138" fill="#4A90D9" style="transform-origin:396px 138px"/>
+      <polygon class="fr-diamond fr-dm3" points="396,206 391,198 396,190 401,198" fill="#4A90D9" style="transform-origin:396px 198px"/>
+      <polygon class="fr-diamond fr-dm4" points="340,232 335,224 340,216 345,224" fill="#4A90D9" style="transform-origin:340px 224px"/>
+      <polygon class="fr-diamond fr-dm5" points="284,206 279,198 284,190 289,198" fill="#4A90D9" style="transform-origin:284px 198px"/>
+      <polygon class="fr-diamond fr-dm6" points="284,130 279,138 284,146 289,138" fill="#4A90D9" style="transform-origin:284px 138px"/>
+      <polygon class="fr-center-hex" points="340,150 356,159 356,181 340,190 324,181 324,159" fill="#0d3070" stroke="#6CB4F0" stroke-width="1.2"/>
+      <circle class="fr-center-dot d1" cx="340" cy="170" r="13" fill="#1B8FE8"/>
+      <circle class="fr-center-dot d2" cx="340" cy="170" r="6.5" fill="#daeeff"/>
+      <circle class="fr-center-pulse" cx="340" cy="170" r="20" fill="none" stroke="#6CB4F0" stroke-width="1.2"/>
+    </g>
+    <text class="fr-wordmark" text-anchor="middle" x="340" y="370" font-family="'Gill Sans','Optima','Segoe UI',sans-serif" font-size="72" font-weight="400" letter-spacing="8" fill="#1B8FE8">FROST<tspan font-weight="300" fill="#5aaee8">ERP</tspan></text>
+    <line class="fr-ruleline" x1="190" y1="383" x2="490" y2="383" stroke="#1B8FE8" stroke-width="0.6" opacity="0.35"/>
+    <text class="fr-tagline" text-anchor="middle" x="340" y="410" font-family="'Courier New',monospace" font-size="12" letter-spacing="5" fill="#1B8FE8" opacity="0.6">REFRIGERAÇÕES</text>
+  </svg>
+</div>
+<script>
+  (function(){
+    var sp = document.getElementById("splash");
+    if(!sp) return;
+    var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    function done(){
+      sp.remove();
+      document.body.style.overflow = "";               // libera scroll
+      if (window.ScrollTrigger) window.ScrollTrigger.refresh();
+    }
+
+    // quem pede menos animação não espera o splash
+    if (reduced) { done(); return; }
+
+    document.body.style.overflow = "hidden";            // trava scroll durante o splash
+    setTimeout(function(){
+      sp.style.opacity = "0";                           // fade-out 0.6s
+      setTimeout(done, 600);
+    }, 3000);                                           // 3s igual ao app
+  })();
+</script>
+
+<canvas id="bg-canvas"></canvas>
+
+<header class="topbar" style="font-size: 21px; font-weight: 300; background-size: contain; background-position: center center; height: 85px">
+  <a class="brand" href="#hero" aria-label="FrostERP">
+    <img src="logo.svg" alt="FrostERP" class="brand-logo" />
+  </a>
+  <nav class="topnav">
+    <a href="#solucao">Recursos</a>
+    <a href="#demo">Demo</a>
+    <a href="#faq">FAQ</a>
+  </nav>
+  <a class="btn btn-ghost" href="#cta">Agendar reunião</a>
+</header>
+
+<main>
+
+  <!-- 00 HERO -->
+  <section class="panel" id="hero" data-side="center" data-screen-label="Hero" style="justify-content: flex-start">
+    <div class="panel-inner"><div class="col">
+      <span class="badge" data-reveal><span class="dot-live"></span> Já rodando em Altamira e região</span>
+      <h1 class="h-hero" data-hero-title>Refrigeração não se gerencia em planilha.</h1>
+      <p class="lead" data-reveal>OS, agenda de manutenção, financeiro e estoque num sistema só. Sem instalação, sem fidelidade.</p>
+      <div class="cta-row" data-reveal>
+        <a class="btn btn-primary" href="https://wa.me/5593984166832?text=Ol%C3%A1!%20Tenho%20interesse%20no%20FrostERP%20e%20gostaria%20de%20falar%20com%20a%20equipe." target="_blank" rel="noopener">Falar com a gente no WhatsApp</a>
+        <a class="btn btn-ghost" href="https://wa.me/5593984166832?text=Ol%C3%A1!%20Gostaria%20de%20ver%20uma%20demonstra%C3%A7%C3%A3o%20de%2015%20minutos%20do%20FrostERP." target="_blank" rel="noopener">Ver uma demonstração (15 min)</a>
+      </div>
+    </div></div>
+    <div class="scroll-hint"><span class="mouse"></span><span>role para explorar</span></div>
+  </section>
+
+  <!-- 01 DORES -->
+  <section class="panel" id="dores" data-side="left" data-screen-label="Dores">
+    <div class="panel-inner"><div class="col">
+      <h2 class="h-sec" data-reveal style="letter-spacing: -3.8px; line-height: 1.2; font-size: 50px; opacity: 0.9">O que custa caro hoje?</h2>
+      <div class="pain-list">
+        <div class="pain" data-reveal><div class="x" aria-hidden="true">!</div><div><h3>Suas OS vivem em grupos de WhatsApp</h3><p>Você perde histórico técnico, fotos do serviço e prazo de garantia.</p></div></div>
+        <div class="pain" data-reveal><div class="x" aria-hidden="true">!</div><div><h3>Financeiro não conversa com o operacional</h3><p>Você fecha OS mas não sabe o que entrou no caixa.</p></div></div>
+        <div class="pain" data-reveal><div class="x" aria-hidden="true">!</div><div><h3>Estoque é uma planilha desatualizada</h3><p>Compressor que você jurou ter, sumiu. Peça parada virou prejuízo.</p></div></div>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- 02 SOLUÇÃO -->
+  <section class="panel" id="solucao" data-side="right" data-screen-label="Solução">
+    <div class="panel-inner"><div class="col">
+      <h2 class="h-sec" data-reveal>Sua equipe mais rápida. Seu cliente impressionado.</h2>
+      <p class="lead" data-reveal>Os módulos você explora ao lado — aqui estão os diferenciais que viram vantagem competitiva no dia a dia da sua empresa.</p>
+      <div class="mod-grid">
+        <div class="mod" data-reveal><div class="ico" aria-hidden="true">⬢</div><h3>Seu técnico vira profissional 5 estrelas</h3><p>No celular ele marca chegada, registra fotos do serviço e colhe a assinatura do cliente. Passa confiança e fecha a OS na hora.</p></div>
+        <div class="mod" data-reveal><div class="ico" aria-hidden="true">☁</div><h3>Decisão na palma da mão</h3><p>Campo e escritório sempre no mesmo dado, em tempo real. Você acompanha tudo do celular — de onde estiver, sem ligar pra ninguém.</p></div>
+        <div class="mod" data-reveal><div class="ico" aria-hidden="true">✦</div><h3>Cliente avisado, telefone em paz</h3><p>Cada etapa da OS dispara um WhatsApp automático pro cliente. Mais profissionalismo, menos "e aí, como tá meu serviço?".</p></div>
+        <div class="mod" data-reveal><div class="ico" aria-hidden="true">⎙</div><h3>Orçamento pronto em segundos</h3><p>Orçamento, OS e recibo gerados na hora, já formatados e com a assinatura embutida. Responda rápido e ganhe o serviço.</p></div>
+        <div class="mod" data-reveal><div class="ico" aria-hidden="true">⛉</div><h3>Seus dados blindados</h3><p>2FA, biometria, acesso por função e histórico de quem mexeu em quê. Só quem você autoriza entra — e tudo fica registrado.</p></div>
+        <div class="mod" data-reveal><div class="ico" aria-hidden="true">⤓</div><h3>Trabalha onde você trabalha</h3><p>Instala como app no celular e no PC e funciona até sem sinal no campo. Com backup automático — nada se perde, nunca.</p></div>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- 03 DEMO — carrossel de módulos -->
+  <section class="panel" id="demo" data-side="center" data-screen-label="Demo">
+    <div class="panel-inner" style="flex-direction:column;">
+      <div style="width:100%; max-width:980px; margin:0 auto;">
+        <h2 class="h-sec" data-reveal style="text-align:center;">Veja como funciona</h2>
+        <p class="lead" data-reveal style="text-align:center; margin-left:auto; margin-right:auto;">Clique em cada módulo e explore o que ele faz. Os 6 do núcleo vêm em todo plano — e dá pra ir além com módulos adicionais e até criados sob medida.</p>
+
+        <div class="carousel" data-reveal>
+          <button class="car-arrow car-prev" aria-label="Anterior">‹</button>
+          <div class="car-track" id="car-track">
+            <button class="mod-card active" data-key="dashboard"><span class="ico" aria-hidden="true">◴</span><h3>Dashboard</h3><span class="tag core">Núcleo</span></button>
+            <button class="mod-card" data-key="os"><span class="ico" aria-hidden="true">▦</span><h3>Ordens de Serviço</h3><span class="tag core">Núcleo</span></button>
+            <button class="mod-card" data-key="financeiro"><span class="ico" aria-hidden="true">◷</span><h3>Financeiro</h3><span class="tag core">Núcleo</span></button>
+            <button class="mod-card" data-key="agenda"><span class="ico" aria-hidden="true">▤</span><h3>Agenda</h3><span class="tag core">Núcleo</span></button>
+            <button class="mod-card" data-key="cadastro"><span class="ico" aria-hidden="true">⬡</span><h3>Cadastro</h3><span class="tag core">Núcleo</span></button>
+            <button class="mod-card" data-key="config"><span class="ico" aria-hidden="true">⚙</span><h3>Configurações</h3><span class="tag core">Núcleo</span></button>
+            <button class="mod-card" data-key="ia"><span class="ico" aria-hidden="true">✦</span><h3>IA / Atendimento</h3><span class="tag add">Adicional</span></button>
+            <button class="mod-card" data-key="posvenda"><span class="ico" aria-hidden="true">↻</span><h3>Pós-venda</h3><span class="tag add">Adicional</span></button>
+            <button class="mod-card" data-key="custom"><span class="ico" aria-hidden="true">✜</span><h3>Módulos sob medida</h3><span class="tag custom">Exclusivo</span></button>
+          </div>
+          <button class="car-arrow car-next" aria-label="Próximo">›</button>
+        </div>
+
+        <div class="mod-detail glass" id="mod-detail" data-reveal>
+          <div class="d-ico" aria-hidden="true">◴</div>
+          <div class="d-body">
+            <div class="d-head"><h3>Dashboard</h3><span class="tag core">Núcleo</span></div>
+            <p class="d-desc">A visão de comando da operação. KPIs do dia, gráficos e atividade recente numa tela só.</p>
+            <ul class="d-feats">
+              <li><span class="ck" aria-hidden="true">✓</span>OS em andamento</li>
+              <li><span class="ck" aria-hidden="true">✓</span>Receita do mês</li>
+              <li><span class="ck" aria-hidden="true">✓</span>Clientes ativos</li>
+              <li><span class="ck" aria-hidden="true">✓</span>Gráficos em tempo real</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 05 FAQ -->
+  <section class="panel" id="faq" data-side="left" data-screen-label="FAQ">
+    <div class="panel-inner"><div class="col">
+      <h2 class="h-sec" data-reveal>Perguntas frequentes</h2>
+      <div class="faq-list">
+        <div class="faq-item" data-reveal><button class="faq-q" type="button" aria-expanded="false">Tem fidelidade ou multa?<span class="pm" aria-hidden="true">+</span></button><div class="faq-a"><div>Não. Você cancela quando quiser, sem multa.</div></div></div>
+        <div class="faq-item" data-reveal><button class="faq-q" type="button" aria-expanded="false">Para quais empresas é indicado?<span class="pm" aria-hidden="true">+</span></button><div class="faq-a"><div>Empresas de refrigeração, climatização, instalação e manutenção de ar-condicionado com 1 a 15 técnicos em campo.</div></div></div>
+        <div class="faq-item" data-reveal><button class="faq-q" type="button" aria-expanded="false">Migra os dados das minhas planilhas?<span class="pm" aria-hidden="true">+</span></button><div class="faq-a"><div>Sim. Nossa equipe ajuda a importar clientes, produtos e estoques na implantação.</div></div></div>
+        <div class="faq-item" data-reveal><button class="faq-q" type="button" aria-expanded="false">Quanto tempo para começar a usar?<span class="pm" aria-hidden="true">+</span></button><div class="faq-a"><div>Você cria a conta e entra no sistema em 5 minutos. Migração completa leva de 1 a 3 dias úteis.</div></div></div>
+        <div class="faq-item" data-reveal><button class="faq-q" type="button" aria-expanded="false">Funciona no celular?<span class="pm" aria-hidden="true">+</span></button><div class="faq-a"><div>Sim. Interface responsiva para usar em qualquer dispositivo.</div></div></div>
+      </div>
+    </div></div>
+  </section>
+
+  <!-- 06 CTA FINAL -->
+  <section class="panel" id="cta" data-side="center" data-screen-label="CTA final">
+    <div class="panel-inner"><div class="col">
+      <h2 class="h-sec" data-reveal>Vamos conversar sobre a sua operação.</h2>
+      <p class="lead" data-reveal>Fale direto com a nossa equipe, marque uma reunião e receba uma proposta comercial sob medida para a sua empresa.</p>
+      <div class="cta-row" data-reveal>
+        <a class="btn btn-primary" href="https://wa.me/5593984166832?text=Ol%C3%A1!%20Tenho%20interesse%20no%20FrostERP%20e%20gostaria%20de%20falar%20com%20a%20equipe." target="_blank" rel="noopener">Falar com a gente no WhatsApp</a>
+        <a class="btn btn-ghost" href="https://wa.me/5593984166832?text=Ol%C3%A1!%20Gostaria%20de%20ver%20uma%20demonstra%C3%A7%C3%A3o%20de%2015%20minutos%20do%20FrostERP." target="_blank" rel="noopener">Ver uma demonstração (15 min)</a>
+      </div>
+    </div></div>
+    <div class="foot" data-reveal style="position:absolute; left:0; right:0; bottom:26px; margin-top:0; padding:26px clamp(20px,7vw,120px) 0;">
+      <span>FrostERP — Gestão integrada para refrigeração</span>
+      <a href="https://wa.me/5593984166832" target="_blank" rel="noopener">WhatsApp (93) 98416-6832</a>
+      <a href="mailto:suportefrosterp@gmail.com">suportefrosterp@gmail.com</a>
+    </div>
+  </section>
+
+</main>
+
+<!-- libs globais -->
+<script src="https://unpkg.com/gsap@3.12.5/dist/gsap.min.js"></script>
+<script src="https://unpkg.com/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
+<script src="https://unpkg.com/animejs@3.2.1/lib/anime.min.js"></script>
+
+<!-- three.js como módulo -->
+<script type="importmap">
+{ "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module" src="scene3d.js"></script>
+<script src="scroll.js"></script>
+
+</body>
+</html>
