@@ -239,6 +239,12 @@ describe("validateOSProposal", () => {
     const r = validateOSProposal({ ...base });
     expect(r.payload.discount_note).toBe("");
   });
+  it("marca e modelo do equipamento são opcionais", () => {
+    const r = validateOSProposal({ ...base, equipment_brand: "", equipment_model: "" });
+    expect(r.valid).toBe(true);
+    expect(r.missing).not.toContain("equipment_brand");
+    expect(r.missing).not.toContain("equipment_model");
+  });
 });
 
 describe("buildOSWhatsAppResumo", () => {

@@ -144,7 +144,9 @@ export function monthsAgo(n) {
 // Retorna { valid, missing[], payload } — payload com telefone só dígitos e
 // media_urls sempre array. Helper puro: testado em utils.test.js.
 export function validateOSProposal(input) {
-  const required = ["customer_name", "address", "equipment_type", "equipment_brand", "equipment_model", "problem", "phone"];
+  // marca/modelo do equipamento são OPCIONAIS — o cliente frequentemente não
+  // sabe informar e a IA não consegue captar. Exigi-los travava a aprovação.
+  const required = ["customer_name", "address", "equipment_type", "problem", "phone"];
   const src = input || {};
   const missing = required.filter((k) => !String(src[k] ?? "").trim());
   const payload = {

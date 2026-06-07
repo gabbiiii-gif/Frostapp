@@ -29,6 +29,8 @@ export const STATUS_MAP = {
   aguardando_finalizacao: { label: "Aguardando Finalização", color: "bg-orange-500" },
   pago: { label: "Pago", color: "bg-green-500" },
   atrasado: { label: "Atrasado", color: "bg-red-500" },
+  // OS recusada pelo cliente (não fechou) — mantida para captação/follow-up.
+  nao_autorizada: { label: "Não autorizada", color: "bg-rose-700" },
 };
 
 // Matriz de permissões por role — inclui módulo financeiro

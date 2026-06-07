@@ -1785,7 +1785,11 @@ function StyleSheet() {
 
 // ─── BASE UI COMPONENTS ─────────────────────────────────────────────────────────
 
-function Modal({ isOpen, title, children, onClose, size = "md" }) {
+// disableHistory: pula o gerenciamento de history.pushState/popstate (botão
+// voltar). Necessário para modais EMPILHADOS (ex.: cadastro rápido de cliente
+// aberto por cima da modal de OS) — senão fechar o modal de cima chama
+// history.back(), que dispara popstate e fecha o modal de baixo em cascata.
+function Modal({ isOpen, title, children, onClose, size = "md", disableHistory = false }) {
   const sizeMap = { sm: "max-w-md", md: "max-w-2xl", lg: "max-w-4xl", xl: "max-w-6xl" };
   const ref = useRef(null);
 
@@ -1802,7 +1806,7 @@ function Modal({ isOpen, title, children, onClose, size = "md" }) {
   const onCloseRef = useRef(onClose);
   useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || disableHistory) return;
     let poppedByBack = false;
     window.history.pushState({ modal: true }, "");
     const onPop = () => {
@@ -1816,7 +1820,7 @@ function Modal({ isOpen, title, children, onClose, size = "md" }) {
         window.history.back();
       }
     };
-  }, [isOpen]);
+  }, [isOpen, disableHistory]);
 
   if (!isOpen) return null;
 
@@ -6627,12 +6631,14 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
     em_deslocamento: "Em Deslocamento",
     em_execucao: "Em Execução",
     finalizado: "Finalizado",
+    nao_autorizada: "Não autorizada",
   };
   const STATUS_COLORS_OS = {
     aguardando: "bg-yellow-500",
     em_deslocamento: "bg-cyan-500",
     em_execucao: "bg-blue-500",
     finalizado: "bg-green-500",
+    nao_autorizada: "bg-rose-700",
   };
 
   // Carrega clientes e funcionários do DB diretamente para garantir dados atualizados
@@ -7216,6 +7222,15 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
     return STATUS_FLOW[idx + 1];
   }, []);
 
+  // Marca a OS como "não autorizada" — cliente não fechou o orçamento. Não exclui:
+  // mantém o registro para captação/follow-up posterior do lead.
+  const marcarNaoAutorizada = useCallback((os) => {
+    if (!window.confirm(`Marcar a OS ${os.numero} como NÃO AUTORIZADA?\n\nEla sai do fluxo ativo mas fica registrada para você captar o cliente depois.`)) return;
+    DB.set("erp:os:" + os.id, { ...os, status: "nao_autorizada", naoAutorizadaEm: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    addToast(`OS ${os.numero} marcada como não autorizada.`, "warning");
+    loadOrders();
+  }, [addToast, loadOrders]);
+
   const columns = [
     { key: "numero", label: "Nº", width: "w-24" },
     { key: "clienteNome", label: "Cliente" },
@@ -7308,6 +7323,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
           {/* Status novos do fluxo Tech App */}
           <option value="em_servico">Em Serviço (técnico)</option>
           <option value="aguardando_finalizacao">Aguardando Finalização</option>
+          <option value="nao_autorizada">Não autorizada</option>
         </select>
         {user.role !== "tecnico" && (
           <select name="filterTecnico"
@@ -7393,6 +7409,16 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                   title={`Avançar para ${STATUS_LABELS_OS[getNextStatus(row.status)]}`}
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" /></svg>
+                </button>
+              )}
+              {/* Marcar como Não autorizada — captação de leads que não fecharam */}
+              {canManage && row.status !== "finalizado" && row.status !== "nao_autorizada" && (
+                <button
+                  onClick={() => marcarNaoAutorizada(row)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-rose-400 hover:bg-gray-700 transition"
+                  title="Marcar como Não autorizada (cliente não fechou)"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 5.636L5.636 18.364M5.636 5.636a9 9 0 1012.728 12.728A9 9 0 005.636 5.636z" /></svg>
                 </button>
               )}
               {/* Botões de documentos HTML */}
@@ -7993,7 +8019,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
 
       {/* ─── Modal Cadastro Rápido de Cliente ─── */}
       {quickClientOpen && (
-        <Modal isOpen={true} title="Novo Cliente" onClose={() => setQuickClientOpen(false)} size="md">
+        <Modal isOpen={true} title="Novo Cliente" onClose={() => setQuickClientOpen(false)} size="md" disableHistory>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -14756,6 +14782,7 @@ function TecnicoMobileApp({ user, onLogout, addToast, theme, setTheme }) {
           { id: "resumo", label: "Resumo" },
           { id: "ativas", label: `Ativas (${ativas.length})` },
           { id: "historico", label: `Histórico (${historico.length})` },
+          { id: "ponto", label: "Ponto" },
         ].map((t) => (
           <button
             key={t.id}
@@ -14777,7 +14804,12 @@ function TecnicoMobileApp({ user, onLogout, addToast, theme, setTheme }) {
           <TecnicoDashboard user={user} orders={orders} />
         )}
 
-        {tab !== "resumo" && lista.length === 0 && (
+        {/* Ponto Eletrônico — técnico bate o próprio ponto (PIN/facial/biometria) */}
+        {tab === "ponto" && (
+          <PontoModule user={user} addToast={addToast} employees={DB.list("erp:employee:")} db={DB} reloadData={() => setReload((r) => r + 1)} />
+        )}
+
+        {(tab === "ativas" || tab === "historico") && lista.length === 0 && (
           <div className="text-center py-20 text-gray-500">
             <div className="text-4xl mb-2">📋</div>
             <p className="text-sm">
@@ -14788,7 +14820,7 @@ function TecnicoMobileApp({ user, onLogout, addToast, theme, setTheme }) {
           </div>
         )}
 
-        {tab !== "resumo" && lista.map((os) => (
+        {(tab === "ativas" || tab === "historico") && lista.map((os) => (
           <button
             key={os.id}
             onClick={() => setSelected(os)}
@@ -15503,6 +15535,33 @@ export default function App() {
       unsubscribe();
     };
   }, [user, loadAllData]);
+
+  // ─── Badge de novas propostas de OS da IA (WhatsApp) ───────────────────────
+  // Conta propostas pendentes (ai_os_proposals.status='pending_approval') da
+  // empresa e mostra bolinha vermelha no item "Ordens de Serviço" do menu.
+  // Atualiza via Realtime (postgres_changes) + poll de 60s como rede de segurança.
+  const [pendingProposals, setPendingProposals] = useState(0);
+  useEffect(() => {
+    if (!user || !supabase) return;
+    const companyId = getCurrentMember()?.company_id;
+    if (!companyId) return;
+    let alive = true;
+    const fetchCount = async () => {
+      const { count } = await supabase
+        .from("ai_os_proposals")
+        .select("id", { count: "exact", head: true })
+        .eq("company_id", companyId)
+        .eq("status", "pending_approval");
+      if (alive) setPendingProposals(count || 0);
+    };
+    fetchCount();
+    const ch = supabase
+      .channel("os-proposals-badge")
+      .on("postgres_changes", { event: "*", schema: "public", table: "ai_os_proposals", filter: `company_id=eq.${companyId}` }, fetchCount)
+      .subscribe();
+    const poll = setInterval(fetchCount, 60000);
+    return () => { alive = false; clearInterval(poll); try { supabase.removeChannel(ch); } catch { /* noop */ } };
+  }, [user]);
 
   // ─── Add Toast ───
   // Timer de remoção fica apenas no componente Toast (via useEffect com clearTimeout)
@@ -16337,7 +16396,7 @@ export default function App() {
                 setShowSearchResults(false);
               }}
               title={sidebarCollapsed ? item.label : undefined}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${
+              className={`relative w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${
                 activeModule === item.id
                   ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20"
                   : "text-gray-300 hover:bg-gray-700 hover:text-white"
@@ -16353,6 +16412,16 @@ export default function App() {
                 />
               </span>
               {!sidebarCollapsed && <span className="truncate">{item.label}</span>}
+              {/* Bolinha vermelha: novas propostas de OS feitas pela IA (WhatsApp) */}
+              {item.id === "processos" && pendingProposals > 0 && (
+                sidebarCollapsed ? (
+                  <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-red-500 ring-2 ring-gray-800 animate-pulse" title={`${pendingProposals} nova(s) proposta(s) da IA`} />
+                ) : (
+                  <span className="ml-auto flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-red-500 text-white text-[10px] font-bold animate-pulse" title={`${pendingProposals} nova(s) proposta(s) da IA aguardando aprovação`}>
+                    {pendingProposals > 9 ? "9+" : pendingProposals}
+                  </span>
+                )
+              )}
             </button>
           ))}
         </nav>
