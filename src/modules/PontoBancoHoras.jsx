@@ -49,6 +49,9 @@ export default function PontoBancoHoras({ user, addToast, db, employees, isAdmin
   const [mes, setMes] = useState(mesAtual);
   // Para self: força o próprio. Para admin: combobox.
   const [funcSelecionado, setFuncSelecionado] = useState(user?.id || "");
+  // Bump após salvar jornada — força o useMemo de `jornada` a reler do db.
+  // Sem isso, salvar mostrava sucesso mas a tela seguia com o valor antigo.
+  const [jornadaTick, setJornadaTick] = useState(0);
   // Ocorrências (placeholder — fase E vai popular). Lista vazia já produz
   // resultados corretos (sem zerar débitos por atestado).
   const ocorrencias = useMemo(() => {
@@ -61,7 +64,7 @@ export default function PontoBancoHoras({ user, addToast, db, employees, isAdmin
   const periodo = useMemo(() => periodoMes(mes), [mes]);
   const jornada = useMemo(
     () => (db && funcSelecionado ? getJornada(db, funcSelecionado) : JORNADA_DEFAULT),
-    [db, funcSelecionado]
+    [db, funcSelecionado, jornadaTick]
   );
 
   const saldos = useMemo(() => {
@@ -242,7 +245,7 @@ export default function PontoBancoHoras({ user, addToast, db, employees, isAdmin
           atual={jornada}
           addToast={addToast}
           onClose={() => setShowJornada(false)}
-          onSaved={() => { setShowJornada(false); }}
+          onSaved={() => { setShowJornada(false); setJornadaTick((t) => t + 1); }}
         />
       )}
     </div>

@@ -11345,8 +11345,9 @@ function UserManagement({ currentUser, addToast }) {
     // cliente_escola é externa (Vanda) e NÃO vira funcionário.
     const syncLinkedEmployee = (userId) => {
       const cargoPorPapel = { gerente: "Gerente", admin: "Administrativo", atendente: "Administrativo" };
-      const cargoFunc = form.role === "tecnico"
-        ? (form.cargo || "Técnico em Refrigeração")
+      // tecnico e ponto: usam o cargo escolhido no form. Demais: derivado do papel.
+      const cargoFunc = (form.role === "tecnico" || form.role === "ponto")
+        ? (form.cargo || (form.role === "tecnico" ? "Técnico em Refrigeração" : "Administrativo"))
         : (cargoPorPapel[form.role] || null);
       let prevEmp = DB.get("erp:employee:" + userId);
       if (!cargoFunc) {
@@ -11403,7 +11404,7 @@ function UserManagement({ currentUser, addToast }) {
         status: form.status,
         customPermissions: form.useCustomPermissions ? form.customPermissions : null,
         comissaoPercentual: comissaoNum,
-        cargo: form.role === "tecnico" ? form.cargo : (editing.cargo || null),
+        cargo: (form.role === "tecnico" || form.role === "ponto") ? form.cargo : (editing.cargo || null),
         updatedAt: new Date().toISOString(),
       };
       if (form.password) {
@@ -11461,7 +11462,7 @@ function UserManagement({ currentUser, addToast }) {
         sessionTokenHash: null,
         customPermissions: form.useCustomPermissions ? form.customPermissions : null,
         comissaoPercentual: comissaoNum,
-        cargo: form.role === "tecnico" ? form.cargo : null,
+        cargo: (form.role === "tecnico" || form.role === "ponto") ? form.cargo : null,
         invitedAt: new Date().toISOString(),
       };
       const redirectTo = `${window.location.origin}/?type=invite`;
@@ -11733,6 +11734,8 @@ function UserManagement({ currentUser, addToast }) {
                 <option value="gerente">Gerente</option>
                 <option value="tecnico">Técnico</option>
                 <option value="atendente">Atendente</option>
+                {/* Funcionário que só bate ponto — sem tela de técnico nem ERP. */}
+                <option value="ponto">Funcionário (só ponto)</option>
                 {/* Role da cliente externa Vanda: cai no portal isolado EscolaPortalVanda (sem ERP). */}
                 <option value="cliente_escola">Cliente Escola (Portal Vanda)</option>
               </select>
@@ -11750,9 +11753,9 @@ function UserManagement({ currentUser, addToast }) {
             </div>
           </div>
 
-          {/* ─── Cargo do técnico (distingue Técnico de Técnico Auxiliar) ─── */}
-          {/* Vira o cargo do funcionário vinculado criado automaticamente. */}
-          {form.role === "tecnico" && (
+          {/* ─── Cargo do funcionário vinculado ─── */}
+          {/* Técnico: só cargos técnicos. Ponto: qualquer cargo (motorista, ajudante…). */}
+          {(form.role === "tecnico" || form.role === "ponto") && (
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">
                 Cargo (funcionário)
@@ -11762,12 +11765,13 @@ function UserManagement({ currentUser, addToast }) {
                 onChange={(e) => setForm({ ...form, cargo: e.target.value })}
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white focus:outline-none focus:border-blue-500"
               >
-                {CARGOS_TECNICO_OPCOES.map((c) => (
+                {(form.role === "tecnico" ? CARGOS_TECNICO_OPCOES : CARGOS_FUNCIONARIO).map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
               <p className="text-xs text-gray-500 mt-1">
-                Define o cargo do funcionário criado junto com este usuário. "Técnico Auxiliar" também conta como técnico.
+                Define o cargo do funcionário criado junto com este usuário.
+                {form.role === "tecnico" ? ' "Técnico Auxiliar" também conta como técnico.' : ""}
               </p>
             </div>
           )}
@@ -14709,6 +14713,50 @@ function TecnicoDashboard({ user, orders }) {
   );
 }
 
+// ─── Shell dedicado para role="ponto" ───────────────────────────────────────
+// Funcionário que SÓ bate ponto (não é técnico, não usa ERP). Header enxuto +
+// indicador de sincronização offline + o PontoModule. Nada mais.
+function PontoShell({ user, onLogout, addToast, theme, setTheme }) {
+  const [pendingSync, setPendingSync] = useState(() => outboxSize());
+  const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+  useEffect(() => {
+    const unsub = onOutboxChange((n) => setPendingSync(n));
+    const up = () => { setOnline(true); setPendingSync(outboxSize()); };
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    const poll = setInterval(() => setPendingSync(outboxSize()), 10000);
+    return () => { unsub(); window.removeEventListener("online", up); window.removeEventListener("offline", down); clearInterval(poll); };
+  }, []);
+  return (
+    <div className="min-h-screen bg-gray-900 text-gray-100 font-['DM_Sans']">
+      <StyleSheet />
+      <header className="sticky top-0 z-20 bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between shadow-lg">
+        <div>
+          <h1 className="text-base font-bold">{user.nome}</h1>
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-gray-400">Ponto • FrostERP</p>
+            {!online && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-600 text-gray-200">Offline</span>}
+            {pendingSync > 0 && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/90 text-black" title={`${pendingSync} registro(s) gravado(s) e aguardando internet`}>🟠 {pendingSync} aguardando envio</span>}
+            {online && pendingSync === 0 && <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-600/80 text-white">✓ sincronizado</span>}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          {typeof setTheme === "function" && (
+            <button type="button" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} className="p-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition" aria-label="Alternar tema">
+              {theme === "dark" ? "☀️" : "🌙"}
+            </button>
+          )}
+          <button onClick={onLogout} className="text-xs px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 transition">Sair</button>
+        </div>
+      </header>
+      <main className="p-4 pb-24">
+        <PontoModule user={user} addToast={addToast} employees={DB.list("erp:employee:")} db={DB} reloadData={() => {}} />
+      </main>
+    </div>
+  );
+}
+
 function TecnicoMobileApp({ user, onLogout, addToast, theme, setTheme }) {
   const [orders, setOrders] = useState([]);
   const [tab, setTab] = useState("resumo"); // resumo | ativas | historico | ponto
@@ -16351,6 +16399,18 @@ export default function App() {
       <>
         <ToastContainer toasts={toasts} removeToast={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
         <EscolaPortalVanda user={user} onLogout={handleLogout} addToast={addToast} db={DB} />
+      </>
+    );
+  }
+
+  // ─── Roteamento por role: "ponto" — funcionário que SÓ bate ponto ───
+  // Não-técnicos (motorista, ajudante, administrativo) que só precisam registrar
+  // jornada. Sem sidebar, sem tela de técnico, sem ERP — apenas o PontoModule.
+  if (user.role === "ponto") {
+    return (
+      <>
+        <ToastContainer toasts={toasts} removeToast={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
+        <PontoShell user={user} onLogout={handleLogout} addToast={addToast} theme={theme} setTheme={setTheme} />
       </>
     );
   }

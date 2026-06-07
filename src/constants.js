@@ -48,6 +48,10 @@ export const ROLE_PERMISSIONS = {
   // Role exclusiva do portal da Vanda. Único módulo: "escola-portal".
   // Render branch em App.jsx detecta esta role e mostra EscolaPortalVanda.
   cliente_escola: ["escola-portal"],
+  // Funcionário que SÓ bate ponto (motorista, ajudante, administrativo que não
+  // é técnico). Não vê a tela de técnico nem o ERP — só o Ponto Eletrônico.
+  // Render branch em App.jsx detecta esta role e mostra o PontoShell.
+  ponto: ["ponto"],
 };
 
 // ─── CARGOS de funcionários ──────────────────────────────────────────────────
