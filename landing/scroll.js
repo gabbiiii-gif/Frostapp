@@ -6,6 +6,8 @@
     }
     const gsap = window.gsap;
     gsap.registerPlugin(window.ScrollTrigger);
+    // não recalcula triggers quando a barra de endereço do mobile aparece/some (evita scroll "pulando")
+    window.ScrollTrigger.config({ ignoreMobileResize: true });
     const fs = window.frostScene;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 

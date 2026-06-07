@@ -17,6 +17,7 @@ const state = {
   particles: true,
   palette: "frost",
   reduced: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
+  mobile: window.matchMedia("(max-width: 760px), (pointer: coarse)").matches,
   balanceScale: 1, // fator responsivo: encolhe o balanço lateral em telas estreitas
   fitScale: 1,     // fator responsivo: encolhe o modelo em retrato pra não cortar
 };
@@ -115,6 +116,16 @@ function loadModel() {
     side: THREE.DoubleSide,
   });
 
+  // mobile: sem transmission (remove o render-pass extra — principal causa do scroll travado).
+  // Vira gelo fosco/refletivo, bem mais leve, mantendo o brilho do envMap.
+  if (state.mobile) {
+    iceMat.transmission = 0;
+    iceMat.thickness = 0;
+    iceMat.opacity = 0.9;
+    iceMat.roughness = 0.16;
+    iceMat.side = THREE.FrontSide;   // metade dos triângulos desenhados
+  }
+
   const loader = new GLTFLoader();
   loader.load(
     "snowflake.glb",
@@ -156,7 +167,8 @@ function loadModel() {
 
 export function init(canvas) {
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  // mobile: limita pixelRatio (transmission renderiza buffer extra por frame — caro em retina)
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, state.mobile ? 1.5 : 2));
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   renderer.setClearColor(0x000000, 0);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -219,7 +231,7 @@ export function init(canvas) {
   scene.userData.lightB = lB;
 
   // Partículas de neve
-  const N = 520;
+  const N = state.mobile ? 220 : 520;   // menos neve no celular
   const pos = new Float32Array(N * 3);
   const spd = new Float32Array(N);
   for (let i = 0; i < N; i++) {
