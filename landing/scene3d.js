@@ -32,7 +32,8 @@ let exploded = false;      // já explodiu (trava re-disparo até resetar)
 let eStart = 0;            // instante (clock) em que a explosão começou
 const BN = 1300;           // qtd de cacos
 const EXPLODE_T = 2.0;     // duração da explosão (s)
-const ICE_OPACITY = 0.75;  // opacidade geral do floco
+const ICE_OPACITY = 0.75;  // opacidade geral do floco (desktop)
+let restOpacity = ICE_OPACITY;  // opacidade de repouso do floco — menor no mobile pra não roubar atenção (partículas ficam intactas)
 let raf = 0;
 const clock = new THREE.Clock();
 let curX = 0, curScroll = 0, curTwist = 0;
@@ -121,10 +122,11 @@ function loadModel() {
   if (state.mobile) {
     iceMat.transmission = 0;
     iceMat.thickness = 0;
-    iceMat.opacity = 0.9;
     iceMat.roughness = 0.16;
     iceMat.side = THREE.FrontSide;   // metade dos triângulos desenhados
+    restOpacity = 0.4;               // mobile: floco discreto (só o modelo — partículas mantêm opacidade)
   }
+  iceMat.opacity = restOpacity;
 
   const loader = new GLTFLoader();
   loader.load(
@@ -348,7 +350,7 @@ function loop() {
     // modelo encolhe e some rápido enquanto os cacos partem
     const mp = Math.min(1, life / 0.18);
     if (model) model.scale.setScalar(THREE.MathUtils.lerp(1, 0.15, mp));
-    if (iceMat) iceMat.opacity = ICE_OPACITY * (1 - mp);
+    if (iceMat) iceMat.opacity = restOpacity * (1 - mp);
 
     if (life > EXPLODE_T) {
       exploding = false;
@@ -408,7 +410,7 @@ function resetExplosion() {
   exploded = false;
   if (burst) burst.visible = false;
   if (model) { model.visible = true; model.scale.setScalar(1); }
-  if (iceMat) iceMat.opacity = ICE_OPACITY;
+  if (iceMat) iceMat.opacity = restOpacity;
 }
 
 // API pública
