@@ -780,11 +780,21 @@ export async function uploadAllToSupabase() {
 // chaves ainda na fila — senão um registro feito offline (ex.: ponto) seria
 // apagado pela limpeza do hydrate antes de chegar ao servidor.
 const OUTBOX_KEY = 'erp:syncOutbox';
+// Pub/sub: notifica a UI (indicador "X aguardando envio") quando a fila muda.
+const _outboxListeners = new Set();
+export function onOutboxChange(cb) {
+  _outboxListeners.add(cb);
+  return () => _outboxListeners.delete(cb);
+}
+function _notifyOutbox(n) {
+  _outboxListeners.forEach((cb) => { try { cb(n); } catch { /* noop */ } });
+}
 function _loadOutbox() {
   try { return JSON.parse(localStorage.getItem(OUTBOX_KEY) || '[]'); } catch { return []; }
 }
 function _saveOutbox(arr) {
   try { localStorage.setItem(OUTBOX_KEY, JSON.stringify(arr)); } catch { /* noop */ }
+  _notifyOutbox(arr.length);
 }
 function enqueueOutbox(op, key, value) {
   if (isSensitive(key)) return;

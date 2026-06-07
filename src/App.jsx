@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, flushOutbox, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated } from "./supabase.js";
+import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -14706,9 +14706,25 @@ function TecnicoDashboard({ user, orders }) {
 
 function TecnicoMobileApp({ user, onLogout, addToast, theme, setTheme }) {
   const [orders, setOrders] = useState([]);
-  const [tab, setTab] = useState("resumo"); // resumo | ativas | historico
+  const [tab, setTab] = useState("resumo"); // resumo | ativas | historico | ponto
   const [selected, setSelected] = useState(null); // OS aberta no detalhe
   const [reload, setReload] = useState(0);
+
+  // ─── Status de sincronização offline ───
+  // pendingSync = nº de registros (ponto/OS) ainda na fila aguardando internet.
+  // online = conectividade atual. Mostra um aviso no header pro técnico ter
+  // certeza de que o ponto offline foi gravado e vai subir quando voltar a rede.
+  const [pendingSync, setPendingSync] = useState(() => outboxSize());
+  const [online, setOnline] = useState(typeof navigator !== "undefined" ? navigator.onLine : true);
+  useEffect(() => {
+    const unsub = onOutboxChange((n) => setPendingSync(n));
+    const up = () => { setOnline(true); setPendingSync(outboxSize()); };
+    const down = () => setOnline(false);
+    window.addEventListener("online", up);
+    window.addEventListener("offline", down);
+    const poll = setInterval(() => setPendingSync(outboxSize()), 10000);
+    return () => { unsub(); window.removeEventListener("online", up); window.removeEventListener("offline", down); clearInterval(poll); };
+  }, []);
 
   // ─── Carrega OS atribuídas ao técnico logado ───
   useEffect(() => {
@@ -14744,7 +14760,24 @@ function TecnicoMobileApp({ user, onLogout, addToast, theme, setTheme }) {
       <header className="sticky top-0 z-20 bg-gray-800 border-b border-gray-700 px-4 py-3 flex items-center justify-between shadow-lg">
         <div>
           <h1 className="text-base font-bold">{user.nome}</h1>
-          <p className="text-xs text-gray-400">Técnico • FrostERP</p>
+          <div className="flex items-center gap-2">
+            <p className="text-xs text-gray-400">Técnico • FrostERP</p>
+            {/* Indicador de conectividade + fila offline */}
+            {!online && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-gray-600 text-gray-200">Offline</span>
+            )}
+            {pendingSync > 0 && (
+              <span
+                className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-amber-500/90 text-black flex items-center gap-1"
+                title={`${pendingSync} registro(s) gravado(s) e aguardando internet para sincronizar`}
+              >
+                🟠 {pendingSync} aguardando envio
+              </span>
+            )}
+            {online && pendingSync === 0 && (
+              <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-green-600/80 text-white" title="Tudo sincronizado">✓ sincronizado</span>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {/* Toggle tema — técnico também alterna entre dark e light */}
