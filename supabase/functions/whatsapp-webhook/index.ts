@@ -185,6 +185,17 @@ async function handleMessage(j: Job) {
     return;
   }
 
+  // ── Resposta de pós-venda? ───────────────────────────────────────────────
+  // Antes de acionar o agente conversacional de OS, verifica se este inbound é
+  // a resposta do cliente a uma mensagem de pós-venda enviada (NPS, lembrete,
+  // reagendamento) ainda sem resposta. Se for, classifica a intenção via Haiku,
+  // grava em pos_venda_mensagens, manda um ack curto e escala humano (Inbox +
+  // email) quando necessário — e NÃO cai no fluxo do agente. Só texto: respostas
+  // de pós-venda são textuais (nota, "sim", "quero reagendar").
+  if (j.text && await handlePosVendaReply(supabase, cfg, j)) {
+    return;
+  }
+
   // ── Imagem: baixa da Evolution → Storage ─────────────────────────────────
   let mediaUrl: string | null = null;
   let imageBase64: string | null = null;
@@ -339,6 +350,220 @@ async function handleOperatorMessage(
       conversation_id: conversationId, company_id: companyId, role: "agent", content: limpo,
     });
   }
+}
+
+// ─── Pós-venda: captura + classificação de respostas ────────────────────────
+
+// Modelo barato/rápido pra classificar respostas curtas de pós-venda. Não
+// precisa do raciocínio do Sonnet — é só mapear texto → intenção + nota NPS.
+const POSVENDA_MODEL = "claude-haiku-4-5";
+const POSVENDA_JANELA_DIAS = 7; // resposta só conta se a msg foi enviada nos últimos N dias
+const INTENCOES = ["confirma", "reagenda", "duvida", "cancela", "parar", "outro"];
+
+const CLASSIFY_TOOL = {
+  name: "registrar_classificacao",
+  description: "Registra a classificação da resposta do cliente. Sempre chame esta tool.",
+  input_schema: {
+    type: "object",
+    properties: {
+      intencao: {
+        type: "string",
+        enum: INTENCOES,
+        description:
+          "Intenção principal da resposta. confirma=concorda/positivo/ok; reagenda=quer remarcar a visita/serviço; duvida=fez pergunta que precisa de humano; cancela=quer cancelar a visita/serviço; parar=pediu pra não receber mais mensagens (descadastro); outro=qualquer outra coisa.",
+      },
+      nps_score: {
+        type: ["integer", "null"],
+        description: "Se a mensagem enviada era uma pesquisa NPS e o cliente deu uma nota de 0 a 10, a nota. Caso contrário, null.",
+      },
+      resumo: { type: "string", description: "Resumo de uma frase do que o cliente disse." },
+    },
+    required: ["intencao", "resumo"],
+  },
+};
+
+// Detecta e trata uma resposta de pós-venda. Retorna true se ESTE inbound era a
+// resposta a uma mensagem de pós-venda pendente (e já foi tratado) — nesse caso
+// o caller NÃO deve rodar o agente conversacional.
+async function handlePosVendaReply(supabase: SupabaseClient, cfg: any, j: Job): Promise<boolean> {
+  const desde = new Date(Date.now() - POSVENDA_JANELA_DIAS * 24 * 3600 * 1000).toISOString();
+  // Mensagens enviadas, sem resposta, dentro da janela, da mesma empresa.
+  const { data: candidatos } = await supabase
+    .from("pos_venda_mensagens")
+    .select("id, tipo, conteudo, telefone, cliente_id, cliente_nome, os_numero, metadata")
+    .eq("company_id", cfg.company_id)
+    .eq("status", "enviada")
+    .is("respondida_em", null)
+    .gte("enviada_em", desde)
+    .order("enviada_em", { ascending: false })
+    .limit(50);
+  if (!candidatos || candidatos.length === 0) return false;
+
+  // Casa pelo telefone (tolera DDI/DDD/máscara via phonesMatch).
+  const alvo = candidatos.find((c) => phonesMatch(c.telefone, j.phone));
+  if (!alvo) return false;
+
+  // Classifica a intenção + nota NPS.
+  let cls: { intencao: string; nps_score: number | null; resumo: string };
+  try {
+    cls = await classifyPosVendaReply(alvo.tipo, alvo.conteudo, j.text);
+  } catch (e) {
+    console.error("[pos-venda] classify erro:", e);
+    // Fallback: registra a resposta crua e marca pra humano (não perde o retorno).
+    cls = { intencao: "outro", nps_score: null, resumo: "" };
+  }
+
+  const precisaHumano =
+    ["duvida", "cancela", "parar"].includes(cls.intencao) ||
+    (alvo.tipo === "nps" && cls.nps_score != null && cls.nps_score <= 6);
+
+  // Atualiza a linha da fila com a resposta classificada.
+  const metaPrev = (alvo.metadata && typeof alvo.metadata === "object") ? alvo.metadata as Record<string, unknown> : {};
+  await supabase.from("pos_venda_mensagens").update({
+    status: "respondida",
+    resposta_cliente: j.text,
+    intencao_detectada: cls.intencao,
+    respondida_em: new Date().toISOString(),
+    precisa_humano: precisaHumano,
+    metadata: { ...metaPrev, nps_score: cls.nps_score, resumo: cls.resumo, classificado_em: new Date().toISOString() },
+  }).eq("id", alvo.id);
+
+  // Opt-out: cliente pediu pra parar → não recebe mais pós-venda.
+  if (cls.intencao === "parar" && alvo.cliente_id) {
+    await supabase.from("pos_venda_optout").insert({
+      cliente_id: alvo.cliente_id,
+      company_id: cfg.company_id,
+      motivo: "cliente pediu para parar via WhatsApp (pós-venda)",
+      origem: "whatsapp_reply",
+    }); // erro de duplicado é ignorado (cliente já opt-out)
+  }
+
+  // Ack curto pro cliente não ficar no vácuo.
+  const ack = ackPosVenda(cls.intencao, alvo.tipo);
+  const evoBase = String(cfg.evolution_url || "").replace(/\/+$/, "");
+  const apikey = cfg.metadata?.evolution_apikey || "";
+  if (ack && evoBase && apikey) {
+    try {
+      await enviarTexto(evoBase, cfg.evolution_instance, apikey, j.phone, ack);
+    } catch (e) { console.error("[pos-venda] ack erro:", e); }
+  }
+
+  // Escala humano: Inbox (precisa_humano já setado) + email pra admin/gerente.
+  if (precisaHumano) {
+    await notifyPosVendaHumano(supabase, cfg.company_id, alvo, j.text, cls).catch((e) =>
+      console.error("[pos-venda] email erro:", e));
+  }
+
+  return true;
+}
+
+// Classifica a resposta do cliente via Haiku, forçando saída estruturada (tool).
+async function classifyPosVendaReply(
+  tipo: string, enviado: string, resposta: string,
+): Promise<{ intencao: string; nps_score: number | null; resumo: string }> {
+  const sys =
+    "Você classifica respostas de clientes a mensagens de pós-venda de uma assistência técnica de refrigeração. " +
+    "Tipos de mensagem enviada: nps (pesquisa de satisfação com nota 0-10), lembrete_visita (lembrete de manutenção), " +
+    "reagendamento (proposta de nova data), custom. Classifique a INTENÇÃO da resposta e, se a mensagem enviada era NPS " +
+    "e o cliente deu uma nota, extraia a nota de 0 a 10. Sempre chame a tool registrar_classificacao.";
+  const user = `Mensagem que ENVIAMOS (tipo=${tipo}):\n"""${enviado || ""}"""\n\nResposta do CLIENTE:\n"""${resposta}"""`;
+  const r = await fetch(ANTHROPIC_URL, {
+    method: "POST",
+    headers: {
+      "x-api-key": Deno.env.get("ANTHROPIC_API_KEY")!,
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({
+      model: POSVENDA_MODEL,
+      max_tokens: 512,
+      system: sys,
+      tools: [CLASSIFY_TOOL],
+      tool_choice: { type: "tool", name: "registrar_classificacao" },
+      messages: [{ role: "user", content: user }],
+    }),
+  });
+  if (!r.ok) throw new Error(`Anthropic ${r.status}: ${(await r.text()).slice(0, 300)}`);
+  const jr = await r.json();
+  const tu = (jr.content || []).find((c: any) => c.type === "tool_use");
+  const out = (tu?.input || {}) as Record<string, unknown>;
+  const intencao = INTENCOES.includes(String(out.intencao)) ? String(out.intencao) : "outro";
+  const rawNps = out.nps_score;
+  const nps = (typeof rawNps === "number" && rawNps >= 0 && rawNps <= 10) ? Math.round(rawNps) : null;
+  return { intencao, nps_score: nps, resumo: String(out.resumo || "").slice(0, 300) };
+}
+
+// Ack curto enviado ao cliente após capturar a resposta.
+function ackPosVenda(intencao: string, tipo: string): string {
+  switch (intencao) {
+    case "parar": return "Tudo bem, não enviaremos mais mensagens. Obrigado! 🙏";
+    case "reagenda": return "Certo! Vou encaminhar pra nossa equipe remarcar com você. 👍";
+    case "cancela": return "Entendido. Vou avisar nossa equipe e em breve falamos com você.";
+    case "duvida": return "Recebi sua mensagem! Nossa equipe vai te responder em seguida. 🙏";
+    case "confirma": return tipo === "nps" ? "Muito obrigado pelo seu feedback! 🙏" : "Perfeito, obrigado pela confirmação! 👍";
+    default: return tipo === "nps" ? "Obrigado pelo seu retorno! 🙏" : "Recebido, obrigado!";
+  }
+}
+
+// Notifica admin/gerente ativos por email quando uma resposta precisa de humano.
+// Reusa a edge function send-email (Resend). Roda em contexto service_role.
+async function notifyPosVendaHumano(
+  supabase: SupabaseClient, companyId: string, alvo: any, respostaCliente: string,
+  cls: { intencao: string; nps_score: number | null; resumo: string },
+): Promise<void> {
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+  const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
+  const INTERNAL_SECRET = Deno.env.get("INTERNAL_FUNCTION_SECRET") || "";
+
+  const { data: gestores } = await supabase
+    .from("company_members")
+    .select("user_id")
+    .eq("company_id", companyId)
+    .in("role", ["admin", "gerente"])
+    .eq("status", "ativo");
+  const ids = [...new Set((gestores || []).map((m: { user_id: string }) => m.user_id))];
+  if (!ids.length) return;
+
+  const emails: string[] = [];
+  for (const uid of ids) {
+    const { data, error } = await supabase.auth.admin.getUserById(uid);
+    if (!error && data?.user?.email) emails.push(data.user.email);
+  }
+  if (!emails.length) return;
+
+  const cliente = alvo.cliente_nome || "Cliente";
+  const intLabel: Record<string, string> = {
+    confirma: "Confirmou", reagenda: "Quer reagendar", duvida: "Dúvida (precisa humano)",
+    cancela: "Cancelou", parar: "Pediu opt-out", outro: "Outro",
+  };
+  const label = intLabel[cls.intencao] || cls.intencao;
+  const subject = `Pós-venda: resposta de ${cliente} precisa de atenção`;
+  const npsLine = cls.nps_score != null ? ` · NPS ${cls.nps_score}` : "";
+  const html = `
+    <div style="font-family:-apple-system,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111;">
+      <h2 style="color:#b91c1c;margin-bottom:8px;">Resposta de pós-venda aguardando atendimento</h2>
+      <p style="color:#374151;"><strong>${cliente}</strong>${alvo.os_numero ? ` · OS ${alvo.os_numero}` : ""}</p>
+      <p style="color:#6b7280;">Intenção detectada: <strong>${label}</strong>${npsLine}</p>
+      <p style="color:#6b7280;margin-bottom:4px;">Enviamos:</p>
+      <blockquote style="margin:0 0 12px;color:#374151;">${alvo.conteudo || ""}</blockquote>
+      <p style="color:#111;margin-bottom:4px;">Cliente respondeu:</p>
+      <blockquote style="margin:0;border-left:3px solid #06b6d4;padding-left:8px;color:#111;">${respostaCliente}</blockquote>
+      <p style="color:#6b7280;font-size:13px;margin-top:16px;">Abra o FrostERP → Pós-Venda → Inbox pra responder.</p>
+    </div>`;
+  const text = `Pós-venda: ${cliente} respondeu (${label}${npsLine}): "${respostaCliente}"`;
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  // send-email é verify_jwt=false; passa apikey/Authorization quando disponíveis
+  // (gateway Supabase) e o segredo interno se configurado.
+  if (ANON_KEY) { headers.apikey = ANON_KEY; headers.Authorization = `Bearer ${SERVICE_KEY}`; }
+  if (INTERNAL_SECRET) headers["x-internal-secret"] = INTERNAL_SECRET;
+
+  await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ to: emails, subject, html, text }),
+  });
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
