@@ -237,17 +237,41 @@ function GeofenceConfigPanel({ db, addToast, reloadData }) {
       addToast?.({ type: "error", message: "Geolocalização indisponível neste dispositivo." });
       return;
     }
+    // Geolocation do navegador exige contexto seguro (HTTPS ou localhost). Em
+    // http via IP da rede o browser bloqueia silenciosamente como "negado".
+    if (typeof window !== "undefined" && window.isSecureContext === false) {
+      addToast?.({
+        type: "error",
+        message: "GPS exige HTTPS. Acesse pelo domínio seguro (https) ou clique direto no mapa pra marcar o centro.",
+      });
+      return;
+    }
     setBuscandoLocal(true);
+    const onErro = (err) => {
+      setBuscandoLocal(false);
+      // 1=PERMISSION_DENIED, 2=POSITION_UNAVAILABLE, 3=TIMEOUT
+      const msg = err?.code === 1
+        ? "Permissão de localização negada. Libere o acesso à localização nas configurações do navegador (cadeado → Localização → Permitir) e tente de novo — ou clique no mapa pra marcar o centro."
+        : err?.code === 3
+          ? "Tempo esgotado ao buscar o GPS. Tente de novo, ou clique no mapa pra marcar o centro."
+          : "Não foi possível obter sua localização. Clique direto no mapa pra marcar o centro da empresa.";
+      addToast?.({ type: "error", message: msg });
+    };
+    const onOk = (pos) => {
+      setLat(pos.coords.latitude);
+      setLng(pos.coords.longitude);
+      setBuscandoLocal(false);
+      addToast?.({ type: "success", message: "Localização atual capturada. Ajuste o pino se precisar." });
+    };
+    // Tenta alta precisão; se falhar por timeout/indisponível, refaz sem GPS fino
+    // (usa Wi-Fi/rede — resolve em desktop sem chip de GPS).
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLat(pos.coords.latitude);
-        setLng(pos.coords.longitude);
-        setBuscandoLocal(false);
-        addToast?.({ type: "success", message: "Localização atual capturada. Ajuste o pino se precisar." });
-      },
-      () => {
-        setBuscandoLocal(false);
-        addToast?.({ type: "error", message: "Não foi possível obter sua localização (permissão negada?)." });
+      onOk,
+      (err) => {
+        if (err?.code === 1) { onErro(err); return; } // negado: refazer não adianta
+        navigator.geolocation.getCurrentPosition(onOk, onErro, {
+          enableHighAccuracy: false, timeout: 10000, maximumAge: 60000,
+        });
       },
       { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
     );
