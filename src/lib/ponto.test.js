@@ -15,6 +15,8 @@ import {
   listarRegistrosDiaTodos,
   minutosTrabalhadosDia,
   formatMinutos,
+  distanciaMetros,
+  avaliarGeofence,
 } from "./ponto.js";
 
 function makeMemDb() {
@@ -223,6 +225,104 @@ describe("ponto.formatMinutos", () => {
   it("dash para null/NaN", () => {
     expect(formatMinutos(null)).toBe("—");
     expect(formatMinutos(NaN)).toBe("—");
+  });
+});
+
+describe("ponto.distanciaMetros (haversine)", () => {
+  it("zero para o mesmo ponto", () => {
+    expect(distanciaMetros(-23.5, -46.6, -23.5, -46.6)).toBe(0);
+  });
+  it("calcula distância curta com precisão razoável (~111m por 0.001° lat)", () => {
+    // 0.001 grau de latitude ≈ 111 m
+    const d = distanciaMetros(-23.5000, -46.6, -23.5010, -46.6);
+    expect(d).toBeGreaterThan(105);
+    expect(d).toBeLessThan(115);
+  });
+  it("NaN quando argumento inválido", () => {
+    expect(Number.isNaN(distanciaMetros(null, -46, -23, -46))).toBe(true);
+  });
+});
+
+describe("ponto.avaliarGeofence", () => {
+  const centro = { ativo: true, lat: -23.5, lng: -46.6, raio_m: 100 };
+
+  it("desativado quando cerca off ou ausente", () => {
+    expect(avaliarGeofence({ lat: -23.5, lng: -46.6, acc: 5 }, null).geo_motivo).toBe("desativado");
+    expect(avaliarGeofence({ lat: -23.5, lng: -46.6, acc: 5 }, { ...centro, ativo: false }).geo_motivo).toBe("desativado");
+    expect(avaliarGeofence({ lat: 0, lng: 0 }, null).fora_da_area).toBe(false);
+  });
+
+  it("ok quando dentro do raio", () => {
+    const r = avaliarGeofence({ lat: -23.5, lng: -46.6, acc: 10 }, centro);
+    expect(r.fora_da_area).toBe(false);
+    expect(r.geo_motivo).toBe("ok");
+    expect(r.distancia_m).toBe(0);
+  });
+
+  it("fora quando além do raio", () => {
+    // ~333 m ao norte (0.003° lat), acc 10 → bem fora dos 100 m
+    const r = avaliarGeofence({ lat: -23.497, lng: -46.6, acc: 10 }, centro);
+    expect(r.fora_da_area).toBe(true);
+    expect(r.geo_motivo).toBe("fora");
+    expect(r.distancia_m).toBeGreaterThan(100);
+  });
+
+  it("tolera acurácia do GPS na borda (não acusa falso-positivo)", () => {
+    // ~111 m de distância, mas acc 50 → 111-50 = 61 <= 100 → dentro
+    const r = avaliarGeofence({ lat: -23.499, lng: -46.6, acc: 50 }, centro);
+    expect(r.fora_da_area).toBe(false);
+    expect(r.geo_motivo).toBe("ok");
+  });
+
+  it("sem_gps quando cerca ativa mas GPS ausente (suspeito)", () => {
+    const r = avaliarGeofence(null, centro);
+    expect(r.fora_da_area).toBe(true);
+    expect(r.geo_motivo).toBe("sem_gps");
+    expect(r.distancia_m).toBeNull();
+  });
+});
+
+describe("ponto.registrarPonto — geofence", () => {
+  let db;
+  beforeEach(() => { db = makeMemDb(); });
+  const centro = { ativo: true, lat: -23.5, lng: -46.6, raio_m: 100 };
+
+  it("marca fora_da_area + distancia quando bate longe", () => {
+    const r = registrarPonto(db, {
+      funcionario_id: JOAO, tipo: "entrada", metodo: "pin",
+      gps: { lat: -23.497, lng: -46.6, acc: 10 }, geofence: centro,
+    });
+    expect(r.fora_da_area).toBe(true);
+    expect(r.geo_motivo).toBe("fora");
+    expect(r.distancia_m).toBeGreaterThan(100);
+  });
+
+  it("dentro da área não sinaliza", () => {
+    const r = registrarPonto(db, {
+      funcionario_id: JOAO, tipo: "entrada", metodo: "pin",
+      gps: { lat: -23.5, lng: -46.6, acc: 8 }, geofence: centro,
+    });
+    expect(r.fora_da_area).toBe(false);
+    expect(r.geo_motivo).toBe("ok");
+  });
+
+  it("sem cerca configurada → desativado, não sinaliza", () => {
+    const r = registrarPonto(db, {
+      funcionario_id: JOAO, tipo: "entrada", metodo: "pin",
+      gps: { lat: 10, lng: 10, acc: 8 },
+    });
+    expect(r.fora_da_area).toBe(false);
+    expect(r.geo_motivo).toBe("desativado");
+  });
+
+  it("registro manual nunca sinaliza geofence", () => {
+    const r = registrarPonto(db, {
+      funcionario_id: JOAO, tipo: "entrada", metodo: "manual",
+      manual_motivo: "correção", manual_por: "admin",
+      gps: { lat: -23.497, lng: -46.6, acc: 5 }, geofence: centro,
+    });
+    expect(r.fora_da_area).toBe(false);
+    expect(r.geo_motivo).toBe("manual");
   });
 });
 

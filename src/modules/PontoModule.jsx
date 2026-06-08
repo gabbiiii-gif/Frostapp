@@ -53,6 +53,38 @@ const PontoBancoHorasLazy = lazy(() => import("./PontoBancoHoras.jsx"));
 // Ocorrências/justificativas lazy — usa Supabase Storage para anexos.
 const PontoOcorrenciasLazy = lazy(() => import("./PontoOcorrencias.jsx"));
 
+// Mapa da cerca (Leaflet) lazy — só baixa quando admin abre "Configurações".
+const PontoGeofenceMapLazy = lazy(() => import("./PontoGeofenceMap.jsx"));
+
+// Lê a config da cerca do erp:config (por empresa). Retorna o objeto
+// { ativo, lat, lng, raio_m } ou null se nunca configurada.
+function lerGeofence(db) {
+  try {
+    const cfg = db?.get?.("erp:config");
+    return cfg?.pontoGeofence || null;
+  } catch {
+    return null;
+  }
+}
+
+// Badge visual de geofence numa batida. Só aparece quando há algo a sinalizar
+// (fora da área ou sem GPS). Dentro da área / cerca desativada → não renderiza.
+function GeoBadge({ registro, compact = false }) {
+  const motivo = registro?.geo_motivo;
+  if (motivo !== "fora" && motivo !== "sem_gps") return null;
+  const txt = motivo === "sem_gps"
+    ? "Sem GPS"
+    : `Fora da área${typeof registro.distancia_m === "number" ? ` (${registro.distancia_m}m)` : ""}`;
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded bg-red-600/20 text-red-300 border border-red-600/40 font-semibold ${compact ? "text-[10px] px-1.5 py-0.5" : "text-[11px] px-2 py-0.5"}`}
+      title={motivo === "sem_gps" ? "Bateu ponto sem permitir localização" : "Bateu ponto fora da área permitida"}
+    >
+      📍 {txt}
+    </span>
+  );
+}
+
 // Coleta GPS de forma não-bloqueante. Resolve sempre — null em caso de erro
 // ou ausência de permissão. A captura roda em paralelo ao registro: se demorar
 // mais de 4s, segue sem GPS.
@@ -137,6 +169,15 @@ export default function PontoModule({ user, addToast, employees, reloadData, db 
               Equipe
             </button>
           )}
+          {isAdminView && (
+            <button
+              type="button"
+              onClick={() => setTab("config")}
+              className={`px-3 py-1.5 text-xs font-semibold rounded whitespace-nowrap ${tab === "config" ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}
+            >
+              Configurações
+            </button>
+          )}
         </nav>
       </header>
 
@@ -168,7 +209,157 @@ export default function PontoModule({ user, addToast, employees, reloadData, db 
       {tab === "equipe" && isAdminView && (
         <EquipeView user={user} addToast={addToast} db={db} employees={employees} refresh={refresh} tick={tick} reloadData={reloadData} />
       )}
+      {tab === "config" && isAdminView && (
+        <GeofenceConfigPanel db={db} addToast={addToast} reloadData={reloadData} />
+      )}
     </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// GeofenceConfigPanel — admin define a área (cerca virtual) onde o ponto vale
+// ────────────────────────────────────────────────────────────────────────────
+// Salva em erp:config.pontoGeofence = { ativo, lat, lng, raio_m }. Por empresa
+// (erp:config é singleton scoped). Mapa Leaflet pra posicionar o centro + raio.
+function GeofenceConfigPanel({ db, addToast, reloadData }) {
+  const inicial = useMemo(() => lerGeofence(db) || { ativo: false, lat: null, lng: null, raio_m: 100 }, [db]);
+  const [ativo, setAtivo] = useState(!!inicial.ativo);
+  const [lat, setLat] = useState(typeof inicial.lat === "number" ? inicial.lat : null);
+  const [lng, setLng] = useState(typeof inicial.lng === "number" ? inicial.lng : null);
+  const [raio, setRaio] = useState(Number(inicial.raio_m) || 100);
+  const [salvando, setSalvando] = useState(false);
+  const [buscandoLocal, setBuscandoLocal] = useState(false);
+
+  const temCentro = typeof lat === "number" && typeof lng === "number";
+
+  const usarLocalAtual = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      addToast?.({ type: "error", message: "Geolocalização indisponível neste dispositivo." });
+      return;
+    }
+    setBuscandoLocal(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setLat(pos.coords.latitude);
+        setLng(pos.coords.longitude);
+        setBuscandoLocal(false);
+        addToast?.({ type: "success", message: "Localização atual capturada. Ajuste o pino se precisar." });
+      },
+      () => {
+        setBuscandoLocal(false);
+        addToast?.({ type: "error", message: "Não foi possível obter sua localização (permissão negada?)." });
+      },
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+    );
+  }, [addToast]);
+
+  const salvar = useCallback(() => {
+    if (ativo && !temCentro) {
+      addToast?.({ type: "error", message: "Defina o ponto central da empresa no mapa antes de ativar." });
+      return;
+    }
+    setSalvando(true);
+    try {
+      const cfg = db.get("erp:config") || {};
+      cfg.pontoGeofence = {
+        ativo,
+        lat: temCentro ? lat : null,
+        lng: temCentro ? lng : null,
+        raio_m: Math.max(20, Math.min(2000, Math.round(raio))),
+      };
+      db.set("erp:config", cfg);
+      reloadData?.();
+      addToast?.({ type: "success", message: "Área do ponto salva." });
+    } catch (e) {
+      addToast?.({ type: "error", message: e?.message || "Erro ao salvar." });
+    } finally {
+      setSalvando(false);
+    }
+  }, [db, ativo, temCentro, lat, lng, raio, addToast, reloadData]);
+
+  return (
+    <section className="space-y-5 max-w-3xl">
+      <div className="rounded-2xl border border-gray-700 bg-gray-800/40 p-5">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h2 className="text-lg font-bold text-white">Área permitida do ponto</h2>
+            <p className="text-sm text-gray-400 mt-1 max-w-xl">
+              Define uma cerca ao redor da empresa. Batidas fora do raio (ou sem
+              GPS) ficam <span className="text-red-300 font-semibold">sinalizadas</span> no painel
+              da equipe. Não bloqueia — só avisa.
+            </p>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer shrink-0">
+            <button
+              type="button"
+              role="switch"
+              aria-checked={ativo}
+              onClick={() => setAtivo((v) => !v)}
+              className={`relative inline-flex h-6 w-11 rounded-full transition-colors ${ativo ? "bg-cyan-600" : "bg-gray-600"}`}
+            >
+              <span className={`inline-block h-5 w-5 rounded-full bg-white transition-transform mt-0.5 ${ativo ? "translate-x-5" : "translate-x-0.5"}`} />
+            </button>
+            <span className="text-sm text-gray-200">{ativo ? "Ativa" : "Desativada"}</span>
+          </label>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={usarLocalAtual}
+            disabled={buscandoLocal}
+            className="px-3 py-2 text-xs font-semibold rounded bg-gray-700 hover:bg-gray-600 text-white disabled:opacity-50 min-h-[44px]"
+          >
+            {buscandoLocal ? "Buscando…" : "📍 Usar minha localização atual"}
+          </button>
+          <div className="text-xs text-gray-400">
+            {temCentro
+              ? <>Centro: <span className="text-gray-200 font-mono">{lat.toFixed(5)}, {lng.toFixed(5)}</span></>
+              : "Clique no mapa para marcar o centro da empresa."}
+          </div>
+        </div>
+
+        <div className="mt-4">
+          <Suspense fallback={<div className="h-72 rounded-lg border border-gray-700 bg-gray-800/40 flex items-center justify-center text-sm text-gray-400">Carregando mapa…</div>}>
+            <PontoGeofenceMapLazy
+              lat={lat}
+              lng={lng}
+              raio_m={raio}
+              onChangeCenter={(la, ln) => { setLat(la); setLng(ln); }}
+            />
+          </Suspense>
+        </div>
+
+        <div className="mt-4">
+          <label className="block text-sm text-gray-300 mb-1">
+            Raio da área: <span className="text-cyan-400 font-semibold">{raio} m</span>
+          </label>
+          <input
+            type="range"
+            min={20}
+            max={1000}
+            step={10}
+            value={raio}
+            onChange={(e) => setRaio(Number(e.target.value))}
+            className="w-full accent-cyan-500"
+          />
+          <div className="flex justify-between text-[10px] text-gray-500 mt-1">
+            <span>20 m</span><span>1000 m</span>
+          </div>
+        </div>
+
+        <div className="mt-5">
+          <button
+            type="button"
+            onClick={salvar}
+            disabled={salvando}
+            className="px-5 py-2 bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-600 text-white rounded font-medium min-h-[44px]"
+          >
+            {salvando ? "Salvando…" : "Salvar área"}
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -394,6 +585,7 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
                     {labelMetodo(r.metodo)}
                     {r.manual_motivo && <> · <em className="not-italic">{r.manual_motivo}</em></>}
                   </div>
+                  <div className="mt-1"><GeoBadge registro={r} compact /></div>
                 </div>
                 {r.gps_lat && (
                   <span className="text-[10px] text-gray-500" title={`lat ${r.gps_lat.toFixed(4)} lng ${r.gps_lng.toFixed(4)} acc ${Math.round(r.gps_acc || 0)}m`}>
@@ -576,19 +768,38 @@ function BaterPontoModal({ user, userRecord, db, addToast, proxima, temFacial, t
   // Helper compartilhado: grava o registro de ponto com método informado.
   const gravarRegistro = useCallback(async (metodo, extras = {}) => {
     const gps = await tryGetGps(4000);
+    // Cerca virtual da empresa (se configurada) — registrarPonto avalia e marca
+    // fora_da_area/geo_motivo na batida.
+    const geofence = lerGeofence(db);
     const reg = registrarPonto(db, {
       funcionario_id: user.id,
       tipo: proxima,
       metodo,
       gps,
+      geofence,
       user_agent: typeof navigator !== "undefined" ? navigator.userAgent : null,
       device_id: deviceIdRef.current,
       ...extras,
     });
-    addToast?.({
-      type: "success",
-      message: `${labelTipo(reg.tipo)} registrada às ${new Date(reg.datahora).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}`,
-    });
+    const hora = new Date(reg.datahora).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+    // Avisa o funcionário quando a batida ficou sinalizada — transparência: ele
+    // sabe que o gestor vê o registro como fora da área / sem localização.
+    if (reg.geo_motivo === "fora") {
+      addToast?.({
+        type: "warning",
+        message: `${labelTipo(reg.tipo)} registrada às ${hora} — FORA da área da empresa${typeof reg.distancia_m === "number" ? ` (${reg.distancia_m}m)` : ""}. Seu gestor será notificado.`,
+      });
+    } else if (reg.geo_motivo === "sem_gps") {
+      addToast?.({
+        type: "warning",
+        message: `${labelTipo(reg.tipo)} registrada às ${hora} — sem localização (GPS desligado). Será sinalizada ao gestor.`,
+      });
+    } else {
+      addToast?.({
+        type: "success",
+        message: `${labelTipo(reg.tipo)} registrada às ${hora}`,
+      });
+    }
     onRegistrado?.();
   }, [db, user, proxima, addToast, onRegistrado]);
 
@@ -876,7 +1087,10 @@ function EquipeView({ user, addToast, db, employees, refresh, tick, reloadData }
                 return (
                   <tr key={r.id} className="border-t border-gray-700 hover:bg-gray-800/40">
                     <td className="px-3 py-2 text-white">{e?.nome || r.funcionario_id}</td>
-                    <td className="px-3 py-2 text-gray-200">{labelTipo(r.tipo)}</td>
+                    <td className="px-3 py-2 text-gray-200">
+                      {labelTipo(r.tipo)}
+                      <div className="mt-1"><GeoBadge registro={r} compact /></div>
+                    </td>
                     <td className="px-3 py-2 text-gray-200">
                       {new Date(r.datahora).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
                     </td>
@@ -885,7 +1099,11 @@ function EquipeView({ user, addToast, db, employees, refresh, tick, reloadData }
                       {r.manual_motivo && <span className="block text-[11px] text-gray-500 italic">{r.manual_motivo}</span>}
                     </td>
                     <td className="px-3 py-2 text-gray-400 hidden md:table-cell">
-                      {r.gps_lat ? "📍 OK" : "—"}
+                      {r.geo_motivo === "fora"
+                        ? <span className="text-red-400" title={`${r.distancia_m}m do ponto`}>📍 Fora</span>
+                        : r.geo_motivo === "sem_gps"
+                          ? <span className="text-red-400">Sem GPS</span>
+                          : r.gps_lat ? "📍 OK" : "—"}
                     </td>
                   </tr>
                 );

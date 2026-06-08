@@ -64,6 +64,55 @@ export async function verifyPin(funcionarioId, pin, storedHash) {
   }
 }
 
+// ─── Geofencing (cerca virtual ao redor da empresa) ─────────────────────────
+// A empresa define um ponto central (lat/lng) + raio em metros. Cada batida
+// avalia a distância do GPS ao centro e sinaliza quando está FORA da área.
+// Não bloqueia — só marca, pra o admin enxergar no painel (trabalho externo
+// legítimo continua passando, mas fica rastro).
+
+// Distância em metros entre dois pontos (fórmula de Haversine).
+export function distanciaMetros(lat1, lng1, lat2, lng2) {
+  if ([lat1, lng1, lat2, lng2].some((v) => typeof v !== "number" || isNaN(v))) return NaN;
+  const R = 6371000; // raio da Terra em metros
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return Math.round(2 * R * Math.asin(Math.sqrt(a)));
+}
+
+// Avalia uma batida contra a cerca configurada.
+//   gps:      { lat, lng, acc } ou null
+//   geofence: { ativo, lat, lng, raio_m } ou null/undefined
+// Retorna { fora_da_area, distancia_m, geo_motivo }:
+//   - geo_motivo "desativado": cerca off (ou sem config) → nunca sinaliza
+//   - geo_motivo "sem_gps":    cerca on mas GPS ausente → sinaliza (suspeito)
+//   - geo_motivo "fora":       distância além do raio (com tolerância da acurácia)
+//   - geo_motivo "ok":         dentro da área
+// Tolerância: desconta a acurácia do GPS (gps.acc) da distância antes de comparar
+// com o raio — evita falso-positivo quando o sinal está impreciso.
+export function avaliarGeofence(gps, geofence) {
+  const ativo = !!(geofence && geofence.ativo &&
+    typeof geofence.lat === "number" && typeof geofence.lng === "number" &&
+    typeof geofence.raio_m === "number" && geofence.raio_m > 0);
+  if (!ativo) {
+    return { fora_da_area: false, distancia_m: null, geo_motivo: "desativado" };
+  }
+  if (!gps || typeof gps.lat !== "number" || typeof gps.lng !== "number") {
+    return { fora_da_area: true, distancia_m: null, geo_motivo: "sem_gps" };
+  }
+  const dist = distanciaMetros(gps.lat, gps.lng, geofence.lat, geofence.lng);
+  if (isNaN(dist)) {
+    return { fora_da_area: true, distancia_m: null, geo_motivo: "sem_gps" };
+  }
+  // Acurácia (raio de erro do GPS) abate a distância — benefício da dúvida.
+  const acc = typeof gps.acc === "number" && gps.acc > 0 ? gps.acc : 0;
+  const fora = dist - acc > geofence.raio_m;
+  return { fora_da_area: fora, distancia_m: dist, geo_motivo: fora ? "fora" : "ok" };
+}
+
 // ─── Registros: criação e queries ──────────────────────────────────────────
 
 // Retorna o ÚLTIMO registro de um funcionário (mais recente).
@@ -117,6 +166,7 @@ export function registrarPonto(db, dados) {
     foto_path = null,     // para método facial (fase futura)
     manual_motivo = null, // preenchido apenas se metodo='manual'
     manual_por = null,    // admin que registrou
+    geofence = null,      // { ativo, lat, lng, raio_m } — cerca da empresa (ou null)
     datahora = new Date().toISOString(),
   } = dados || {};
 
@@ -139,6 +189,12 @@ export function registrarPonto(db, dados) {
     throw new Error("Registro manual exige motivo.");
   }
 
+  // Avalia a cerca virtual (se configurada). Registros manuais do admin não
+  // sinalizam — o admin está corrigindo histórico, não batendo no local.
+  const geo = metodo === "manual"
+    ? { fora_da_area: false, distancia_m: null, geo_motivo: "manual" }
+    : avaliarGeofence(gps, geofence);
+
   const id = "erp:ponto:" + genId();
   const registro = {
     id,
@@ -149,6 +205,9 @@ export function registrarPonto(db, dados) {
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
     gps_acc: gps?.acc ?? null,
+    fora_da_area: geo.fora_da_area,
+    distancia_m: geo.distancia_m,
+    geo_motivo: geo.geo_motivo,
     ip,
     user_agent,
     device_id,

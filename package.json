@@ -38,6 +38,7 @@
     "@vladmandic/face-api": "^1.7.15",
     "animejs": "^4.4.1",
     "html2pdf.js": "^0.14.0",
+    "leaflet": "^1.9.4",
     "motion": "^12.36.0",
     "ogl": "^1.0.11",
     "qrcode": "^1.5.4",
