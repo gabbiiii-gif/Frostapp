@@ -31,6 +31,21 @@ function json(body: unknown, status = 200) {
 const MAX_BATCH = 50;
 const MAX_TENTATIVAS = 3;
 
+// Normaliza telefone BR para o formato que a Evolution/WhatsApp espera: digitos
+// com DDI 55 na frente. Telefones cadastrados costumam vir locais — ex:
+// "(93) 9172-1424" -> "9391721424" (10 digitos, sem DDI) -> Evolution responde
+// number "exists:false". Prependendo "55" vira "559391721424" e resolve.
+//   - ja tem DDI 55 (>=12 digitos): mantem;
+//   - 10 (DDD+8) ou 11 (DDD+9+8) digitos: prepend 55;
+//   - fora desses tamanhos: devolve so os digitos (nao da pra inferir DDD).
+function normalizarTelefoneBR(raw: string): string {
+  const d = String(raw || "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.length >= 12 && d.startsWith("55")) return d;
+  if (d.length === 10 || d.length === 11) return "55" + d;
+  return d;
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
@@ -66,11 +81,15 @@ Deno.serve(async (req) => {
   // ── Evolution (reusa ai_agent_config + secret) ───────────────────────────
   const { data: evo } = await supabase
     .from("ai_agent_config")
-    .select("evolution_url, evolution_instance, enabled")
+    .select("evolution_url, evolution_instance, enabled, metadata")
     .eq("enabled", true)
     .limit(1)
     .maybeSingle();
-  const apikey = Deno.env.get("EVOLUTION_APIKEY") || "";
+  // apikey: prioriza ai_agent_config.metadata.evolution_apikey (padrao do projeto,
+  // mesma fonte usada por whatsapp-webhook e frost-notify-approval). Fallback pro
+  // env EVOLUTION_APIKEY por compatibilidade com setups antigos.
+  const apikey = String((evo?.metadata as Record<string, unknown> | null)?.evolution_apikey || "")
+    || Deno.env.get("EVOLUTION_APIKEY") || "";
   if (!evo?.evolution_url || !evo?.evolution_instance || !apikey) {
     return json({ skipped: "evolution_nao_configurada", sent: 0 });
   }
@@ -98,7 +117,7 @@ Deno.serve(async (req) => {
   let failed = 0;
 
   for (const m of msgs) {
-    const numero = String(m.telefone || "").replace(/\D/g, "");
+    const numero = normalizarTelefoneBR(m.telefone);
     if (!numero) {
       await supabase.from("pos_venda_mensagens")
         .update({ status: "erro", erro_envio: "telefone invalido" })
