@@ -153,9 +153,10 @@ Deno.serve(async (req: Request) => {
   const INTERNAL_SECRET = Deno.env.get("INTERNAL_FUNCTION_SECRET") || "";
   if (!SUPABASE_URL || !SERVICE_KEY || !ANON_KEY) return json({ ok: false, error: "server_misconfigured" }, 500);
 
-  if (INTERNAL_SECRET) {
+  // FAIL-CLOSED: exige x-internal-secret SEMPRE (fecha contra chamadas anonimas).
+  {
     const sent = req.headers.get("x-internal-secret") || "";
-    if (sent !== INTERNAL_SECRET) return json({ ok: false, error: "forbidden" }, 403);
+    if (!INTERNAL_SECRET || sent !== INTERNAL_SECRET) return json({ ok: false, error: "forbidden" }, 403);
   }
 
   let body: Record<string, unknown> = {};
