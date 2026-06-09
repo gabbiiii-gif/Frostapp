@@ -998,13 +998,27 @@ export async function deleteMasterRemote(_id, _callerTokenHash) {
   return false;
 }
 
-// ─── Storage: upload/delete de fotos da OS ───────────────────────────────────
+// ─── Storage: upload/delete de fotos e assinaturas da OS ─────────────────────
+// HARDENING C0-2: buckets 'os-fotos' e 'os-assinaturas' passam a ser PRIVADOS.
+// Antes eram públicos: qualquer um com a URL lia foto/assinatura/CPF do cliente
+// (vazamento de PII) e qualquer usuário autenticado apagava arquivo de outra
+// empresa (sem escopo de pasta). Agora:
+//   1. Path escopado por empresa: `${companyId}/${osId}/...` → a RLS do Storage
+//      isola por pasta (foldername[1] = company_id), igual a ponto-docs.
+//   2. Acesso por signed URL de TTL longo (não há mais leitura pública por path);
+//      as URLs ficam embutidas nos documentos de OS/recibo gerados sob demanda.
+// IMPORTANTE: privatizar os buckets e aplicar a RLS de pasta SÓ pode ocorrer
+// JUNTO com o deploy deste código (ver migração harden_os_storage_buckets).
+const SIGNED_URL_TTL = 60 * 60 * 24 * 365 * 5; // ~5 anos
+
 export async function uploadFotoOS(file, osId) {
   if (!supabase) return null;
+  const companyId = getCompanyId();
+  if (!companyId) { console.warn('uploadFotoOS: sem company_id (usuário não autenticado).'); return null; }
   try {
     const ext = (file.name || 'foto.jpg').split('.').pop();
     const ts = Date.now();
-    const path = `${osId}/${ts}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const path = `${companyId}/${osId}/${ts}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
     const { error: upErr } = await supabase.storage
       .from('os-fotos')
       .upload(path, file, { cacheControl: '3600', upsert: false, contentType: file.type });
@@ -1012,34 +1026,40 @@ export async function uploadFotoOS(file, osId) {
       console.warn('Upload foto erro:', upErr.message);
       return null;
     }
-    const { data } = supabase.storage.from('os-fotos').getPublicUrl(path);
-    return data?.publicUrl || null;
+    const { data, error: signErr } = await supabase.storage.from('os-fotos').createSignedUrl(path, SIGNED_URL_TTL);
+    if (signErr) {
+      console.warn('Signed URL foto erro:', signErr.message);
+      return null;
+    }
+    return data?.signedUrl || null;
   } catch (err) {
     console.warn('Upload foto falhou:', err.message);
     return null;
   }
 }
 
-export async function deleteFotoOS(publicUrl) {
-  if (!supabase || !publicUrl) return;
+export async function deleteFotoOS(url) {
+  if (!supabase || !url) return;
   try {
     const marker = '/os-fotos/';
-    const idx = publicUrl.indexOf(marker);
+    const idx = url.indexOf(marker);
     if (idx === -1) return;
-    const path = publicUrl.slice(idx + marker.length);
+    // Remove a querystring (?token=...) das signed URLs antes de extrair o path.
+    const path = url.slice(idx + marker.length).split('?')[0];
     await supabase.storage.from('os-fotos').remove([path]);
   } catch (err) {
     console.warn('Delete foto falhou:', err.message);
   }
 }
 
-// ─── Storage: upload/delete de assinatura do cliente na OS ───────────────────
-// Bucket: 'os-assinaturas' (público). Criar manualmente no Supabase Dashboard.
-// Estrutura: {osId}/{timestamp}.png — uma assinatura por OS (sobrescreve).
+// Assinatura do cliente na OS. Bucket PRIVADO 'os-assinaturas'.
+// Estrutura: {companyId}/{osId}/{timestamp}.png — uma assinatura por OS (sobrescreve).
 export async function uploadAssinaturaOS(blob, osId) {
   if (!supabase) return null;
+  const companyId = getCompanyId();
+  if (!companyId) { console.warn('uploadAssinaturaOS: sem company_id (usuário não autenticado).'); return null; }
   try {
-    const path = `${osId}/${Date.now()}.png`;
+    const path = `${companyId}/${osId}/${Date.now()}.png`;
     const { error: upErr } = await supabase.storage
       .from('os-assinaturas')
       .upload(path, blob, { cacheControl: '3600', upsert: true, contentType: 'image/png' });
@@ -1047,21 +1067,26 @@ export async function uploadAssinaturaOS(blob, osId) {
       console.warn('Upload assinatura erro:', upErr.message);
       return null;
     }
-    const { data } = supabase.storage.from('os-assinaturas').getPublicUrl(path);
-    return data?.publicUrl || null;
+    const { data, error: signErr } = await supabase.storage.from('os-assinaturas').createSignedUrl(path, SIGNED_URL_TTL);
+    if (signErr) {
+      console.warn('Signed URL assinatura erro:', signErr.message);
+      return null;
+    }
+    return data?.signedUrl || null;
   } catch (err) {
     console.warn('Upload assinatura falhou:', err.message);
     return null;
   }
 }
 
-export async function deleteAssinaturaOS(publicUrl) {
-  if (!supabase || !publicUrl) return;
+export async function deleteAssinaturaOS(url) {
+  if (!supabase || !url) return;
   try {
     const marker = '/os-assinaturas/';
-    const idx = publicUrl.indexOf(marker);
+    const idx = url.indexOf(marker);
     if (idx === -1) return;
-    const path = publicUrl.slice(idx + marker.length);
+    // Remove a querystring (?token=...) das signed URLs antes de extrair o path.
+    const path = url.slice(idx + marker.length).split('?')[0];
     await supabase.storage.from('os-assinaturas').remove([path]);
   } catch (err) {
     console.warn('Delete assinatura falhou:', err.message);
