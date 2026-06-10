@@ -116,6 +116,116 @@ function tryGetGps(timeoutMs = 4000) {
   });
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// GpsPermissionRow — botão explícito para o funcionário liberar/repetir o GPS
+// ────────────────────────────────────────────────────────────────────────────
+// O ponto usa a localização para validar a cerca virtual da empresa. Navegadores
+// só abrem o prompt de permissão em resposta a um gesto do usuário — por isso
+// este botão. Mostra o estado atual (via Permissions API quando disponível) e,
+// ao clicar, chama getCurrentPosition: se o estado for "prompt" o navegador
+// abre o pedido de permissão; se já estiver "denied", orienta como reabilitar.
+function GpsPermissionRow({ addToast }) {
+  // 'unknown' | 'granted' | 'prompt' | 'denied' | 'unsupported'
+  const [estado, setEstado] = useState("unknown");
+  const [carregando, setCarregando] = useState(false);
+
+  // Lê o estado SEM disparar prompt. Safari/iOS não implementa
+  // permissions.query para geolocation → fica 'unknown' (o botão segue
+  // funcionando, pois é o getCurrentPosition que abre o prompt de fato).
+  useEffect(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      setEstado("unsupported");
+      return;
+    }
+    if (!navigator.permissions?.query) {
+      setEstado("unknown");
+      return;
+    }
+    let status;
+    let cancelado = false;
+    navigator.permissions
+      .query({ name: "geolocation" })
+      .then((st) => {
+        if (cancelado) return;
+        status = st;
+        setEstado(st.state); // granted | prompt | denied
+        // Atualiza ao vivo se o usuário mexer na permissão pelo navegador.
+        st.onchange = () => setEstado(st.state);
+      })
+      .catch(() => { if (!cancelado) setEstado("unknown"); });
+    return () => { cancelado = true; if (status) status.onchange = null; };
+  }, []);
+
+  // Dispara o prompt do navegador. Precisa rodar dentro do clique (gesto do user).
+  const solicitar = useCallback(() => {
+    if (typeof navigator === "undefined" || !navigator.geolocation) {
+      addToast?.({ type: "error", message: "Este dispositivo não suporta GPS." });
+      return;
+    }
+    setCarregando(true);
+    navigator.geolocation.getCurrentPosition(
+      () => {
+        setCarregando(false);
+        setEstado("granted");
+        addToast?.({ type: "success", message: "Localização liberada! Pode bater o ponto normalmente." });
+      },
+      (err) => {
+        setCarregando(false);
+        if (err && err.code === err.PERMISSION_DENIED) {
+          setEstado("denied");
+          addToast?.({
+            type: "error",
+            message: "Permissão de localização negada. Toque no cadeado da barra de endereço → Localização → Permitir e tente de novo.",
+          });
+        } else {
+          addToast?.({
+            type: "warning",
+            message: "Não foi possível obter o GPS agora. Verifique se a localização do aparelho está ligada.",
+          });
+        }
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+  }, [addToast]);
+
+  // Sem suporte a GPS no device → nem mostra o botão.
+  if (estado === "unsupported") return null;
+
+  const granted = estado === "granted";
+  const denied = estado === "denied";
+
+  return (
+    <div className="mt-3 flex items-center gap-2 flex-wrap">
+      <button
+        type="button"
+        onClick={solicitar}
+        disabled={carregando || granted}
+        className={`inline-flex items-center gap-1.5 text-xs font-semibold px-3 py-2 rounded-lg transition disabled:opacity-70 ${
+          granted
+            ? "bg-green-600/15 text-green-300 border border-green-600/30 cursor-default"
+            : denied
+              ? "bg-red-600/15 text-red-300 border border-red-600/30 hover:bg-red-600/25"
+              : "bg-cyan-600 hover:bg-cyan-500 text-white"
+        }`}
+        title="Permitir que o app use sua localização para validar a cerca da empresa"
+      >
+        📍 {carregando
+          ? "Buscando GPS…"
+          : granted
+            ? "Localização ativa"
+            : denied
+              ? "Localização bloqueada — tocar p/ tentar de novo"
+              : "Permitir localização"}
+      </button>
+      {denied && (
+        <span className="text-[11px] text-gray-400">
+          Bloqueada no navegador. Libere no cadeado → Localização → Permitir.
+        </span>
+      )}
+    </div>
+  );
+}
+
 export default function PontoModule({ user, addToast, employees, reloadData, db }) {
   const isAdminView = useMemo(
     () => user?.role === "admin" || user?.role === "gerente",
@@ -575,6 +685,11 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
             </button>
           )}
         </div>
+
+        {/* Permissão de GPS — botão explícito para o funcionário liberar/repetir.
+            A cerca da empresa só funciona com a localização permitida. */}
+        <GpsPermissionRow addToast={addToast} />
+
         {temFacial && (
           <p className="mt-2 text-[11px] text-green-300/80">
             ✓ Reconhecimento facial ativo · cadastrado em {formatDate(userRecord.ponto_face_enrolled_at)}
