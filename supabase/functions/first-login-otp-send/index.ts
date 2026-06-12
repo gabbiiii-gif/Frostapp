@@ -167,7 +167,11 @@ Deno.serve(async (req: Request) => {
   const emailHeaders: Record<string, string> = {
     "Content-Type": "application/json",
     apikey: ANON_KEY,
-    Authorization: `Bearer ${SERVICE_KEY}`,
+    // Usa a ANON_KEY no Authorization (não a service_role). O gateway das Edge
+    // Functions valida o bearer e rejeita (401) o token service_role — quebrando
+    // a chamada server-to-server antes do send-email rodar. A autenticação real
+    // entre functions é o header x-internal-secret abaixo, não o JWT.
+    Authorization: `Bearer ${ANON_KEY}`,
   };
   if (INTERNAL_SECRET) emailHeaders["x-internal-secret"] = INTERNAL_SECRET;
 

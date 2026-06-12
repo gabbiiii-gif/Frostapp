@@ -555,8 +555,10 @@ async function notifyPosVendaHumano(
 
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   // send-email é verify_jwt=false; passa apikey/Authorization quando disponíveis
-  // (gateway Supabase) e o segredo interno se configurado.
-  if (ANON_KEY) { headers.apikey = ANON_KEY; headers.Authorization = `Bearer ${SERVICE_KEY}`; }
+  // (gateway Supabase) e o segredo interno se configurado. ANON_KEY no
+  // Authorization: o gateway rejeita (401) o token service_role na chamada
+  // entre Edge Functions. Auth real é o x-internal-secret abaixo.
+  if (ANON_KEY) { headers.apikey = ANON_KEY; headers.Authorization = `Bearer ${ANON_KEY}`; }
   if (INTERNAL_SECRET) headers["x-internal-secret"] = INTERNAL_SECRET;
 
   await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {

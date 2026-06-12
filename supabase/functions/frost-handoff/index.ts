@@ -107,7 +107,9 @@ Deno.serve(async (req: Request) => {
     const headers: Record<string, string> = {
       "Content-Type": "application/json",
       apikey: ANON_KEY,
-      Authorization: `Bearer ${SERVICE_KEY}`,
+      // ANON_KEY no Authorization: o gateway rejeita (401) o token service_role
+      // na chamada entre Edge Functions. Auth real é o x-internal-secret abaixo.
+      Authorization: `Bearer ${ANON_KEY}`,
     };
     if (INTERNAL_SECRET) headers["x-internal-secret"] = INTERNAL_SECRET;
 

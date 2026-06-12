@@ -84,6 +84,49 @@ function getCompanyId() {
   return getCurrentMember()?.company_id || null;
 }
 
+// ─── Gating de escrita por role (espelha private.kv_can_write no Postgres) ───
+// O hardening de RLS (ADR 009) restringe QUEM pode escrever cada prefixo no
+// kv_store por role. Se o client tentar sincronizar uma chave que o role do
+// usuário não pode gravar, o Postgres rejeita com "new row violates row-level
+// security policy" (código 42501) — e, pior, a antiga lógica reenfileirava a
+// escrita na outbox, criando um poison-pill que retentava pra sempre.
+//
+// Esta função replica EXATAMENTE a policy server-side pra decidir, no client,
+// se vale a pena tentar o upsert/delete. Chaves não-graváveis ficam local-only
+// (mesmo tratamento de isSensitive). Mantenha em sincronia com kv_can_write.
+function canWriteKey(key) {
+  const role = getCurrentMember()?.role;
+  if (!role) return true; // sem role conhecido: deixa o servidor decidir
+  if (role === 'admin' || role === 'gerente') return true;
+  if (role === 'cliente_escola') {
+    return key.startsWith('erp:escola:') || key.startsWith('erp:evento_escola:');
+  }
+  if (role === 'ponto') {
+    return key.startsWith('erp:ponto:') || key.startsWith('erp:jornada:') || key.startsWith('erp:ocorrencia:');
+  }
+  // Demais internos (técnico, atendente, …): tudo MENOS financeiro/segredos/config/user/employee.
+  return !(
+    key.startsWith('erp:finance:') ||
+    key.startsWith('erp:transaction:') ||
+    key.startsWith('erp:banking:') ||
+    key.startsWith('erp:transferencia:') ||
+    key.startsWith('erp:vale:') ||
+    key.startsWith('erp:calendarFeedToken:') ||
+    key.startsWith('erp:config:') ||
+    key.startsWith('erp:user:') ||
+    key.startsWith('erp:employee:')
+  );
+}
+
+// Detecta erro de permissão/RLS do Postgres. Escritas que falham por isso NUNCA
+// vão passar numa retentativa (não é falha transitória de rede), então não
+// devem ir pra outbox — senão viram poison-pill.
+function isPermissionError(error) {
+  if (!error) return false;
+  if (error.code === '42501') return true;
+  return /row-level security|permission denied/i.test(error.message || '');
+}
+
 // ─── Auth: login com fallback para migração de PBKDF2 legado ────────────────
 // Fluxo: tenta signInWithPassword. Se 401, chama Edge Function migrate-login
 // que valida contra o hash PBKDF2 antigo e cria o user em auth.users. Depois retenta.
@@ -752,6 +795,7 @@ export async function uploadAllToSupabase() {
       const key = window.storage.key(i);
       if (!key || !key.startsWith('erp:')) continue;
       if (isSensitive(key)) continue;
+      if (!canWriteKey(key)) continue; // role sem permissão → fora do batch (RLS rejeitaria o upsert inteiro)
       const raw = window.storage.getItem(key);
       if (raw === null) continue;
       try {
@@ -820,14 +864,17 @@ export async function flushOutbox() {
   _flushing = true;
   const remaining = [];
   for (const e of arr) {
+    // Limpa poison-pills: chaves que o role não pode gravar (RLS) nunca vão
+    // passar — descarta da fila em vez de retentar pra sempre.
+    if (!canWriteKey(e.key)) continue;
     try {
       if (e.op === 'del') {
         const { error } = await supabase.from('kv_store').delete().eq('key', e.key).eq('company_id', companyId);
-        if (error) remaining.push(e);
+        if (error && !isPermissionError(error)) remaining.push(e);
       } else {
         const safeValue = sanitizeForSync(e.key, e.value);
         const { error } = await supabase.from('kv_store').upsert({ key: e.key, value: safeValue, company_id: companyId, updated_at: new Date().toISOString() }, { onConflict: 'key' });
-        if (error) remaining.push(e);
+        if (error && !isPermissionError(error)) remaining.push(e);
       }
     } catch { remaining.push(e); }
   }
@@ -843,6 +890,9 @@ if (typeof window !== 'undefined') {
 export function syncToSupabase(key, value) {
   if (!supabase) return;
   if (isSensitive(key)) return;
+  // Role do usuário não pode gravar esta chave (RLS) → fica local-only, sem
+  // tentar (evita erro 42501 e poison-pill na outbox).
+  if (!canWriteKey(key)) return;
   const companyId = getCompanyId();
   if (!companyId) return; // sem auth → fica só local; será uploaded no próximo login
   // Offline: enfileira direto sem tentar (evita erro de rede e garante reenvio).
@@ -855,13 +905,18 @@ export function syncToSupabase(key, value) {
     .from('kv_store')
     .upsert({ key, value: safeValue, company_id: companyId, updated_at: new Date().toISOString() }, { onConflict: 'key' })
     .then(({ error }) => {
-      if (error) { console.warn('Sync error:', key, error.message); enqueueOutbox('set', key, value); }
+      if (error) {
+        console.warn('Sync error:', key, error.message);
+        // Erro de RLS/permissão não some em retry → descarta (não vira poison-pill).
+        if (!isPermissionError(error)) enqueueOutbox('set', key, value);
+      }
     }, () => enqueueOutbox('set', key, value)); // rejeição (rede) → fila
 }
 
 // ─── Delete unitário (chamado por DB.delete) ─────────────────────────────────
 export function deleteFromSupabase(key) {
   if (!supabase) return;
+  if (!canWriteKey(key)) return; // role sem permissão de gravar essa chave → no-op
   const companyId = getCompanyId();
   if (!companyId) return;
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
@@ -874,7 +929,10 @@ export function deleteFromSupabase(key) {
     .eq('key', key)
     .eq('company_id', companyId)
     .then(({ error }) => {
-      if (error) { console.warn('Delete sync error:', key, error.message); enqueueOutbox('del', key); }
+      if (error) {
+        console.warn('Delete sync error:', key, error.message);
+        if (!isPermissionError(error)) enqueueOutbox('del', key);
+      }
     }, () => enqueueOutbox('del', key));
 }
 
