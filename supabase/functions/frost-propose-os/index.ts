@@ -123,7 +123,9 @@ async function notifyAdmins(
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     apikey: anonKey,
-    Authorization: `Bearer ${serviceKey}`,
+    // anonKey no Authorization: o gateway rejeita (401) o token service_role
+    // na chamada entre Edge Functions. Auth real é o x-internal-secret abaixo.
+    Authorization: `Bearer ${anonKey}`,
   };
   if (internalSecret) headers["x-internal-secret"] = internalSecret;
 
