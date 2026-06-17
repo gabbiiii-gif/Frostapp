@@ -192,23 +192,50 @@ describe("ponto — queries", () => {
 });
 
 describe("ponto.minutosTrabalhadosDia", () => {
-  it("pareia entrada→saida e desconta intervalo", () => {
+  it("dia legado com batidas de intervalo: usa os pares antigos", () => {
     const regs = [
-      { tipo: "entrada",          datahora: "2026-06-02T08:00:00Z" },
-      { tipo: "intervalo_inicio", datahora: "2026-06-02T12:00:00Z" },
-      { tipo: "intervalo_fim",    datahora: "2026-06-02T13:00:00Z" },
-      { tipo: "saida",            datahora: "2026-06-02T17:00:00Z" },
+      { tipo: "entrada",          datahora: "2026-06-02T08:00:00" },
+      { tipo: "intervalo_inicio", datahora: "2026-06-02T12:00:00" },
+      { tipo: "intervalo_fim",    datahora: "2026-06-02T13:00:00" },
+      { tipo: "saida",            datahora: "2026-06-02T17:00:00" },
     ];
-    // 8→12 = 240, 13→17 = 240, total = 480 min = 8h
-    expect(minutosTrabalhadosDia(regs)).toBe(480);
+    expect(minutosTrabalhadosDia(regs)).toBe(480); // 240 + 240
+  });
+
+  it("entrada/saida com janela de almoço: desconta a sobreposição", () => {
+    const regs = [
+      { tipo: "entrada", datahora: "2026-06-02T08:00:00" },
+      { tipo: "saida",   datahora: "2026-06-02T17:00:00" },
+    ];
+    const jornada = { almoco_inicio: "12:00", almoco_fim: "13:00" };
+    // 9h bruto (540) - 60 de almoço = 480
+    expect(minutosTrabalhadosDia(regs, jornada)).toBe(480);
+  });
+
+  it("meio período de manhã (sai antes do almoço): não desconta", () => {
+    const regs = [
+      { tipo: "entrada", datahora: "2026-06-02T08:00:00" },
+      { tipo: "saida",   datahora: "2026-06-02T11:00:00" },
+    ];
+    const jornada = { almoco_inicio: "12:00", almoco_fim: "13:00" };
+    expect(minutosTrabalhadosDia(regs, jornada)).toBe(180); // 3h cheias
+  });
+
+  it("sem janela de almoço: não desconta nada", () => {
+    const regs = [
+      { tipo: "entrada", datahora: "2026-06-02T08:00:00" },
+      { tipo: "saida",   datahora: "2026-06-02T17:00:00" },
+    ];
+    expect(minutosTrabalhadosDia(regs, { almoco_inicio: null, almoco_fim: null })).toBe(540);
+    expect(minutosTrabalhadosDia(regs)).toBe(540); // jornada ausente
   });
 
   it("zero quando dia vazio", () => {
     expect(minutosTrabalhadosDia([])).toBe(0);
   });
 
-  it("ignora pares ímpares (entrada sem saída)", () => {
-    const regs = [{ tipo: "entrada", datahora: "2026-06-02T08:00:00Z" }];
+  it("ignora entrada sem saída", () => {
+    const regs = [{ tipo: "entrada", datahora: "2026-06-02T08:00:00" }];
     expect(minutosTrabalhadosDia(regs)).toBe(0);
   });
 });

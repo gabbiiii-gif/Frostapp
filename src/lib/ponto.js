@@ -246,21 +246,58 @@ export function listarRegistrosDiaTodos(db, dataISO) {
 }
 
 // ─── Cálculo de minutos trabalhados em um dia ────────────────────────────────
-// Pares entrada/saida ordenados. Intervalos descontados.
-// Retorna minutos como inteiro (>= 0). Não calcula débito vs jornada (essa
-// lógica entra em fase seguinte de banco de horas).
-export function minutosTrabalhadosDia(registrosDia) {
+
+// Converte "HH:MM" para um Date no MESMO dia local de `ref`. null se inválido.
+function horaParaData(ref, hhmm) {
+  if (!hhmm || !/^\d{1,2}:\d{2}$/.test(String(hhmm))) return null;
+  const [h, m] = String(hhmm).split(":").map(Number);
+  const d = new Date(ref);
+  d.setHours(h, m, 0, 0);
+  return d;
+}
+
+// Minutos de interseção entre o trabalho [entrada, saida] e a janela de almoço
+// da jornada (mesmo dia). 0 quando não há janela ou não há sobreposição.
+function sobreposicaoAlmocoMin(entrada, saida, jornada) {
+  const ai = horaParaData(entrada, jornada?.almoco_inicio);
+  const af = horaParaData(entrada, jornada?.almoco_fim);
+  if (!ai || !af || af <= ai) return 0;
+  const ini = Math.max(entrada.getTime(), ai.getTime());
+  const fim = Math.min(saida.getTime(), af.getTime());
+  return fim > ini ? (fim - ini) / 60000 : 0;
+}
+
+// Minutos trabalhados no dia.
+// - Dia com batidas de intervalo (LEGADO) → cálculo por pares (preserva histórico).
+// - Só entrada/saida → soma os pares e desconta a janela de almoço da jornada.
+export function minutosTrabalhadosDia(registrosDia, jornada = null) {
   const ordenados = [...(registrosDia || [])].sort(
     (a, b) => new Date(a.datahora) - new Date(b.datahora)
+  );
+  const temIntervalo = ordenados.some(
+    (r) => r.tipo === "intervalo_inicio" || r.tipo === "intervalo_fim"
   );
   let total = 0;
   let entradaAtual = null;
   for (const r of ordenados) {
-    if (r.tipo === "entrada" || r.tipo === "intervalo_fim") {
-      entradaAtual = r;
-    } else if ((r.tipo === "saida" || r.tipo === "intervalo_inicio") && entradaAtual) {
-      total += (new Date(r.datahora) - new Date(entradaAtual.datahora)) / 60000;
-      entradaAtual = null;
+    if (temIntervalo) {
+      if (r.tipo === "entrada" || r.tipo === "intervalo_fim") {
+        entradaAtual = r;
+      } else if ((r.tipo === "saida" || r.tipo === "intervalo_inicio") && entradaAtual) {
+        total += (new Date(r.datahora) - new Date(entradaAtual.datahora)) / 60000;
+        entradaAtual = null;
+      }
+    } else {
+      if (r.tipo === "entrada") {
+        entradaAtual = r;
+      } else if (r.tipo === "saida" && entradaAtual) {
+        const ent = new Date(entradaAtual.datahora);
+        const sai = new Date(r.datahora);
+        const bruto = (sai - ent) / 60000;
+        const almoco = sobreposicaoAlmocoMin(ent, sai, jornada);
+        total += Math.max(0, bruto - almoco);
+        entradaAtual = null;
+      }
     }
   }
   return Math.max(0, Math.round(total));
