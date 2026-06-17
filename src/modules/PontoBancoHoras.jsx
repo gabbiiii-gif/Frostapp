@@ -257,37 +257,41 @@ export default function PontoBancoHoras({ user, addToast, db, employees, isAdmin
 // ConfigJornadaModal — admin define jornada de um funcionário
 // ────────────────────────────────────────────────────────────────────────────
 function ConfigJornadaModal({ db, funcionarioId, funcionarioNome, atual, addToast, onClose, onSaved }) {
-  const [horasDia, setHorasDia] = useState(atual.horas_dia ?? 8);
-  const [horasSemana, setHorasSemana] = useState(atual.horas_semana ?? 44);
-  const [diasSemana, setDiasSemana] = useState(new Set(atual.dias_semana || [1, 2, 3, 4, 5]));
+  const NOMES = ["Domingo", "Segunda", "Terça", "Quarta", "Quinta", "Sexta", "Sábado"];
+  const inicialMapa = atual.horas_por_dia || { 0: 0, 1: 8, 2: 8, 3: 8, 4: 8, 5: 8, 6: 0 };
+  const [horasPorDia, setHorasPorDia] = useState(() => ({ ...inicialMapa }));
   const [tolerancia, setTolerancia] = useState(atual.tolerancia_min ?? 10);
-  const [intervalo, setIntervalo] = useState(atual.intervalo_min ?? 60);
-  const [horaEntrada, setHoraEntrada] = useState(atual.hora_entrada || "08:00");
-  const [horaSaida, setHoraSaida] = useState(atual.hora_saida || "17:00");
+  const [temAlmoco, setTemAlmoco] = useState(!!(atual.almoco_inicio && atual.almoco_fim));
+  const [almocoInicio, setAlmocoInicio] = useState(atual.almoco_inicio || "12:00");
+  const [almocoFim, setAlmocoFim] = useState(atual.almoco_fim || "13:00");
   const [erro, setErro] = useState("");
   const [loading, setLoading] = useState(false);
 
+  const setHoras = (d, val) => {
+    const n = Math.max(0, Math.min(24, parseFloat(val) || 0));
+    setHorasPorDia((prev) => ({ ...prev, [d]: n }));
+  };
   const toggleDia = (d) => {
-    const novo = new Set(diasSemana);
-    if (novo.has(d)) novo.delete(d); else novo.add(d);
-    setDiasSemana(novo);
+    setHorasPorDia((prev) => ({ ...prev, [d]: (Number(prev[d]) || 0) > 0 ? 0 : 8 }));
   };
 
   const handleSubmit = useCallback((e) => {
     e?.preventDefault();
     setErro("");
-    const hd = parseFloat(horasDia);
-    if (!(hd > 0 && hd <= 24)) { setErro("Horas/dia inválido."); return; }
+    const algumDia = Object.values(horasPorDia).some((h) => (Number(h) || 0) > 0);
+    if (!algumDia) { setErro("Defina ao menos um dia com horas."); return; }
+    if (temAlmoco && !(almocoFim > almocoInicio)) {
+      setErro("Fim do almoço deve ser depois do início."); return;
+    }
     setLoading(true);
     try {
+      const mapa = {};
+      for (let d = 0; d <= 6; d++) mapa[d] = Number(horasPorDia[d]) || 0;
       setJornada(db, funcionarioId, {
-        horas_dia: hd,
-        horas_semana: parseFloat(horasSemana) || 44,
-        dias_semana: Array.from(diasSemana).sort(),
+        horas_por_dia: mapa,
+        almoco_inicio: temAlmoco ? almocoInicio : null,
+        almoco_fim: temAlmoco ? almocoFim : null,
         tolerancia_min: parseInt(tolerancia, 10) || 0,
-        intervalo_min: parseInt(intervalo, 10) || 0,
-        hora_entrada: horaEntrada,
-        hora_saida: horaSaida,
         ativo: true,
       });
       addToast?.({ type: "success", message: "Jornada atualizada." });
@@ -297,16 +301,15 @@ function ConfigJornadaModal({ db, funcionarioId, funcionarioNome, atual, addToas
     } finally {
       setLoading(false);
     }
-  }, [db, funcionarioId, horasDia, horasSemana, diasSemana, tolerancia, intervalo, horaEntrada, horaSaida, addToast, onSaved]);
+  }, [db, funcionarioId, horasPorDia, temAlmoco, almocoInicio, almocoFim, tolerancia, addToast, onSaved]);
 
   return (
     <div
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4"
-      role="dialog"
-      aria-modal="true"
+      role="dialog" aria-modal="true"
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
-      <div className="w-full max-w-md bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl">
+      <div className="w-full max-w-md bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="px-5 py-4 border-b border-gray-700 flex items-center justify-between">
           <div>
             <h3 className="text-base font-bold text-white">Configurar jornada</h3>
@@ -315,48 +318,63 @@ function ConfigJornadaModal({ db, funcionarioId, funcionarioNome, atual, addToas
           <button type="button" onClick={onClose} className="text-gray-400 hover:text-white">✕</button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-5 space-y-3">
-          <div className="grid grid-cols-2 gap-3">
-            <Field id="jor-h-dia" label="Horas/dia" type="number" step="0.5" min="0" max="24" value={horasDia} onChange={setHorasDia} />
-            <Field id="jor-h-sem" label="Horas/semana" type="number" step="1" min="0" max="80" value={horasSemana} onChange={setHorasSemana} />
-          </div>
-
+        <form onSubmit={handleSubmit} className="p-5 space-y-4">
           <fieldset>
-            <legend className="block text-xs font-semibold text-gray-300 mb-1.5">Dias úteis</legend>
-            <div className="flex gap-1 flex-wrap">
-              {DIA_SEMANA.map((label, idx) => (
-                <button
-                  key={idx}
-                  type="button"
-                  onClick={() => toggleDia(idx)}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-semibold border ${diasSemana.has(idx) ? "bg-blue-600 border-blue-500 text-white" : "bg-gray-800 border-gray-700 text-gray-300 hover:border-gray-500"}`}
-                >
-                  {label}
-                </button>
-              ))}
+            <legend className="block text-xs font-semibold text-gray-300 mb-2">Carga horária por dia</legend>
+            <div className="space-y-1.5">
+              {NOMES.map((nome, d) => {
+                const ativo = (Number(horasPorDia[d]) || 0) > 0;
+                return (
+                  <div key={d} className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => toggleDia(d)}
+                      className={`w-24 px-2 py-1.5 rounded-lg text-xs font-semibold border text-left ${ativo ? "bg-blue-600 border-blue-500 text-white" : "bg-gray-800 border-gray-700 text-gray-400"}`}
+                    >
+                      {nome}
+                    </button>
+                    <input
+                      type="number" step="0.5" min="0" max="24"
+                      value={horasPorDia[d] ?? 0}
+                      onChange={(e) => setHoras(d, e.target.value)}
+                      disabled={!ativo}
+                      className="w-20 px-2 py-1.5 rounded-lg bg-gray-800 border border-gray-700 text-white text-sm disabled:opacity-40"
+                    />
+                    <span className="text-xs text-gray-500">{ativo ? "horas" : "folga"}</span>
+                  </div>
+                );
+              })}
             </div>
+            <p className="text-[11px] text-gray-500 mt-1.5">Toque no dia pra ligar/desligar. Sábado meio período = 4h.</p>
           </fieldset>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field id="jor-tol" label="Tolerância (min)" type="number" step="1" min="0" max="60" value={tolerancia} onChange={setTolerancia} />
-            <Field id="jor-int" label="Intervalo (min)" type="number" step="5" min="0" max="240" value={intervalo} onChange={setIntervalo} />
-          </div>
+          <fieldset className="border-t border-gray-800 pt-3">
+            <div className="flex items-center justify-between mb-2">
+              <legend className="text-xs font-semibold text-gray-300">Janela de almoço</legend>
+              <label className="flex items-center gap-2 text-xs text-gray-300">
+                <input type="checkbox" checked={temAlmoco} onChange={(e) => setTemAlmoco(e.target.checked)} />
+                {temAlmoco ? "Com almoço" : "Sem almoço"}
+              </label>
+            </div>
+            {temAlmoco && (
+              <div className="grid grid-cols-2 gap-3">
+                <Field id="alm-ini" label="Início" type="time" value={almocoInicio} onChange={setAlmocoInicio} />
+                <Field id="alm-fim" label="Fim" type="time" value={almocoFim} onChange={setAlmocoFim} />
+              </div>
+            )}
+            <p className="text-[11px] text-gray-500 mt-1.5">O almoço é descontado automático — não precisa bater. Quem sai antes do início não perde nada.</p>
+          </fieldset>
 
-          <div className="grid grid-cols-2 gap-3">
-            <Field id="jor-ent" label="Hora entrada" type="time" value={horaEntrada} onChange={setHoraEntrada} />
-            <Field id="jor-sai" label="Hora saída" type="time" value={horaSaida} onChange={setHoraSaida} />
+          <div className="grid grid-cols-2 gap-3 border-t border-gray-800 pt-3">
+            <Field id="jor-tol" label="Tolerância (min)" type="number" step="1" min="0" max="60" value={tolerancia} onChange={setTolerancia} />
           </div>
 
           {erro && (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">
-              {erro}
-            </div>
+            <div className="rounded-lg border border-red-500/40 bg-red-500/10 px-3 py-2 text-sm text-red-200">{erro}</div>
           )}
 
           <div className="flex items-center justify-end gap-2 pt-2">
-            <button type="button" onClick={onClose} className="px-3 py-2 text-sm text-gray-300 hover:text-white" disabled={loading}>
-              Cancelar
-            </button>
+            <button type="button" onClick={onClose} className="px-3 py-2 text-sm text-gray-300 hover:text-white" disabled={loading}>Cancelar</button>
             <button type="submit" disabled={loading} className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold disabled:opacity-50">
               {loading ? "Salvando…" : "Salvar"}
             </button>
