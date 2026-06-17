@@ -130,26 +130,18 @@ export function dentroJanelaDuplicacao(ultimoIso, agoraIso = new Date().toISOStr
   return (new Date(agoraIso) - new Date(ultimoIso)) < JANELA_DUP_MS;
 }
 
-// Infere qual o próximo tipo esperado com base no histórico do dia.
-// Lógica simples: 4 estados ciclando — entrada → intervalo_inicio →
-// intervalo_fim → saida → (próximo dia entrada). Se a jornada não tem
-// intervalo configurado, pula direto entrada → saida.
-export function proximaAcao(registrosDia, jornada = null) {
-  const temIntervalo = jornada?.intervalo_min && jornada.intervalo_min > 0;
-  // Ordem por horário ascendente
+// Próximo tipo esperado: só entrada/saída. Almoço NÃO é mais batido (vira
+// desconto por janela na jornada). Batidas de intervalo legadas são ignoradas
+// no fluxo — só contam no histórico de minutos trabalhados.
+export function proximaAcao(registrosDia) {
   const ordenados = [...(registrosDia || [])].sort(
     (a, b) => new Date(a.datahora) - new Date(b.datahora)
   );
-  const tipos = ordenados.map((r) => r.tipo);
-  // Estado atual: o último registro indica em qual fase está
-  const ultimo = tipos[tipos.length - 1];
-
-  if (!ultimo) return "entrada";
-  if (ultimo === "entrada") return temIntervalo ? "intervalo_inicio" : "saida";
-  if (ultimo === "intervalo_inicio") return "intervalo_fim";
-  if (ultimo === "intervalo_fim") return "saida";
-  if (ultimo === "saida") return "entrada"; // próximo dia / extras
-  return "entrada";
+  // Considera apenas entrada/saida pra decidir o próximo passo.
+  const reais = ordenados.filter((r) => r.tipo === "entrada" || r.tipo === "saida");
+  const ultimo = reais[reais.length - 1]?.tipo;
+  if (ultimo === "entrada") return "saida";
+  return "entrada"; // vazio, ou último foi saida
 }
 
 // Cria registro e grava no kv_store. Valida anti-duplicação e tipo válido.

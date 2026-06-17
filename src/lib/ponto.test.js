@@ -75,25 +75,25 @@ describe("ponto.proximaAcao", () => {
   it("entrada quando dia vazio", () => {
     expect(proximaAcao([])).toBe("entrada");
   });
-  it("intervalo_inicio após entrada quando jornada tem intervalo", () => {
-    const r = [{ tipo: "entrada", datahora: "2026-06-02T08:00:00Z" }];
-    expect(proximaAcao(r, { intervalo_min: 60 })).toBe("intervalo_inicio");
+  it("saida após entrada", () => {
+    const r = [{ tipo: "entrada", datahora: "2026-06-02T08:00:00" }];
+    expect(proximaAcao(r)).toBe("saida");
   });
-  it("saida após entrada quando jornada sem intervalo", () => {
-    const r = [{ tipo: "entrada", datahora: "2026-06-02T08:00:00Z" }];
-    expect(proximaAcao(r, { intervalo_min: 0 })).toBe("saida");
+  it("entrada de novo após saida (novo ciclo)", () => {
+    const r = [
+      { tipo: "entrada", datahora: "2026-06-02T08:00:00" },
+      { tipo: "saida",   datahora: "2026-06-02T17:00:00" },
+    ];
+    expect(proximaAcao(r)).toBe("entrada");
   });
-  it("ciclo entrada→intervalo→saida", () => {
-    const j = { intervalo_min: 60 };
-    let r = [];
-    r.push({ tipo: "entrada", datahora: "2026-06-02T08:00:00Z" });
-    expect(proximaAcao(r, j)).toBe("intervalo_inicio");
-    r.push({ tipo: "intervalo_inicio", datahora: "2026-06-02T12:00:00Z" });
-    expect(proximaAcao(r, j)).toBe("intervalo_fim");
-    r.push({ tipo: "intervalo_fim", datahora: "2026-06-02T13:00:00Z" });
-    expect(proximaAcao(r, j)).toBe("saida");
-    r.push({ tipo: "saida", datahora: "2026-06-02T17:00:00Z" });
-    expect(proximaAcao(r, j)).toBe("entrada");
+  it("ignora batidas de intervalo legadas (trata última real)", () => {
+    const r = [
+      { tipo: "entrada",          datahora: "2026-06-02T08:00:00" },
+      { tipo: "intervalo_inicio", datahora: "2026-06-02T12:00:00" },
+      { tipo: "intervalo_fim",    datahora: "2026-06-02T13:00:00" },
+    ];
+    // última batida não-saida → ainda espera saida
+    expect(proximaAcao(r)).toBe("saida");
   });
 });
 
