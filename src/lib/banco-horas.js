@@ -84,13 +84,14 @@ export function setJornada(db, funcionarioId, dados) {
 
 // ─── Cálculo de saldo por dia ──────────────────────────────────────────────
 
-// data: string "YYYY-MM-DD"
+// data: string "YYYY-MM-DD". Dia útil = carga esperada > 0 nesse dia da semana.
 export function ehDiaUtil(data, jornada = JORNADA_DEFAULT) {
   const dia = String(data).slice(0, 10);
   // Date(YYYY-MM-DD) interpreta como UTC; somar T12:00 garante dia local correto.
   const d = new Date(dia + "T12:00:00");
   if (isNaN(d.getTime())) return false;
-  return (jornada.dias_semana || []).includes(d.getDay());
+  const mapa = jornada.horas_por_dia || {};
+  return (Number(mapa[d.getDay()]) || 0) > 0;
 }
 
 // Lista de ocorrências do dia que zeram o débito (atestados aprovados).
@@ -108,9 +109,13 @@ function temAtestadoAprovado(ocorrenciasDia) {
 // jornada: config do funcionário
 export function calcularSaldoDia(data, registros, jornada = JORNADA_DEFAULT, ocorrenciasDia = []) {
   const dia = String(data).slice(0, 10);
-  const trabalhados = minutosTrabalhadosDia(registros);
+  // Passa a jornada para que minutosTrabalhadosDia desconte a janela de almoço.
+  const trabalhados = minutosTrabalhadosDia(registros, jornada);
   const ehUtil = ehDiaUtil(dia, jornada);
-  const esperado = ehUtil ? Math.round((jornada.horas_dia || 8) * 60) : 0;
+  // Carga esperada vem do mapa por dia da semana (0=dom..6=sáb).
+  const dow = new Date(dia + "T12:00:00").getDay();
+  const horasDia = Number((jornada.horas_por_dia || {})[dow]) || 0;
+  const esperado = ehUtil ? Math.round(horasDia * 60) : 0;
 
   // Atestado aprovado zera débito (não vira crédito também — neutraliza).
   const atestado = temAtestadoAprovado(ocorrenciasDia);
@@ -200,6 +205,18 @@ export function enumerarDias(ini, fim) {
     d.setDate(d.getDate() + 1);
   }
   return out;
+}
+
+// Resumo curto da jornada para cabeçalho de relatório. Ex.: "Seg–Sex 8h · Sáb 4h".
+export function resumoDiasJornada(jornada = JORNADA_DEFAULT) {
+  const nomes = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
+  const mapa = jornada.horas_por_dia || {};
+  const partes = [];
+  for (let d = 0; d <= 6; d++) {
+    const h = Number(mapa[d]) || 0;
+    if (h > 0) partes.push(`${nomes[d]} ${h}h`);
+  }
+  return partes.length ? partes.join(" · ") : "Sem dias úteis";
 }
 
 // Mês YYYY-MM como ini/fim de período.

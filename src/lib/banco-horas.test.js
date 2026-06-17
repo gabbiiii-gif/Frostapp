@@ -33,16 +33,26 @@ describe("ehDiaUtil", () => {
     expect(ehDiaUtil("2026-06-05")).toBe(true); // sexta
   });
   it("sáb/dom não são úteis no default", () => {
-    expect(ehDiaUtil("2026-06-06")).toBe(false); // sábado
-    expect(ehDiaUtil("2026-06-07")).toBe(false); // domingo
+    expect(ehDiaUtil("2026-06-06")).toBe(false); // sábado (horas_por_dia[6]=0)
+    expect(ehDiaUtil("2026-06-07")).toBe(false); // domingo (horas_por_dia[0]=0)
   });
-  it("jornada custom respeita dias_semana", () => {
-    expect(ehDiaUtil("2026-06-06", { dias_semana: [6] })).toBe(true);
+  it("jornada custom respeita horas_por_dia (sábado com carga)", () => {
+    // Mesmo propósito: sábado como dia útil — agora expresso em horas_por_dia.
+    expect(ehDiaUtil("2026-06-06", {
+      horas_por_dia: { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 8 },
+    })).toBe(true);
   });
 });
 
 describe("calcularSaldoDia", () => {
-  const jornada = { ...JORNADA_DEFAULT };
+  // Fixture migrado para horas_por_dia (Task 4). Sem janela de almoço para isolar
+  // o teste de saldo (lógica de débito/crédito/tolerância) do desconto de almoço.
+  const jornada = {
+    ...JORNADA_DEFAULT,
+    horas_por_dia: { 0: 0, 1: 8, 2: 8, 3: 8, 4: 8, 5: 8, 6: 0 },
+    almoco_inicio: null,
+    almoco_fim: null,
+  };
   const make = (hStart, hEnd) => ({
     tipo: hStart === hEnd ? "entrada" : "entrada",
     datahora: `2026-06-01T${hStart}:00Z`,
@@ -150,7 +160,14 @@ describe("calcularSaldoPeriodo", () => {
     db.set("erp:ponto:2", { id: "2", funcionario_id: "f", tipo: "saida",   datahora: "2026-06-01T19:00:00Z" });
     db.set("erp:ponto:3", { id: "3", funcionario_id: "f", tipo: "entrada", datahora: "2026-06-03T11:00:00Z" });
     db.set("erp:ponto:4", { id: "4", funcionario_id: "f", tipo: "saida",   datahora: "2026-06-03T20:00:00Z" });
-    const r = calcularSaldoPeriodo(db, "f", "2026-06-01", "2026-06-03");
+    // Fixture migrado para horas_por_dia (Task 4), sem janela de almoço para
+    // isolar o saldo do desconto de almoço — preserva a intenção original
+    // (dia 1 = 8h = ok; dia 3 = 9h = +60 crédito; dia 2 = falta).
+    const jornada = {
+      horas_por_dia: { 0: 0, 1: 8, 2: 8, 3: 8, 4: 8, 5: 8, 6: 0 },
+      almoco_inicio: null, almoco_fim: null, tolerancia_min: 10,
+    };
+    const r = calcularSaldoPeriodo(db, "f", "2026-06-01", "2026-06-03", jornada);
     expect(r.length).toBe(3);
     expect(r[0].status).toBe("ok");
     expect(r[1].status).toBe("falta");
@@ -223,5 +240,39 @@ describe("banco-horas.migrarJornada", () => {
     const out = migrarJornada(nova);
     expect(out.horas_por_dia[6]).toBe(4);
     expect(out.almoco_inicio).toBe("11:30");
+  });
+});
+
+describe("banco-horas.calcularSaldoDia (carga por dia)", () => {
+  const jornada = {
+    horas_por_dia: { 0: 0, 1: 8, 2: 8, 3: 8, 4: 8, 5: 8, 6: 4 },
+    almoco_inicio: "12:00", almoco_fim: "13:00", tolerancia_min: 10,
+  };
+  const dia = (data, ent, sai) => [
+    { tipo: "entrada", datahora: `${data}T${ent}:00` },
+    { tipo: "saida",   datahora: `${data}T${sai}:00` },
+  ];
+
+  it("sábado meio período: esperado 4h, cumpriu 4h → saldo 0", () => {
+    // 2026-06-06 é sábado. 08:00–12:00 = 4h, sem cruzar almoço (12:00 borda) → 240
+    const r = calcularSaldoDia("2026-06-06", dia("2026-06-06", "08", "12"), jornada);
+    expect(r.eh_dia_util).toBe(true);
+    expect(r.minutos_esperados).toBe(240);
+    expect(r.minutos_trabalhados).toBe(240);
+    expect(r.saldo).toBe(0);
+  });
+
+  it("domingo é folga: esperado 0", () => {
+    const r = calcularSaldoDia("2026-06-07", [], jornada); // domingo
+    expect(r.eh_dia_util).toBe(false);
+    expect(r.minutos_esperados).toBe(0);
+    expect(r.status).toBe("folga");
+  });
+
+  it("dia útil integral: 08–17 menos almoço = 8h, esperado 8h → saldo 0", () => {
+    const r = calcularSaldoDia("2026-06-01", dia("2026-06-01", "08", "17"), jornada); // segunda
+    expect(r.minutos_esperados).toBe(480);
+    expect(r.minutos_trabalhados).toBe(480);
+    expect(r.saldo).toBe(0);
   });
 });

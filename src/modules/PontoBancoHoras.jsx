@@ -25,6 +25,7 @@ import {
   setJornada,
   periodoMes,
   JORNADA_DEFAULT,
+  resumoDiasJornada,
 } from "../lib/banco-horas.js";
 import { formatMinutos } from "../lib/ponto.js";
 import { formatDate } from "../utils.js";
@@ -468,7 +469,7 @@ function exportarPDF(saldos, jornada, funcNome, mes, totalMin) {
 </head><body>
   <h1>Banco de horas</h1>
   <div class="meta">
-    ${escapeHtml(funcNome)} · ${mes} · Jornada ${jornada.horas_dia}h/dia · Tolerância ${jornada.tolerancia_min} min
+    ${escapeHtml(funcNome)} · ${mes} · Jornada ${resumoDiasJornada(jornada)} · Tolerância ${jornada.tolerancia_min} min
   </div>
   <table>
     <thead><tr><th>Data</th><th>Trabalhado</th><th>Esperado</th><th>Saldo</th><th>Status</th></tr></thead>
