@@ -32,6 +32,7 @@ import {
   TIPOS_PONTO,
   getOuCriarDeviceId,
 } from "../lib/ponto.js";
+import { getJornada } from "../lib/banco-horas.js";
 import { formatDate, toISODate } from "../utils.js";
 // Biometria nativa (Capacitor) — funciona só em APK Android/iOS.
 // authenticateBiometric: prompt do OS (Touch/Face ID). Retorna boolean.
@@ -529,17 +530,20 @@ function MeuPontoView({ user, addToast, db, refresh, tick }) {
   // Dia de hoje no fuso LOCAL — toISODate usa getFullYear/Month/Date (não UTC),
   // senão à noite no Brasil a data pulava pro dia seguinte.
   const hojeISO = toISODate(new Date());
+  // getJornada migra jornada legada → horas_por_dia + janela de almoço (e cai
+  // no JORNADA_DEFAULT quando não há config). Necessária para descontar o almoço.
   const jornada = useMemo(() => {
     if (!db || !user?.id) return null;
-    return db.get(`erp:jornada:${user.id}`);
+    return getJornada(db, user.id);
   }, [db, user, tick]);
 
   const registrosHoje = useMemo(
     () => (db && user?.id ? listarRegistrosDia(db, user.id, hojeISO) : []),
     [db, user, hojeISO, tick]
   );
-  const minutosHoje = useMemo(() => minutosTrabalhadosDia(registrosHoje), [registrosHoje]);
-  const proxima = useMemo(() => proximaAcao(registrosHoje, jornada), [registrosHoje, jornada]);
+  // Passa a jornada para descontar a janela de almoço dos minutos do dia.
+  const minutosHoje = useMemo(() => minutosTrabalhadosDia(registrosHoje, jornada), [registrosHoje, jornada]);
+  const proxima = useMemo(() => proximaAcao(registrosHoje), [registrosHoje]);
 
   // ─── Setup PIN ───
   const [showSetup, setShowSetup] = useState(false);
