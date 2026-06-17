@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated } from "./supabase.js";
+import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -11949,9 +11949,20 @@ function CompanyAuditPanel() {
   const [search, setSearch] = useState("");
   const [reload, setReload] = useState(0);
 
+  // Auditoria não é mais hidratada no boot (kv_store fica leve). Busca sob
+  // demanda do Supabase ao abrir o painel + faz merge com o que houver local
+  // (entradas recém-criadas neste device, ainda não relidas). Dedupe por id.
   useEffect(() => {
-    const list = DB.list("erp:audit:").sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
-    setEntries(list);
+    let cancel = false;
+    (async () => {
+      const local = DB.list("erp:audit:");
+      const remote = await fetchAuditLog(getActiveCompanyId(), 500);
+      const byId = new Map();
+      [...local, ...remote].forEach((e) => { if (e && e.id) byId.set(e.id, e); });
+      const list = Array.from(byId.values()).sort((a, b) => (b.ts || "").localeCompare(a.ts || ""));
+      if (!cancel) setEntries(list);
+    })();
+    return () => { cancel = true; };
   }, [reload]);
 
   const filtered = useMemo(() => {

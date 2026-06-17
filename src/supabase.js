@@ -714,6 +714,11 @@ export async function hydrateFromSupabase() {
         .from('kv_store')
         .select('key, value')
         .eq('company_id', companyId)
+        // Auditoria (erp:audit:*) NÃO é hidratada no boot — é o maior volume do
+        // kv_store (milhares de linhas) e só o painel de Auditoria precisa dela,
+        // que busca sob demanda via fetchAuditLog(). Excluir aqui derruba
+        // drasticamente o payload de carregamento.
+        .not('key', 'like', 'erp:audit:%')
         .order('key', { ascending: true })
         .range(from, from + PAGE - 1);
       if (error) { pageError = error; break; }
@@ -740,6 +745,8 @@ export async function hydrateFromSupabase() {
         const key = window.storage.key(i);
         if (!key || !key.startsWith('erp:')) continue;
         if (isSensitive(key)) continue;
+        // Audit não vem mais no hydrate (excluída acima); não apagar o que está local.
+        if (key.startsWith('erp:audit:')) continue;
         if (key === 'erp:seeded' || key === 'erp:lastBackup') continue;
         // Não apaga chave ainda pendente de envio (feita offline) — senão um
         // registro de ponto criado sem rede seria perdido antes de sincronizar.
@@ -934,6 +941,29 @@ export function deleteFromSupabase(key) {
         if (!isPermissionError(error)) enqueueOutbox('del', key);
       }
     }, () => enqueueOutbox('del', key));
+}
+
+// ─── Auditoria sob demanda ───────────────────────────────────────────────────
+// erp:audit:* não é hidratado no boot (ver hydrateFromSupabase). O painel de
+// Auditoria chama isto ao abrir e busca só as últimas `limit` entradas direto
+// do Supabase (ordenadas pela chave, que embute o timestamp). Mantém o boot leve
+// sem perder o acesso cross-device ao log.
+export async function fetchAuditLog(companyId, limit = 500) {
+  if (!supabase || !companyId) return [];
+  try {
+    const { data, error } = await supabase
+      .from('kv_store')
+      .select('value')
+      .eq('company_id', companyId)
+      .like('key', 'erp:audit:%')
+      .order('key', { ascending: false })
+      .limit(limit);
+    if (error) { console.warn('fetchAuditLog:', error.message); return []; }
+    return (data || []).map((r) => r.value).filter(Boolean);
+  } catch (e) {
+    console.warn('fetchAuditLog falhou:', e.message);
+    return [];
+  }
 }
 
 // ─── Master users: sync via RPCs SECURITY DEFINER ───────────────────────────
