@@ -12,6 +12,7 @@ import {
   contarPorStatus,
   getJornada,
   setJornada,
+  migrarJornada,
 } from "./banco-horas.js";
 
 function makeMemDb() {
@@ -191,5 +192,36 @@ describe("getJornada / setJornada", () => {
     expect(j.updated_at).toBeDefined();
     const j2 = getJornada(db, "f");
     expect(j2.horas_dia).toBe(6);
+  });
+});
+
+describe("banco-horas.migrarJornada", () => {
+  it("deriva horas_por_dia de dias_semana + horas_dia (legado)", () => {
+    const out = migrarJornada({ horas_dia: 8, dias_semana: [1, 2, 3, 4, 5, 6] });
+    expect(out.horas_por_dia[1]).toBe(8);
+    expect(out.horas_por_dia[6]).toBe(8); // sábado trabalhado
+    expect(out.horas_por_dia[0]).toBe(0); // domingo folga
+  });
+
+  it("deriva janela de almoço de intervalo_min (legado)", () => {
+    const out = migrarJornada({ horas_dia: 8, dias_semana: [1], intervalo_min: 60 });
+    expect(out.almoco_inicio).toBe("12:00");
+    expect(out.almoco_fim).toBe("13:00");
+  });
+
+  it("intervalo_min 0 → sem almoço", () => {
+    const out = migrarJornada({ horas_dia: 8, dias_semana: [1], intervalo_min: 0 });
+    expect(out.almoco_inicio).toBeNull();
+    expect(out.almoco_fim).toBeNull();
+  });
+
+  it("jornada nova (já tem horas_por_dia) passa intacta", () => {
+    const nova = {
+      horas_por_dia: { 0: 0, 1: 8, 2: 8, 3: 8, 4: 8, 5: 8, 6: 4 },
+      almoco_inicio: "11:30", almoco_fim: "12:30",
+    };
+    const out = migrarJornada(nova);
+    expect(out.horas_por_dia[6]).toBe(4);
+    expect(out.almoco_inicio).toBe("11:30");
   });
 });

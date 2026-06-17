@@ -16,21 +16,55 @@ import { listarRegistrosDia, listarRegistrosPeriodo, minutosTrabalhadosDia } fro
 
 // Jornada padrão quando funcionário não tem config salva — útil para fallback.
 export const JORNADA_DEFAULT = {
+  // Carga esperada por dia da semana (0=dom..6=sáb), em horas. 0 = não trabalha.
+  horas_por_dia: { 0: 0, 1: 8, 2: 8, 3: 8, 4: 8, 5: 8, 6: 0 },
+  // Janela fixa de almoço (HH:MM). null/"" = sem almoço.
+  almoco_inicio: "12:00",
+  almoco_fim: "13:00",
+  tolerancia_min: 10,
+  ativo: true,
+  // Campos legados (tolerados na leitura; não escritos pela UI nova):
   horas_dia: 8,
   horas_semana: 44,
-  dias_semana: [1, 2, 3, 4, 5], // seg–sex
-  tolerancia_min: 10,
+  dias_semana: [1, 2, 3, 4, 5],
   intervalo_min: 60,
   hora_entrada: "08:00",
   hora_saida: "17:00",
-  ativo: true,
 };
 
-// Lê a jornada de um funcionário, com fallback ao default. Não toca disco.
+// Converte uma jornada legada (horas_dia + dias_semana + intervalo_min) para o
+// formato novo (horas_por_dia + janela de almoço). Jornada já nova passa intacta.
+export function migrarJornada(raw) {
+  const j = { ...raw };
+  if (!j.horas_por_dia || typeof j.horas_por_dia !== "object") {
+    const horas = Number(j.horas_dia) || JORNADA_DEFAULT.horas_dia;
+    const dias = Array.isArray(j.dias_semana) ? j.dias_semana : JORNADA_DEFAULT.dias_semana;
+    const mapa = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 };
+    dias.forEach((d) => { if (d >= 0 && d <= 6) mapa[d] = horas; });
+    j.horas_por_dia = mapa;
+  }
+  if (j.almoco_inicio === undefined && j.almoco_fim === undefined) {
+    const intv = Number(j.intervalo_min);
+    if (intv > 0) {
+      j.almoco_inicio = "12:00";
+      const fimH = 12 + Math.floor(intv / 60);
+      const fimM = intv % 60;
+      j.almoco_fim = `${String(fimH).padStart(2, "0")}:${String(fimM).padStart(2, "0")}`;
+    } else {
+      j.almoco_inicio = null;
+      j.almoco_fim = null;
+    }
+  }
+  if (j.tolerancia_min === undefined) j.tolerancia_min = JORNADA_DEFAULT.tolerancia_min;
+  if (j.ativo === undefined) j.ativo = true;
+  return j;
+}
+
+// Lê a jornada de um funcionário (migrando legado), com fallback ao default.
 export function getJornada(db, funcionarioId) {
   if (!db || !funcionarioId) return JORNADA_DEFAULT;
-  const j = db.get(`erp:jornada:${funcionarioId}`);
-  return j ? { ...JORNADA_DEFAULT, ...j } : JORNADA_DEFAULT;
+  const raw = db.get(`erp:jornada:${funcionarioId}`);
+  return raw ? migrarJornada(raw) : JORNADA_DEFAULT;
 }
 
 // Grava jornada (admin/gerente — não há checagem aqui, é responsabilidade do
