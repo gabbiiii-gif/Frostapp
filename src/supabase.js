@@ -966,6 +966,24 @@ export async function fetchAuditLog(companyId, limit = 500) {
   }
 }
 
+// ─── Lembrete de manutenção: config ─────────────────────────────────────────
+// Config por empresa (tabela lembrete_config, RLS admin/gerente). O cron
+// lembrete-dispatch lê isso e dispara os lembretes; aqui só o CRUD da config.
+export async function getLembreteConfig(companyId) {
+  if (!supabase || !companyId) return null;
+  const { data, error } = await supabase.from("lembrete_config").select("*").eq("company_id", companyId).maybeSingle();
+  if (error) { console.warn("getLembreteConfig:", error.message); return null; }
+  return data;
+}
+
+export async function saveLembreteConfig(companyId, cfg) {
+  if (!supabase || !companyId) return { ok: false, error: "no_supabase" };
+  const row = { ...cfg, company_id: companyId, updated_at: new Date().toISOString() };
+  const { error } = await supabase.from("lembrete_config").upsert(row, { onConflict: "company_id" });
+  if (error) return { ok: false, error: error.message };
+  return { ok: true };
+}
+
 // ─── Master users: sync via RPCs SECURITY DEFINER ───────────────────────────
 // Acesso direto a master_users foi bloqueado para anon (RLS lockdown Phase 1).
 // Toda interacao passa por RPCs com superficie reduzida:
