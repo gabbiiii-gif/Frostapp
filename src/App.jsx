@@ -6,7 +6,7 @@ import {
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
-import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog } from "./supabase.js";
+import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -11960,6 +11960,105 @@ function CalendarFeedPanel({ feed, onRegenerate, onDisable, onCopy }) {
   );
 }
 
+// Painel: configuração do Lembrete de manutenção/visita (admin/gerente).
+function LembreteConfigPanel({ addToast }) {
+  const [cfg, setCfg] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const companyId = getActiveCompanyId();
+
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      const c = await getLembreteConfig(companyId);
+      if (!cancel) {
+        setCfg(c || {
+          ativo: false, manutencao_ativa: true, intervalo_pj_dias: 90, intervalo_pf_dias: 180,
+          antecedencia_dias: 15, agendados_ativo: true, lookahead_dias: 7, resumo_hora: "07:00",
+          canais: ["whatsapp"], para_cliente: true, para_admin: true, para_dono: false,
+          dono_telefone: "", template_cliente: "", template_admin: "",
+        });
+        setLoading(false);
+      }
+    })();
+    return () => { cancel = true; };
+  }, [companyId]);
+
+  const upd = (k, v) => setCfg((p) => ({ ...p, [k]: v }));
+  const toggleCanal = (canal) => setCfg((p) => {
+    const has = (p.canais || []).includes(canal);
+    return { ...p, canais: has ? p.canais.filter((c) => c !== canal) : [...(p.canais || []), canal] };
+  });
+
+  const salvar = useCallback(async () => {
+    setSaving(true);
+    const r = await saveLembreteConfig(companyId, cfg);
+    setSaving(false);
+    addToast(r.ok ? "Lembrete salvo." : (r.error || "Erro ao salvar."), r.ok ? "success" : "error");
+  }, [companyId, cfg, addToast]);
+
+  if (loading) return <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 text-gray-400">Carregando…</div>;
+
+  const numField = (label, key, min = 0, max = 3650) => (
+    <label className="block">
+      <span className="text-xs text-gray-300">{label}</span>
+      <input type="number" min={min} max={max} value={cfg[key] ?? 0}
+        onChange={(e) => upd(key, parseInt(e.target.value, 10) || 0)}
+        className="mt-1 w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-sm" />
+    </label>
+  );
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6 space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-lg font-semibold text-white">Lembrete de manutenção</h3>
+          <p className="text-gray-400 text-sm mt-0.5">Avisa da próxima visita por WhatsApp. Resumo do dono escrito por IA.</p>
+        </div>
+        <label className="flex items-center gap-2 text-sm text-gray-200">
+          <input type="checkbox" checked={!!cfg.ativo} onChange={(e) => upd("ativo", e.target.checked)} /> Ativo
+        </label>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+        {numField("Intervalo PJ (dias)", "intervalo_pj_dias")}
+        {numField("Intervalo PF (dias)", "intervalo_pf_dias")}
+        {numField("Avisar antes (dias)", "antecedencia_dias")}
+        {numField("Agendadas: janela (dias)", "lookahead_dias")}
+        <label className="block">
+          <span className="text-xs text-gray-300">Resumo do dono (hora)</span>
+          <input type="time" value={cfg.resumo_hora || "07:00"} onChange={(e) => upd("resumo_hora", e.target.value)}
+            className="mt-1 w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-sm" />
+        </label>
+        <label className="block">
+          <span className="text-xs text-gray-300">Telefone do dono</span>
+          <input type="text" value={cfg.dono_telefone || ""} onChange={(e) => upd("dono_telefone", e.target.value)}
+            placeholder="5593991106818" className="mt-1 w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-sm" />
+        </label>
+      </div>
+
+      <div className="flex flex-wrap gap-4 text-sm text-gray-200">
+        <label className="flex items-center gap-2"><input type="checkbox" checked={(cfg.canais||[]).includes("whatsapp")} onChange={() => toggleCanal("whatsapp")} /> WhatsApp</label>
+        <span className="text-gray-600">|</span>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={!!cfg.para_cliente} onChange={(e) => upd("para_cliente", e.target.checked)} /> Cliente</label>
+        <label className="flex items-center gap-2"><input type="checkbox" checked={!!cfg.para_dono} onChange={(e) => upd("para_dono", e.target.checked)} /> Dono</label>
+      </div>
+
+      <label className="block">
+        <span className="text-xs text-gray-300">Mensagem pro cliente (vars: {"{cliente} {empresa} {ultima_visita} {proxima_visita} {equipamento} {endereco}"})</span>
+        <textarea rows={3} value={cfg.template_cliente || ""} onChange={(e) => upd("template_cliente", e.target.value)}
+          className="mt-1 w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-sm" />
+      </label>
+
+      <div className="flex justify-end">
+        <button onClick={salvar} disabled={saving} className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-semibold disabled:opacity-50">
+          {saving ? "Salvando…" : "Salvar"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Painel de auditoria da empresa — lista mutações scoped por companyId via DB.list("erp:audit:")
 function CompanyAuditPanel() {
   const [entries, setEntries] = useState([]);
@@ -13308,6 +13407,7 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
 
       {/* Backup automático semanal — admin acompanha snapshots gerados */}
       {user.role === "admin" && <AutoBackupPanel addToast={addToast} />}
+      {(user.role === "admin" || user.role === "gerente") && <LembreteConfigPanel addToast={addToast} />}
 
       {/* System Info */}
       <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
