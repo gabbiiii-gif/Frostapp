@@ -984,6 +984,32 @@ export async function saveLembreteConfig(companyId, cfg) {
   return { ok: true };
 }
 
+// Histórico de lembretes enviados (tabela lembrete_enviado, RLS admin/gerente).
+export async function getLembreteEnviados(companyId, limit = 200) {
+  if (!supabase || !companyId) return [];
+  const { data, error } = await supabase.from("lembrete_enviado")
+    .select("*").eq("company_id", companyId).order("enviado_em", { ascending: false }).limit(limit);
+  if (error) { console.warn("getLembreteEnviados:", error.message); return []; }
+  return data || [];
+}
+
+// Dispara o resumo do dono na hora (edge function autenticada lembrete-teste).
+export async function sendLembreteResumoDono() {
+  if (!supabase) return { ok: false, error: "no_supabase" };
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return { ok: false, error: "Sessão expirada." };
+    const resp = await fetch(`${supabaseUrl}/functions/v1/lembrete-teste`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: supabaseKey, Authorization: `Bearer ${session.access_token}` },
+      body: JSON.stringify({}),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok || !body.ok) return { ok: false, error: body.error || `HTTP ${resp.status}` };
+    return { ok: true, sent_to: body.sent_to };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
 // ─── Master users: sync via RPCs SECURITY DEFINER ───────────────────────────
 // Acesso direto a master_users foi bloqueado para anon (RLS lockdown Phase 1).
 // Toda interacao passa por RPCs com superficie reduzida:

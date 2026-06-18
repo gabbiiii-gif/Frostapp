@@ -42,7 +42,7 @@ export const STATUS_MAP = {
 //   de solicitação. Não tem acesso a nenhum outro módulo do ERP.
 export const ROLE_PERMISSIONS = {
   admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha", "pos-venda", "ponto", "escola"],
+  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha", "pos-venda", "ponto", "escola", "lembrete"],
   tecnico: ["dashboard", "os", "agenda", "ponto"],
   atendente: ["dashboard", "clientes", "os", "agenda", "ia", "pos-venda", "ponto"],
   // Role exclusiva do portal da Vanda. Único módulo: "escola-portal".

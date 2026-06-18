@@ -102,6 +102,7 @@ import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
 import { FrostIcon } from "./FrostIcons.jsx";
 import AnimatedLogo from "./AnimatedLogo.jsx";
 import PosVendaModule from "./modules/PosVendaModule.jsx";
+import LembreteModule from "./modules/LembreteModule.jsx";
 // ─── Módulos verticais novos (2026-06) ───
 // Ponto Eletrônico: registro de jornada via biometria/facial/PIN + banco de
 // horas + ocorrências/justificativas.
@@ -1359,6 +1360,7 @@ const ALL_MODULES = [
   // Novos módulos verticais
   { id: "ponto", label: "Ponto Eletrônico" },
   { id: "escola", label: "Escola (Vanda)" },
+  { id: "lembrete", label: "Lembrete" },
   { id: "config", label: "Configurações (admin)" },
 ];
 
@@ -1374,6 +1376,7 @@ const TOGGLEABLE_MODULES = [
   { id: "folha", label: "Folha de Pagamento" },
   { id: "ponto", label: "Ponto Eletrônico" },
   { id: "escola", label: "Escola (Vanda)" },
+  { id: "lembrete", label: "Lembrete" },
 ];
 
 // hasPermission respeita customPermissions quando o array está definido (mesmo vazio,
@@ -13407,7 +13410,6 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
 
       {/* Backup automático semanal — admin acompanha snapshots gerados */}
       {user.role === "admin" && <AutoBackupPanel addToast={addToast} />}
-      {(user.role === "admin" || user.role === "gerente") && <LembreteConfigPanel addToast={addToast} />}
 
       {/* System Info */}
       <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
@@ -16285,6 +16287,7 @@ export default function App() {
       { id: "cadastro", label: "Cadastros", iconName: "cadastros", module: "clientes" },
       { id: "ia", label: "IA / Atendimento", iconName: "agenda", module: "ia" },
       { id: "pos-venda", label: "Pós-Venda", iconName: "agenda", module: "pos-venda" },
+      { id: "lembrete", label: "Lembrete", iconName: "agenda", module: "lembrete" },
       { id: "folha", label: "Folha de Pagamento", iconName: "financeiro", module: "folha" },
       // Ponto: acessível por todos os roles internos (cada um vê o que lhe cabe
       // no próprio PontoModule). Escola: apenas admin/gerente no painel interno;
@@ -16929,6 +16932,9 @@ export default function App() {
             )}
             {activeModule === "pos-venda" && (
               <PosVendaModule supabase={supabase} />
+            )}
+            {activeModule === "lembrete" && (
+              <LembreteModule db={DB} addToast={addToast} companyId={getActiveCompanyId()} />
             )}
             {activeModule === "folha" && (
               <FolhaModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} />
