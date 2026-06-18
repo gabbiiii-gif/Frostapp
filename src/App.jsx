@@ -9428,9 +9428,28 @@ function CadastroModule({ user, addToast, reloadData }) {
       DB.set("erp:employee:" + updated.id, updated);
       addToast("Funcionário atualizado com sucesso.", "success");
     } else {
-      const newEmp = { ...data, id: genId(), createdAt: new Date().toISOString() };
-      DB.set("erp:employee:" + newEmp.id, newEmp);
-      addToast("Funcionário cadastrado com sucesso.", "success");
+      // Dedupe: evita duplicar a mesma pessoa em re-cadastro ou em double-tap no
+      // botão Salvar (que gravava 2 registros em ~300ms, sem trava). Procura por
+      // CPF (quando informado) ou por email+nome; se já existe, ATUALIZA em vez
+      // de criar outro id. Torna o salvar idempotente.
+      const soDigitos = (s) => String(s || "").replace(/\D/g, "");
+      const cpfNovo = soDigitos(data.cpf);
+      const emailNovo = data.email.trim().toLowerCase();
+      const nomeNovo = data.nome.trim().toLowerCase();
+      const existente = DB.list("erp:employee:").find((e) =>
+        (cpfNovo && soDigitos(e.cpf) === cpfNovo) ||
+        (emailNovo &&
+          (e.email || "").trim().toLowerCase() === emailNovo &&
+          (e.nome || "").trim().toLowerCase() === nomeNovo)
+      );
+      if (existente) {
+        DB.set("erp:employee:" + existente.id, { ...existente, ...data, updatedAt: new Date().toISOString() });
+        addToast("Funcionário já estava cadastrado — dados atualizados.", "success");
+      } else {
+        const newEmp = { ...data, id: genId(), createdAt: new Date().toISOString() };
+        DB.set("erp:employee:" + newEmp.id, newEmp);
+        addToast("Funcionário cadastrado com sucesso.", "success");
+      }
     }
     setModalOpen(false);
     loadEmployees();
