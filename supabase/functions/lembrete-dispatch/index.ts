@@ -149,9 +149,12 @@ Deno.serve(async (req) => {
     }
 
     if (cfg.para_dono && cfg.dono_telefone) {
+      // Compara em horário de Brasília (não UTC). brNow tem os campos locais = Brasília.
+      const brNow = new Date(agora.toLocaleString("en-US", { timeZone: TZ }));
+      const nowMin = brNow.getHours() * 60 + brNow.getMinutes();
       const [hh, mm] = String(cfg.resumo_hora || "07:00").split(":").map(Number);
-      const alvo = new Date(`${hojeStr}T00:00:00`); alvo.setHours(hh, mm, 0, 0);
-      const dentroJanela = agora >= alvo && agora.getTime() - alvo.getTime() < JANELA_MIN * 60000;
+      const alvoMin = hh * 60 + mm;
+      const dentroJanela = nowMin >= alvoMin && nowMin - alvoMin < JANELA_MIN;
       if (dentroJanela) {
         if (await marcar("resumo_dono", null, hojeStr, "dono", "whatsapp")) {
           try {
