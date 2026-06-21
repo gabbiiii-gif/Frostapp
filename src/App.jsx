@@ -4778,10 +4778,10 @@ function MasterAuditLog() {
 // Dashboard completo — OS, Agenda, Cadastros e Financeiro (receita realizada do mês)
 // ─── DASHBOARD HELPERS (glass / animacoes) ─────────────────────────────────
 
-// Classe-base dos cards "glass" (vidro fosco) usada em todo o dashboard.
-const GLASS = "rounded-2xl border border-white/10 bg-white/[0.035] backdrop-blur-xl shadow-xl shadow-black/30";
+// Classe-base dos cards "glass". A cor real e resolvida por tema no index.css
+// (em light vira tom slate suave; em dark fica vidro fosco sobre fundo escuro).
+const GLASS = "dash-card rounded-2xl border border-white/10 bg-white/[0.035] backdrop-blur-xl shadow-xl shadow-black/30";
 
-// Numero animado com GSAP (count-up suave ao montar/atualizar).
 function CountUp({ value, format, className }) {
   const ref = useRef(null);
   const prev = useRef(0);
@@ -4803,7 +4803,6 @@ function CountUp({ value, format, className }) {
   return <span ref={ref} className={className}>{format ? format(0) : "0"}</span>;
 }
 
-// Anel de progresso (SVG) — usado na "Taxa de conclusao" e afins.
 function Ring({ percent, size = 132, stroke = 12, color = "#06b6d4", children }) {
   const p = Math.max(0, Math.min(100, Number(percent) || 0));
   const r = (size - stroke) / 2;
@@ -4812,7 +4811,7 @@ function Ring({ percent, size = 132, stroke = 12, color = "#06b6d4", children })
   return (
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={stroke} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(120,140,170,0.18)" strokeWidth={stroke} />
         <circle
           cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
           strokeLinecap="round" strokeDasharray={c} strokeDashoffset={off}
@@ -4824,7 +4823,6 @@ function Ring({ percent, size = 132, stroke = 12, color = "#06b6d4", children })
   );
 }
 
-// Wrapper de entrada animada (motion) com stagger por indice.
 function Reveal({ i = 0, className = "", children, onClick }) {
   return (
     <motion.div
@@ -4847,6 +4845,8 @@ function Dashboard({ user, dateFilter, onNavigate }) {
     schedule: [],
     clients: [],
     transactions: [],
+    stocks: [],
+    products: [],
   });
 
   const loadData = useCallback(() => {
@@ -4855,19 +4855,20 @@ function Dashboard({ user, dateFilter, onNavigate }) {
       schedule: DB.list("erp:schedule:"),
       clients: DB.list("erp:client:"),
       transactions: DB.list("erp:finance:"),
+      stocks: DB.list("erp:stock:"),
+      products: DB.list("erp:product:"),
     });
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const { serviceOrders, schedule, clients, transactions } = data;
+  const { serviceOrders, schedule, clients, transactions, stocks, products } = data;
 
   const now = useMemo(() => new Date(), []);
   const todayStr = toISODate(now);
   const mesAtual = now.getMonth();
   const anoAtual = now.getFullYear();
 
-  // Receita "realizada" do mes — apenas transacoes pagas.
   const receitaRealizadaMes = useMemo(() => {
     return transactions
       .filter((t) => {
@@ -4878,7 +4879,6 @@ function Dashboard({ user, dateFilter, onNavigate }) {
       .reduce((acc, t) => acc + (Number(t.valor) || 0), 0);
   }, [transactions, mesAtual, anoAtual]);
 
-  // Despesas pagas do mes + saldo (novos KPIs financeiros).
   const despesasMes = useMemo(() => {
     return transactions
       .filter((t) => {
@@ -4891,15 +4891,8 @@ function Dashboard({ user, dateFilter, onNavigate }) {
 
   const saldoMes = receitaRealizadaMes - despesasMes;
 
-  // KPIs de OS e Agenda.
-  const osEmAndamento = useMemo(
-    () => serviceOrders.filter((os) => os.status === "em_andamento").length,
-    [serviceOrders]
-  );
-  const osPendentes = useMemo(
-    () => serviceOrders.filter((os) => os.status === "pendente").length,
-    [serviceOrders]
-  );
+  const osEmAndamento = useMemo(() => serviceOrders.filter((os) => os.status === "em_andamento").length, [serviceOrders]);
+  const osPendentes = useMemo(() => serviceOrders.filter((os) => os.status === "pendente").length, [serviceOrders]);
   const osConcluidasMes = useMemo(() => {
     return serviceOrders.filter((os) => {
       if (os.status !== "concluido" || !os.dataConclusao) return false;
@@ -4917,18 +4910,13 @@ function Dashboard({ user, dateFilter, onNavigate }) {
     return schedHoje + osHoje;
   }, [schedule, serviceOrders, todayStr]);
 
-  const clientesAtivos = useMemo(
-    () => clients.filter((c) => c.status !== "inativo").length,
-    [clients]
-  );
+  const clientesAtivos = useMemo(() => clients.filter((c) => c.status !== "inativo").length, [clients]);
 
-  // Taxa de conclusao: concluidas / (ativas + concluidas) — anel central.
   const taxaConclusao = useMemo(() => {
     const base = osEmAndamento + osPendentes + osConcluidasMes;
     return base > 0 ? Math.round((osConcluidasMes / base) * 100) : 0;
   }, [osEmAndamento, osPendentes, osConcluidasMes]);
 
-  // Distribuicao de OS por status — donut.
   const osPorStatus = useMemo(() => {
     const defs = [
       { key: "em_andamento", label: "Em andamento", color: "#06b6d4" },
@@ -4943,7 +4931,6 @@ function Dashboard({ user, dateFilter, onNavigate }) {
   }, [serviceOrders]);
   const totalOs = serviceOrders.length;
 
-  // Receita semanal (8 semanas) — area sparkline do card hero.
   const receitaSemanal = useMemo(() => {
     const weeks = [];
     for (let i = 7; i >= 0; i--) {
@@ -4960,7 +4947,6 @@ function Dashboard({ user, dateFilter, onNavigate }) {
     return weeks;
   }, [transactions, now]);
 
-  // OS concluidas por semana — barras.
   const osSemanais = useMemo(() => {
     const weeks = [];
     for (let i = 7; i >= 0; i--) {
@@ -4975,7 +4961,38 @@ function Dashboard({ user, dateFilter, onNavigate }) {
     return weeks;
   }, [serviceOrders, now]);
 
-  // Proximas atividades (schedule + OS) ordenadas por data.
+  // Top tecnicos por OS concluidas (todos os tempos), top 5.
+  const topTecnicos = useMemo(() => {
+    const map = {};
+    serviceOrders.forEach((os) => {
+      if (os.status !== "concluido") return;
+      const nome = (os.tecnicoNome || "").trim();
+      if (!nome) return;
+      map[nome] = (map[nome] || 0) + 1;
+    });
+    const arr = Object.entries(map).map(([nome, total]) => ({ nome, total }))
+      .sort((a, b) => b.total - a.total).slice(0, 5);
+    const max = arr.length ? arr[0].total : 1;
+    return arr.map((t) => ({ ...t, pct: Math.round((t.total / max) * 100) }));
+  }, [serviceOrders]);
+
+  // Estoque baixo: saldo <= estoqueMinimo (com minimo > 0).
+  const estoqueBaixo = useMemo(() => {
+    const nomeById = {};
+    products.forEach((p) => { nomeById[p.id] = p.nome; });
+    return stocks
+      .filter((s) => Number(s.estoqueMinimo) > 0 && Number(s.saldo) <= Number(s.estoqueMinimo))
+      .map((s) => ({
+        id: s.id,
+        nome: nomeById[s.produtoId] || "Produto",
+        saldo: Number(s.saldo) || 0,
+        minimo: Number(s.estoqueMinimo) || 0,
+        zerado: (Number(s.saldo) || 0) <= 0,
+      }))
+      .sort((a, b) => a.saldo - b.saldo)
+      .slice(0, 6);
+  }, [stocks, products]);
+
   const proximasAtividades = useMemo(() => {
     const schedItems = schedule
       .filter((s) => new Date(s.data) >= now && s.status !== "cancelado" && s.status !== "concluido")
@@ -4990,7 +5007,6 @@ function Dashboard({ user, dateFilter, onNavigate }) {
     return [...schedItems, ...osItems].sort((a, b) => new Date(a.data) - new Date(b.data)).slice(0, 6);
   }, [schedule, serviceOrders, now]);
 
-  // OS paradas ha 2+ dias.
   const osAtencao = useMemo(() => {
     const lim = new Date(now); lim.setDate(lim.getDate() - 2);
     return serviceOrders
@@ -5005,52 +5021,48 @@ function Dashboard({ user, dateFilter, onNavigate }) {
   const dataStr = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
 
   const stats = [
-    { label: "OS em Andamento", value: osEmAndamento, icon: "🔧", grad: "from-cyan-500/25 to-cyan-500/0", ring: "text-cyan-300", to: "processos" },
-    { label: "OS Pendentes", value: osPendentes, icon: "⏳", grad: "from-amber-500/25 to-amber-500/0", ring: "text-amber-300", to: "processos" },
-    { label: "Agendamentos Hoje", value: agendamentosHoje, icon: "📅", grad: "from-blue-500/25 to-blue-500/0", ring: "text-blue-300", to: "agenda" },
-    { label: "Clientes Ativos", value: clientesAtivos, icon: "👥", grad: "from-violet-500/25 to-violet-500/0", ring: "text-violet-300", to: "cadastro" },
-    { label: "Concluídas no Mês", value: osConcluidasMes, icon: "✅", grad: "from-emerald-500/25 to-emerald-500/0", ring: "text-emerald-300", to: "processos" },
+    { label: "OS em Andamento", value: osEmAndamento, icon: "🔧", grad: "from-cyan-500/25 to-cyan-500/0", to: "processos" },
+    { label: "OS Pendentes", value: osPendentes, icon: "⏳", grad: "from-amber-500/25 to-amber-500/0", to: "processos" },
+    { label: "Agendamentos Hoje", value: agendamentosHoje, icon: "📅", grad: "from-blue-500/25 to-blue-500/0", to: "agenda" },
+    { label: "Clientes Ativos", value: clientesAtivos, icon: "👥", grad: "from-violet-500/25 to-violet-500/0", to: "cadastro" },
+    { label: "Concluídas no Mês", value: osConcluidasMes, icon: "✅", grad: "from-emerald-500/25 to-emerald-500/0", to: "processos" },
   ];
 
   return (
     <div className="relative space-y-5">
-      {/* glow atmosferico de fundo (leve, sem WebGL) */}
-      <div aria-hidden className="pointer-events-none absolute -top-24 -right-10 h-72 w-72 rounded-full bg-cyan-500/15 blur-[100px]" />
-      <div aria-hidden className="pointer-events-none absolute top-40 -left-16 h-72 w-72 rounded-full bg-violet-500/15 blur-[110px]" />
+      <div aria-hidden className="dash-glow pointer-events-none absolute -top-24 -right-10 h-72 w-72 rounded-full bg-cyan-500/15 blur-[100px]" />
+      <div aria-hidden className="dash-glow pointer-events-none absolute top-40 -left-16 h-72 w-72 rounded-full bg-violet-500/15 blur-[110px]" />
 
-      {/* HERO: saudacao + sparkline | resumo financeiro */}
+      {/* HERO: saudacao + aurora 3D + sparkline | resumo financeiro */}
       <div className="relative grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <Reveal i={0} className={`lg:col-span-2 ${GLASS} p-6 overflow-hidden`}>
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-gray-400 text-sm">{saudacao},</p>
-              <BlurText
-                text={primeiroNome || "Bem-vindo"}
-                className="text-3xl sm:text-4xl font-bold text-white mt-0.5"
-                delay={60}
-              />
-              <p className="text-gray-400 text-sm mt-2 capitalize">{dataStr} · {horaStr}</p>
-            </div>
-            <span className="text-xs text-gray-300 bg-white/5 border border-white/10 rounded-full px-3 py-1 whitespace-nowrap">
-              {totalOs} OS no total
-            </span>
+        <Reveal i={0} className={`relative lg:col-span-2 ${GLASS} p-6 overflow-hidden`}>
+          {/* Fundo 3D real (WebGL via OGL) — sutil */}
+          <div className="dash-aurora pointer-events-none absolute inset-0 opacity-25">
+            <Aurora colorStops={["#0ea5e9", "#3b82f6", "#22d3ee"]} amplitude={0.7} blend={0.4} speed={0.5} />
           </div>
-          <div className="mt-4 -mx-2 h-[120px]">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120} debounce={50}>
-              <AreaChart data={receitaSemanal} margin={{ top: 6, right: 8, left: 8, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="recArea" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.5} />
-                    <stop offset="100%" stopColor="#06b6d4" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <Tooltip
-                  contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }}
-                  formatter={(v) => [formatCurrency(v), "Receita"]}
-                />
-                <Area type="monotone" dataKey="valor" stroke="#22d3ee" strokeWidth={2} fill="url(#recArea)" />
-              </AreaChart>
-            </ResponsiveContainer>
+          <div className="relative z-10">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-gray-400 text-sm">{saudacao},</p>
+                <BlurText text={primeiroNome || "Bem-vindo"} className="text-3xl sm:text-4xl font-bold text-white mt-0.5" delay={60} />
+                <p className="text-gray-400 text-sm mt-2 capitalize">{dataStr} · {horaStr}</p>
+              </div>
+              <span className="text-xs text-gray-300 bg-white/5 border border-white/10 rounded-full px-3 py-1 whitespace-nowrap">{totalOs} OS no total</span>
+            </div>
+            <div className="mt-4 -mx-2 h-[120px]">
+              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120} debounce={50}>
+                <AreaChart data={receitaSemanal} margin={{ top: 6, right: 8, left: 8, bottom: 0 }}>
+                  <defs>
+                    <linearGradient id="recArea" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.5} />
+                      <stop offset="100%" stopColor="#06b6d4" stopOpacity={0} />
+                    </linearGradient>
+                  </defs>
+                  <Tooltip contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }} formatter={(v) => [formatCurrency(v), "Receita"]} />
+                  <Area type="monotone" dataKey="valor" stroke="#22d3ee" strokeWidth={2} fill="url(#recArea)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
           </div>
         </Reveal>
 
@@ -5082,14 +5094,9 @@ function Dashboard({ user, dateFilter, onNavigate }) {
       <div className="relative grid grid-cols-2 lg:grid-cols-5 gap-4">
         {stats.map((s, i) => (
           <Reveal key={s.label} i={i}>
-            <button
-              onClick={() => onNavigate(s.to)}
-              className={`group w-full text-left ${GLASS} p-4 hover:border-white/20 hover:bg-white/[0.06] transition`}
-            >
-              <div className={`mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-b ${s.grad} text-lg`}>
-                {s.icon}
-              </div>
-              <CountUp value={s.value} className={`block text-2xl font-bold text-white`} />
+            <button onClick={() => onNavigate(s.to)} className={`group w-full text-left ${GLASS} p-4 hover:border-white/20 hover:bg-white/[0.06] transition`}>
+              <div className={`mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-b ${s.grad} text-lg`}>{s.icon}</div>
+              <CountUp value={s.value} className="block text-2xl font-bold text-white" />
               <p className="text-gray-400 text-xs mt-0.5">{s.label}</p>
             </button>
           </Reveal>
@@ -5148,13 +5155,66 @@ function Dashboard({ user, dateFilter, onNavigate }) {
                   <stop offset="100%" stopColor="#06b6d4" />
                 </linearGradient>
               </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
-              <XAxis dataKey="name" stroke="rgba(255,255,255,0.4)" fontSize={11} tickLine={false} axisLine={false} />
-              <YAxis stroke="rgba(255,255,255,0.4)" fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} width={28} />
-              <Tooltip cursor={{ fill: "rgba(255,255,255,0.04)" }} contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }} />
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,140,170,0.12)" vertical={false} />
+              <XAxis dataKey="name" stroke="rgba(120,140,170,0.6)" fontSize={11} tickLine={false} axisLine={false} />
+              <YAxis stroke="rgba(120,140,170,0.6)" fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} width={28} />
+              <Tooltip cursor={{ fill: "rgba(120,140,170,0.08)" }} contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }} />
               <Bar dataKey="concluidas" name="Concluídas" fill="url(#barG)" radius={[6, 6, 0, 0]} maxBarSize={26} />
             </BarChart>
           </ResponsiveContainer>
+        </Reveal>
+      </div>
+
+      {/* TOP TECNICOS | ESTOQUE BAIXO */}
+      <div className="relative grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Reveal i={0} className={`${GLASS} p-5`}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-white font-semibold">Top técnicos</h3>
+            <span className="text-xs text-gray-400">OS concluídas</span>
+          </div>
+          {topTecnicos.length > 0 ? (
+            <div className="space-y-3">
+              {topTecnicos.map((t, idx) => (
+                <div key={t.nome} className="flex items-center gap-3">
+                  <span className={`h-7 w-7 shrink-0 rounded-lg flex items-center justify-center text-xs font-bold ${idx === 0 ? "bg-amber-400/20 text-amber-300" : "bg-white/10 text-gray-300"}`}>{idx + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-white text-sm font-medium truncate">{t.nome}</span>
+                      <span className="text-gray-300 text-xs shrink-0">{t.total}</span>
+                    </div>
+                    <div className="mt-1 h-1.5 rounded-full bg-white/10 overflow-hidden">
+                      <div className="h-full rounded-full bg-gradient-to-r from-blue-500 to-cyan-400" style={{ width: `${t.pct}%`, transition: "width 1s cubic-bezier(.22,1,.36,1)" }} />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-[140px] text-gray-500 text-sm">Nenhuma OS concluída ainda</div>
+          )}
+        </Reveal>
+
+        <Reveal i={1} className={`${GLASS} p-5`}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-white font-semibold">Estoque baixo</h3>
+            <button onClick={() => onNavigate("cadastro")} className="text-xs text-cyan-300 hover:text-cyan-200">gerenciar →</button>
+          </div>
+          {estoqueBaixo.length > 0 ? (
+            <div className="space-y-2">
+              {estoqueBaixo.map((p) => (
+                <button key={p.id} onClick={() => onNavigate("cadastro")} className="w-full flex items-center gap-3 p-3 rounded-xl bg-amber-500/[0.06] border border-amber-500/20 hover:bg-amber-500/10 transition text-left">
+                  <span className="text-lg">{p.zerado ? "🛑" : "📦"}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-sm font-medium truncate">{p.nome}</p>
+                    <p className="text-gray-400 text-xs mt-0.5">Saldo {p.saldo} · mínimo {p.minimo}</p>
+                  </div>
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${p.zerado ? "bg-red-500/20 text-red-300" : "bg-amber-500/20 text-amber-300"}`}>{p.zerado ? "zerado" : "baixo"}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-[140px] text-emerald-400 text-sm">✓ Estoque sob controle</div>
+          )}
         </Reveal>
       </div>
 
@@ -5165,14 +5225,8 @@ function Dashboard({ user, dateFilter, onNavigate }) {
           {proximasAtividades.length > 0 ? (
             <div className="space-y-2.5">
               {proximasAtividades.map((ativ) => (
-                <button
-                  key={ativ.id}
-                  onClick={() => onNavigate(ativ.origem === "os" ? "processos" : "agenda")}
-                  className="w-full flex items-start gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.07] transition text-left"
-                >
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${ativ.origem === "os" ? "bg-violet-500/20 text-violet-300" : "bg-cyan-500/20 text-cyan-300"}`}>
-                    {ativ.origem === "os" ? "🔧" : "📅"}
-                  </div>
+                <button key={ativ.id} onClick={() => onNavigate(ativ.origem === "os" ? "processos" : "agenda")} className="w-full flex items-start gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.07] transition text-left">
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${ativ.origem === "os" ? "bg-violet-500/20 text-violet-300" : "bg-cyan-500/20 text-cyan-300"}`}>{ativ.origem === "os" ? "🔧" : "📅"}</div>
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">{ativ.titulo}</p>
                     <p className="text-gray-400 text-xs mt-0.5">{formatDateTime(ativ.data)}</p>
@@ -5192,11 +5246,7 @@ function Dashboard({ user, dateFilter, onNavigate }) {
           {osAtencao.length > 0 ? (
             <div className="space-y-2">
               {osAtencao.map((os) => (
-                <button
-                  key={os.id}
-                  onClick={() => onNavigate("processos")}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-amber-500/[0.06] border border-amber-500/20 hover:bg-amber-500/10 transition text-left"
-                >
+                <button key={os.id} onClick={() => onNavigate("processos")} className="w-full flex items-center gap-3 p-3 rounded-xl bg-amber-500/[0.06] border border-amber-500/20 hover:bg-amber-500/10 transition text-left">
                   <span className="text-lg">⚠️</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">{os.numero} — {os.tipo} ({os.clienteNome})</p>
