@@ -2,10 +2,15 @@
 import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect, Component } from "react";
 import {
   LineChart, Line,
+  AreaChart, Area,
+  BarChart, Bar,
+  PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip,
   ResponsiveContainer
 } from "recharts";
 import { animate } from "animejs";
+import { motion } from "motion/react";
+import gsap from "gsap";
 import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
@@ -4771,6 +4776,71 @@ function MasterAuditLog() {
 // ─── DASHBOARD ──────────────────────────────────────────────────────────────────
 
 // Dashboard completo — OS, Agenda, Cadastros e Financeiro (receita realizada do mês)
+// ─── DASHBOARD HELPERS (glass / animacoes) ─────────────────────────────────
+
+// Classe-base dos cards "glass" (vidro fosco) usada em todo o dashboard.
+const GLASS = "rounded-2xl border border-white/10 bg-white/[0.035] backdrop-blur-xl shadow-xl shadow-black/30";
+
+// Numero animado com GSAP (count-up suave ao montar/atualizar).
+function CountUp({ value, format, className }) {
+  const ref = useRef(null);
+  const prev = useRef(0);
+  useEffect(() => {
+    const node = ref.current;
+    if (!node) return;
+    const obj = { v: prev.current };
+    const ctrl = gsap.to(obj, {
+      v: Number(value) || 0,
+      duration: 1.1,
+      ease: "power2.out",
+      onUpdate: () => {
+        node.textContent = format ? format(obj.v) : Math.round(obj.v).toLocaleString("pt-BR");
+      },
+    });
+    prev.current = Number(value) || 0;
+    return () => ctrl.kill();
+  }, [value, format]);
+  return <span ref={ref} className={className}>{format ? format(0) : "0"}</span>;
+}
+
+// Anel de progresso (SVG) — usado na "Taxa de conclusao" e afins.
+function Ring({ percent, size = 132, stroke = 12, color = "#06b6d4", children }) {
+  const p = Math.max(0, Math.min(100, Number(percent) || 0));
+  const r = (size - stroke) / 2;
+  const c = 2 * Math.PI * r;
+  const off = c * (1 - p / 100);
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={stroke} />
+        <circle
+          cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke}
+          strokeLinecap="round" strokeDasharray={c} strokeDashoffset={off}
+          style={{ transition: "stroke-dashoffset 1.1s cubic-bezier(.22,1,.36,1)" }}
+        />
+      </svg>
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">{children}</div>
+    </div>
+  );
+}
+
+// Wrapper de entrada animada (motion) com stagger por indice.
+function Reveal({ i = 0, className = "", children, onClick }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.45, delay: i * 0.05, ease: [0.22, 1, 0.36, 1] }}
+      className={className}
+      onClick={onClick}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+// ─── DASHBOARD ──────────────────────────────────────────────────────────────
+
 function Dashboard({ user, dateFilter, onNavigate }) {
   const [data, setData] = useState({
     serviceOrders: [],
@@ -4792,47 +4862,52 @@ function Dashboard({ user, dateFilter, onNavigate }) {
 
   const { serviceOrders, schedule, clients, transactions } = data;
 
-  // Receita "realizada" do mês — considera apenas transações com status "pago"
-  // para não inflar o dashboard com receitas ainda não efetivadas.
-  const receitaRealizadaMes = useMemo(() => {
-    const m = new Date().getMonth();
-    const y = new Date().getFullYear();
-    return transactions
-      .filter((t) => {
-        if (t.tipo !== "receita" || t.status !== "pago") return false;
-        if (!t.data) return false;
-        const d = new Date(t.data);
-        return d.getMonth() === m && d.getFullYear() === y;
-      })
-      .reduce((acc, t) => acc + (Number(t.valor) || 0), 0);
-  }, [transactions]);
-
-  // useMemo garante que 'now' não quebre o cache dos memos que dependem dele
   const now = useMemo(() => new Date(), []);
   const todayStr = toISODate(now);
+  const mesAtual = now.getMonth();
+  const anoAtual = now.getFullYear();
 
-  // KPIs centrados em OS e Agenda
+  // Receita "realizada" do mes — apenas transacoes pagas.
+  const receitaRealizadaMes = useMemo(() => {
+    return transactions
+      .filter((t) => {
+        if (t.tipo !== "receita" || t.status !== "pago" || !t.data) return false;
+        const d = new Date(t.data);
+        return d.getMonth() === mesAtual && d.getFullYear() === anoAtual;
+      })
+      .reduce((acc, t) => acc + (Number(t.valor) || 0), 0);
+  }, [transactions, mesAtual, anoAtual]);
+
+  // Despesas pagas do mes + saldo (novos KPIs financeiros).
+  const despesasMes = useMemo(() => {
+    return transactions
+      .filter((t) => {
+        if (t.tipo !== "despesa" || t.status !== "pago" || !t.data) return false;
+        const d = new Date(t.data);
+        return d.getMonth() === mesAtual && d.getFullYear() === anoAtual;
+      })
+      .reduce((acc, t) => acc + (Number(t.valor) || 0), 0);
+  }, [transactions, mesAtual, anoAtual]);
+
+  const saldoMes = receitaRealizadaMes - despesasMes;
+
+  // KPIs de OS e Agenda.
   const osEmAndamento = useMemo(
     () => serviceOrders.filter((os) => os.status === "em_andamento").length,
     [serviceOrders]
   );
-
   const osPendentes = useMemo(
     () => serviceOrders.filter((os) => os.status === "pendente").length,
     [serviceOrders]
   );
-
   const osConcluidasMes = useMemo(() => {
-    const m = now.getMonth();
-    const y = now.getFullYear();
     return serviceOrders.filter((os) => {
       if (os.status !== "concluido" || !os.dataConclusao) return false;
       const d = new Date(os.dataConclusao);
-      return d.getMonth() === m && d.getFullYear() === y;
+      return d.getMonth() === mesAtual && d.getFullYear() === anoAtual;
     }).length;
-  }, [serviceOrders, now]);
+  }, [serviceOrders, mesAtual, anoAtual]);
 
-  // Une agendamentos do módulo Agenda + OS do dia — reflete a nova visão unificada
   const agendamentosHoje = useMemo(() => {
     const schedHoje = schedule.filter((s) => s.data && s.data.startsWith(todayStr)).length;
     const osHoje = serviceOrders.filter((os) => {
@@ -4847,198 +4922,294 @@ function Dashboard({ user, dateFilter, onNavigate }) {
     [clients]
   );
 
-  // Gráfico de linha: OS concluídas por semana (últimas 8 semanas)
-  const lineChartData = useMemo(() => {
+  // Taxa de conclusao: concluidas / (ativas + concluidas) — anel central.
+  const taxaConclusao = useMemo(() => {
+    const base = osEmAndamento + osPendentes + osConcluidasMes;
+    return base > 0 ? Math.round((osConcluidasMes / base) * 100) : 0;
+  }, [osEmAndamento, osPendentes, osConcluidasMes]);
+
+  // Distribuicao de OS por status — donut.
+  const osPorStatus = useMemo(() => {
+    const defs = [
+      { key: "em_andamento", label: "Em andamento", color: "#06b6d4" },
+      { key: "pendente", label: "Pendentes", color: "#f59e0b" },
+      { key: "aguardando_finalizacao", label: "Aguard. final.", color: "#8b5cf6" },
+      { key: "concluido", label: "Concluidas", color: "#10b981" },
+      { key: "cancelado", label: "Canceladas", color: "#ef4444" },
+    ];
+    return defs
+      .map((d) => ({ ...d, value: serviceOrders.filter((o) => o.status === d.key).length }))
+      .filter((d) => d.value > 0);
+  }, [serviceOrders]);
+  const totalOs = serviceOrders.length;
+
+  // Receita semanal (8 semanas) — area sparkline do card hero.
+  const receitaSemanal = useMemo(() => {
     const weeks = [];
     for (let i = 7; i >= 0; i--) {
-      const weekStart = new Date(now);
-      weekStart.setDate(weekStart.getDate() - i * 7);
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekEnd.getDate() + 7);
+      const ws = new Date(now); ws.setDate(ws.getDate() - i * 7); ws.setHours(0, 0, 0, 0);
+      const we = new Date(ws); we.setDate(we.getDate() + 7);
+      const valor = transactions
+        .filter((t) => {
+          if (t.tipo !== "receita" || t.status !== "pago" || !t.data) return false;
+          const d = new Date(t.data); return d >= ws && d < we;
+        })
+        .reduce((a, t) => a + (Number(t.valor) || 0), 0);
+      weeks.push({ name: `S${8 - i}`, valor });
+    }
+    return weeks;
+  }, [transactions, now]);
+
+  // OS concluidas por semana — barras.
+  const osSemanais = useMemo(() => {
+    const weeks = [];
+    for (let i = 7; i >= 0; i--) {
+      const ws = new Date(now); ws.setDate(ws.getDate() - i * 7); ws.setHours(0, 0, 0, 0);
+      const we = new Date(ws); we.setDate(we.getDate() + 7);
       const count = serviceOrders.filter((os) => {
         if (os.status !== "concluido" || !os.dataConclusao) return false;
-        const d = new Date(os.dataConclusao);
-        return d >= weekStart && d < weekEnd;
+        const d = new Date(os.dataConclusao); return d >= ws && d < we;
       }).length;
       weeks.push({ name: `S${8 - i}`, concluidas: count });
     }
     return weeks;
   }, [serviceOrders, now]);
 
-  // Próximas atividades: mescla schedule + OS agendadas/pendentes, ordena por data
+  // Proximas atividades (schedule + OS) ordenadas por data.
   const proximasAtividades = useMemo(() => {
     const schedItems = schedule
       .filter((s) => new Date(s.data) >= now && s.status !== "cancelado" && s.status !== "concluido")
-      .map((s) => ({
-        id: `sched-${s.id}`,
-        titulo: s.titulo,
-        data: s.data,
-        clienteNome: s.clienteNome,
-        tecnicoNome: s.tecnicoNome,
-        status: s.status,
-        origem: "agenda",
-      }));
+      .map((s) => ({ id: `sched-${s.id}`, titulo: s.titulo, data: s.data, clienteNome: s.clienteNome, tecnicoNome: s.tecnicoNome, status: s.status, origem: "agenda" }));
     const osItems = serviceOrders
       .filter((os) => {
         const dRef = os.dataAbertura || os.dataAgendada;
-        if (!dRef) return false;
-        if (os.status === "concluido" || os.status === "cancelado") return false;
+        if (!dRef || os.status === "concluido" || os.status === "cancelado") return false;
         return new Date(dRef) >= now;
       })
-      .map((os) => ({
-        id: `os-${os.id}`,
-        titulo: `${os.numero} — ${os.tipo}`,
-        data: os.dataAbertura || os.dataAgendada,
-        clienteNome: os.clienteNome,
-        tecnicoNome: os.tecnicoNome,
-        status: os.status,
-        origem: "os",
-      }));
-    return [...schedItems, ...osItems]
-      .sort((a, b) => new Date(a.data) - new Date(b.data))
-      .slice(0, 6);
+      .map((os) => ({ id: `os-${os.id}`, titulo: `${os.numero} — ${os.tipo}`, data: os.dataAbertura || os.dataAgendada, clienteNome: os.clienteNome, tecnicoNome: os.tecnicoNome, status: os.status, origem: "os" }));
+    return [...schedItems, ...osItems].sort((a, b) => new Date(a.data) - new Date(b.data)).slice(0, 6);
   }, [schedule, serviceOrders, now]);
 
-  // Alertas: OS pendentes há muito tempo (sem movimentação)
+  // OS paradas ha 2+ dias.
   const osAtencao = useMemo(() => {
-    const doisDiasAtras = new Date(now);
-    doisDiasAtras.setDate(doisDiasAtras.getDate() - 2);
+    const lim = new Date(now); lim.setDate(lim.getDate() - 2);
     return serviceOrders
-      .filter((os) => os.status === "pendente" && new Date(os.dataAbertura) < doisDiasAtras)
+      .filter((os) => os.status === "pendente" && new Date(os.dataAbertura) < lim)
       .slice(0, 5);
   }, [serviceOrders, now]);
 
+  const primeiroNome = (user?.nome || "").split(" ")[0] || "";
+  const hora = now.getHours();
+  const saudacao = hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
+  const horaStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const dataStr = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
+
+  const stats = [
+    { label: "OS em Andamento", value: osEmAndamento, icon: "🔧", grad: "from-cyan-500/25 to-cyan-500/0", ring: "text-cyan-300", to: "processos" },
+    { label: "OS Pendentes", value: osPendentes, icon: "⏳", grad: "from-amber-500/25 to-amber-500/0", ring: "text-amber-300", to: "processos" },
+    { label: "Agendamentos Hoje", value: agendamentosHoje, icon: "📅", grad: "from-blue-500/25 to-blue-500/0", ring: "text-blue-300", to: "agenda" },
+    { label: "Clientes Ativos", value: clientesAtivos, icon: "👥", grad: "from-violet-500/25 to-violet-500/0", ring: "text-violet-300", to: "cadastro" },
+    { label: "Concluídas no Mês", value: osConcluidasMes, icon: "✅", grad: "from-emerald-500/25 to-emerald-500/0", ring: "text-emerald-300", to: "processos" },
+  ];
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h2 className="text-2xl font-bold text-white">Dashboard</h2>
-          <p className="text-gray-400 text-sm mt-1">Bem-vindo, {user.nome.split(" ")[0]}!</p>
-        </div>
-      </div>
+    <div className="relative space-y-5">
+      {/* glow atmosferico de fundo (leve, sem WebGL) */}
+      <div aria-hidden className="pointer-events-none absolute -top-24 -right-10 h-72 w-72 rounded-full bg-cyan-500/15 blur-[100px]" />
+      <div aria-hidden className="pointer-events-none absolute top-40 -left-16 h-72 w-72 rounded-full bg-violet-500/15 blur-[110px]" />
 
-      {/* KPI Cards — OS, Agenda, Cadastros e Financeiro */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-        <KPICard
-          title="OS em Andamento"
-          value={osEmAndamento}
-          icon="🔧"
-          onClick={() => onNavigate("processos")}
-        />
-        <KPICard
-          title="OS Pendentes"
-          value={osPendentes}
-          icon="⏳"
-          onClick={() => onNavigate("processos")}
-        />
-        <KPICard
-          title="Agendamentos Hoje"
-          value={agendamentosHoje}
-          icon="📅"
-          onClick={() => onNavigate("agenda")}
-        />
-        <KPICard
-          title="Clientes Ativos"
-          value={clientesAtivos}
-          icon="👥"
-          onClick={() => onNavigate("cadastro")}
-        />
-        <KPICard
-          title="Receita do Mês"
-          value={formatCurrency(receitaRealizadaMes)}
-          icon="💰"
-          onClick={() => onNavigate("financeiro")}
-        />
-      </div>
-
-      {/* Gráfico + Próximas Atividades */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-white font-semibold">OS Concluídas por Semana</h3>
-            <span className="text-xs text-gray-400">{osConcluidasMes} este mês</span>
-          </div>
-          {/* minWidth/minHeight + debounce evitam o warning de tamanho -1 quando o
-              ModuleSwitcher renderiza o gráfico durante o crossfade (container ainda 0px). */}
-          <ResponsiveContainer width="100%" height={280} minWidth={0} minHeight={280} debounce={50}>
-            <LineChart data={lineChartData}>
-              {/* Stroke do grid lê variável do tema — visível em dark e light */}
-              <CartesianGrid strokeDasharray="3 3" stroke="var(--color-border-default)" />
-              <XAxis dataKey="name" stroke="var(--color-text-muted)" fontSize={12} />
-              <YAxis stroke="var(--color-text-muted)" fontSize={12} allowDecimals={false} />
-              <Tooltip
-                contentStyle={{ backgroundColor: "#1f2937", border: "1px solid #374151", borderRadius: "8px", color: "#fff" }}
+      {/* HERO: saudacao + sparkline | resumo financeiro */}
+      <div className="relative grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <Reveal i={0} className={`lg:col-span-2 ${GLASS} p-6 overflow-hidden`}>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-gray-400 text-sm">{saudacao},</p>
+              <BlurText
+                text={primeiroNome || "Bem-vindo"}
+                className="text-3xl sm:text-4xl font-bold text-white mt-0.5"
+                delay={60}
               />
-              <Line type="monotone" dataKey="concluidas" name="Concluídas" stroke="#06b6d4" strokeWidth={2} dot={{ fill: "#06b6d4", r: 4 }} />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
+              <p className="text-gray-400 text-sm mt-2 capitalize">{dataStr} · {horaStr}</p>
+            </div>
+            <span className="text-xs text-gray-300 bg-white/5 border border-white/10 rounded-full px-3 py-1 whitespace-nowrap">
+              {totalOs} OS no total
+            </span>
+          </div>
+          <div className="mt-4 -mx-2 h-[120px]">
+            <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120} debounce={50}>
+              <AreaChart data={receitaSemanal} margin={{ top: 6, right: 8, left: 8, bottom: 0 }}>
+                <defs>
+                  <linearGradient id="recArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.5} />
+                    <stop offset="100%" stopColor="#06b6d4" stopOpacity={0} />
+                  </linearGradient>
+                </defs>
+                <Tooltip
+                  contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }}
+                  formatter={(v) => [formatCurrency(v), "Receita"]}
+                />
+                <Area type="monotone" dataKey="valor" stroke="#22d3ee" strokeWidth={2} fill="url(#recArea)" />
+              </AreaChart>
+            </ResponsiveContainer>
+          </div>
+        </Reveal>
 
-        <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-          <h3 className="text-white font-semibold mb-4">Próximas Atividades</h3>
+        <Reveal i={1} className={`${GLASS} p-6 flex flex-col justify-between`}>
+          <div className="flex items-center justify-between">
+            <p className="text-gray-300 text-sm font-medium">Resumo do mês</p>
+            <button onClick={() => onNavigate("financeiro")} className="text-xs text-cyan-300 hover:text-cyan-200">ver tudo →</button>
+          </div>
+          <div className="mt-3">
+            <p className="text-gray-400 text-xs">Receita realizada</p>
+            <CountUp value={receitaRealizadaMes} format={formatCurrency} className="text-3xl font-bold text-white" />
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+            <div className="rounded-xl bg-white/5 border border-white/10 p-3">
+              <p className="text-gray-400 text-xs">Despesas</p>
+              <CountUp value={despesasMes} format={formatCurrency} className="text-rose-300 font-semibold" />
+            </div>
+            <div className="rounded-xl bg-white/5 border border-white/10 p-3">
+              <p className="text-gray-400 text-xs">Saldo</p>
+              <span className={`font-semibold ${saldoMes >= 0 ? "text-emerald-300" : "text-rose-300"}`}>
+                {saldoMes >= 0 ? "▲ " : "▼ "}<CountUp value={Math.abs(saldoMes)} format={formatCurrency} />
+              </span>
+            </div>
+          </div>
+        </Reveal>
+      </div>
+
+      {/* STAT TILES */}
+      <div className="relative grid grid-cols-2 lg:grid-cols-5 gap-4">
+        {stats.map((s, i) => (
+          <Reveal key={s.label} i={i}>
+            <button
+              onClick={() => onNavigate(s.to)}
+              className={`group w-full text-left ${GLASS} p-4 hover:border-white/20 hover:bg-white/[0.06] transition`}
+            >
+              <div className={`mb-3 inline-flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-b ${s.grad} text-lg`}>
+                {s.icon}
+              </div>
+              <CountUp value={s.value} className={`block text-2xl font-bold text-white`} />
+              <p className="text-gray-400 text-xs mt-0.5">{s.label}</p>
+            </button>
+          </Reveal>
+        ))}
+      </div>
+
+      {/* CHARTS: anel | donut | barras */}
+      <div className="relative grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <Reveal i={0} className={`${GLASS} p-6 flex flex-col items-center justify-center`}>
+          <h3 className="text-white font-semibold self-start mb-4">Taxa de conclusão</h3>
+          <Ring percent={taxaConclusao} color="#22d3ee">
+            <CountUp value={taxaConclusao} format={(v) => `${Math.round(v)}%`} className="text-3xl font-bold text-white" />
+            <span className="text-[11px] text-gray-400 mt-1">{osConcluidasMes} concluídas</span>
+          </Ring>
+        </Reveal>
+
+        <Reveal i={1} className={`${GLASS} p-6`}>
+          <h3 className="text-white font-semibold mb-2">OS por status</h3>
+          {osPorStatus.length > 0 ? (
+            <div className="flex items-center gap-2">
+              <div className="h-[170px] w-[170px] shrink-0">
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={170} debounce={50}>
+                  <PieChart>
+                    <Pie data={osPorStatus} dataKey="value" nameKey="label" cx="50%" cy="50%" innerRadius={48} outerRadius={78} paddingAngle={3} stroke="none">
+                      {osPorStatus.map((e) => <Cell key={e.key} fill={e.color} />)}
+                    </Pie>
+                    <Tooltip contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex-1 space-y-1.5">
+                {osPorStatus.map((e) => (
+                  <div key={e.key} className="flex items-center gap-2 text-xs">
+                    <span className="h-2.5 w-2.5 rounded-full" style={{ background: e.color }} />
+                    <span className="text-gray-300 flex-1 truncate">{e.label}</span>
+                    <span className="text-white font-semibold">{e.value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-[170px] text-gray-500 text-sm">Sem OS cadastradas</div>
+          )}
+        </Reveal>
+
+        <Reveal i={2} className={`${GLASS} p-6`}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-white font-semibold">Concluídas por semana</h3>
+            <span className="text-xs text-gray-400">8 sem</span>
+          </div>
+          <ResponsiveContainer width="100%" height={180} minWidth={0} minHeight={180} debounce={50}>
+            <BarChart data={osSemanais} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+              <defs>
+                <linearGradient id="barG" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="#3b82f6" />
+                  <stop offset="100%" stopColor="#06b6d4" />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.06)" vertical={false} />
+              <XAxis dataKey="name" stroke="rgba(255,255,255,0.4)" fontSize={11} tickLine={false} axisLine={false} />
+              <YAxis stroke="rgba(255,255,255,0.4)" fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} width={28} />
+              <Tooltip cursor={{ fill: "rgba(255,255,255,0.04)" }} contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }} />
+              <Bar dataKey="concluidas" name="Concluídas" fill="url(#barG)" radius={[6, 6, 0, 0]} maxBarSize={26} />
+            </BarChart>
+          </ResponsiveContainer>
+        </Reveal>
+      </div>
+
+      {/* LISTAS: proximas atividades | OS atencao */}
+      <div className="relative grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <Reveal i={0} className={`${GLASS} p-5`}>
+          <h3 className="text-white font-semibold mb-4">Próximas atividades</h3>
           {proximasAtividades.length > 0 ? (
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {proximasAtividades.map((ativ) => (
                 <button
                   key={ativ.id}
                   onClick={() => onNavigate(ativ.origem === "os" ? "processos" : "agenda")}
-                  className="w-full flex items-start gap-3 p-3 rounded-lg bg-gray-700/30 hover:bg-gray-700/50 transition text-left"
+                  className="w-full flex items-start gap-3 p-3 rounded-xl bg-white/[0.03] border border-white/5 hover:bg-white/[0.07] transition text-left"
                 >
-                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${
-                    ativ.origem === "os"
-                      ? "bg-purple-500/20 text-purple-400"
-                      : "bg-cyan-500/20 text-cyan-400"
-                  }`}>
+                  <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm flex-shrink-0 ${ativ.origem === "os" ? "bg-violet-500/20 text-violet-300" : "bg-cyan-500/20 text-cyan-300"}`}>
                     {ativ.origem === "os" ? "🔧" : "📅"}
                   </div>
                   <div className="flex-1 min-w-0">
                     <p className="text-white text-sm font-medium truncate">{ativ.titulo}</p>
                     <p className="text-gray-400 text-xs mt-0.5">{formatDateTime(ativ.data)}</p>
-                    <p className="text-gray-500 text-xs truncate">
-                      {ativ.tecnicoNome || "—"} • {ativ.clienteNome || "—"}
-                    </p>
+                    <p className="text-gray-500 text-xs truncate">{ativ.tecnicoNome || "—"} • {ativ.clienteNome || "—"}</p>
                   </div>
                   <StatusBadge status={ativ.status} />
                 </button>
               ))}
             </div>
           ) : (
-            <div className="flex items-center justify-center h-[200px] text-gray-500 text-sm">
-              Nenhuma atividade agendada
-            </div>
+            <div className="flex items-center justify-center h-[200px] text-gray-500 text-sm">Nenhuma atividade agendada</div>
           )}
-        </div>
-      </div>
+        </Reveal>
 
-      {/* OS que precisam de atenção */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-5">
-        <h3 className="text-white font-semibold mb-4">OS que precisam de atenção</h3>
-        {osAtencao.length > 0 ? (
-          <div className="space-y-2">
-            {osAtencao.map((os) => (
-              <button
-                key={os.id}
-                onClick={() => onNavigate("processos")}
-                className="w-full flex items-center gap-3 p-3 rounded-lg bg-yellow-500/5 border border-yellow-500/20 hover:bg-yellow-500/10 transition text-left"
-              >
-                <span className="text-lg">⚠️</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-white text-sm font-medium truncate">
-                    {os.numero} — {os.tipo} ({os.clienteNome})
-                  </p>
-                  <p className="text-gray-400 text-xs mt-0.5">
-                    Aberta em {formatDate(os.dataAbertura)} — sem movimentação há 2+ dias
-                  </p>
-                </div>
-                <StatusBadge status={os.status} />
-              </button>
-            ))}
-          </div>
-        ) : (
-          <div className="flex items-center justify-center h-[100px] text-green-400 text-sm">
-            ✓ Todas as OS estão sob controle
-          </div>
-        )}
+        <Reveal i={1} className={`${GLASS} p-5`}>
+          <h3 className="text-white font-semibold mb-4">OS que precisam de atenção</h3>
+          {osAtencao.length > 0 ? (
+            <div className="space-y-2">
+              {osAtencao.map((os) => (
+                <button
+                  key={os.id}
+                  onClick={() => onNavigate("processos")}
+                  className="w-full flex items-center gap-3 p-3 rounded-xl bg-amber-500/[0.06] border border-amber-500/20 hover:bg-amber-500/10 transition text-left"
+                >
+                  <span className="text-lg">⚠️</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-white text-sm font-medium truncate">{os.numero} — {os.tipo} ({os.clienteNome})</p>
+                    <p className="text-gray-400 text-xs mt-0.5">Aberta em {formatDate(os.dataAbertura)} — sem movimentação há 2+ dias</p>
+                  </div>
+                  <StatusBadge status={os.status} />
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-[100px] text-emerald-400 text-sm">✓ Todas as OS estão sob controle</div>
+          )}
+        </Reveal>
       </div>
     </div>
   );
