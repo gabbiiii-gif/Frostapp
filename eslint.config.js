@@ -95,4 +95,15 @@ export default [
       },
     },
   },
+  {
+    // Scripts Node (build/geracao de assets) — console, process, etc.
+    files: ['scripts/**/*.{js,mjs}'],
+    languageOptions: {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+      },
+    },
+  },
 ];
