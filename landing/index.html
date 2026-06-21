@@ -3,7 +3,34 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>FrostERP — Sistema de Gestão Integrada</title>
+<title>FrostERP — Sistema de Gestão para Empresas de Refrigeração</title>
+
+<!-- ============ SEO ============ -->
+<meta name="description" content="Sistema de gestão para empresas de refrigeração: ordens de serviço, agenda de manutenção, financeiro e estoque em um só lugar. Sem instalação, sem fidelidade." />
+<link rel="canonical" href="https://frosterp.com.br/" />
+<meta name="robots" content="index, follow, max-image-preview:large" />
+<meta name="theme-color" content="#0A1628" />
+<meta name="author" content="FrostERP" />
+
+<!-- Open Graph (WhatsApp, Facebook, LinkedIn) -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="FrostERP" />
+<meta property="og:title" content="FrostERP — Gestão para empresas de refrigeração" />
+<meta property="og:description" content="OS, agenda de manutenção, financeiro e estoque num sistema só. Sem instalação, sem fidelidade." />
+<meta property="og:url" content="https://frosterp.com.br/" />
+<meta property="og:image" content="https://frosterp.com.br/og-image.png" />
+<meta property="og:image:width" content="1200" />
+<meta property="og:image:height" content="630" />
+<meta property="og:image:alt" content="FrostERP — Sistema de gestão para empresas de refrigeração" />
+<meta property="og:locale" content="pt_BR" />
+
+<!-- Twitter Card -->
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="FrostERP — Gestão para empresas de refrigeração" />
+<meta name="twitter:description" content="OS, agenda de manutenção, financeiro e estoque num sistema só. Sem instalação, sem fidelidade." />
+<meta name="twitter:image" content="https://frosterp.com.br/og-image.png" />
+<!-- ============ /SEO ============ -->
+
 <!-- Favicon: SVG vetorial estatico (azul). PNG + ICO de fallback. -->
 <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=7" />
 <link rel="icon" type="image/png" href="/favicon-96x96.png?v=7" sizes="96x96" />
@@ -16,6 +43,82 @@
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+<!-- Dados estruturados (Schema.org). Landing sem CSP: inline permitido. -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "Organization",
+      "@id": "https://frosterp.com.br/#organization",
+      "name": "FrostERP",
+      "url": "https://frosterp.com.br/",
+      "logo": "https://frosterp.com.br/web-app-manifest-512x512.png",
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "telephone": "+55-93-98416-6832",
+        "contactType": "sales",
+        "areaServed": "BR",
+        "availableLanguage": "Portuguese"
+      }
+    },
+    {
+      "@type": "WebSite",
+      "@id": "https://frosterp.com.br/#website",
+      "url": "https://frosterp.com.br/",
+      "name": "FrostERP",
+      "inLanguage": "pt-BR",
+      "publisher": { "@id": "https://frosterp.com.br/#organization" }
+    },
+    {
+      "@type": "SoftwareApplication",
+      "name": "FrostERP",
+      "url": "https://frosterp.com.br/",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "description": "Sistema de gestão para empresas de refrigeração: ordens de serviço, agenda de manutenção, financeiro e estoque em um só lugar. Sem instalação, sem fidelidade.",
+      "inLanguage": "pt-BR",
+      "provider": { "@id": "https://frosterp.com.br/#organization" },
+      "offers": {
+        "@type": "Offer",
+        "availability": "https://schema.org/InStock",
+        "priceCurrency": "BRL"
+      }
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "Tem fidelidade ou multa?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Não. Você cancela quando quiser, sem multa." }
+        },
+        {
+          "@type": "Question",
+          "name": "Para quais empresas é indicado?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Empresas de refrigeração, climatização, instalação e manutenção de ar-condicionado com 1 a 15 técnicos em campo." }
+        },
+        {
+          "@type": "Question",
+          "name": "Migra os dados das minhas planilhas?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Sim. Nossa equipe ajuda a importar clientes, produtos e estoques na implantação." }
+        },
+        {
+          "@type": "Question",
+          "name": "Quanto tempo para começar a usar?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Você cria a conta e entra no sistema em 5 minutos. Migração completa leva de 1 a 3 dias úteis." }
+        },
+        {
+          "@type": "Question",
+          "name": "Funciona no celular?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Sim. Interface responsiva para usar em qualquer dispositivo." }
+        }
+      ]
+    }
+  ]
+}
+</script>
 <style>
   :root{
     --bg:#0A1628; --surface:#0F1E36; --surface2:#13243f;
