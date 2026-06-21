@@ -13,12 +13,13 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="FrostERP" />
-    <!-- Favicon: SVG vetorial adaptativo (azul no light / branco no dark via @media interno).
-         PNG + ICO ficam de fallback p/ browsers sem suporte a SVG icon. -->
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=4" />
-    <link rel="icon" type="image/png" href="/favicon-96x96.png?v=4" sizes="96x96" />
-    <link rel="shortcut icon" href="/favicon.ico?v=4" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=4" />
+    <!-- Favicon: SVG vetorial estatico (azul). NAO usar <style>/@media dentro do SVG:
+         o Chrome quebra o render do favicon nesse caso (vira quadrado azul).
+         PNG + ICO de fallback p/ browsers sem suporte a SVG icon. -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=5" />
+    <link rel="icon" type="image/png" href="/favicon-96x96.png?v=5" sizes="96x96" />
+    <link rel="shortcut icon" href="/favicon.ico?v=5" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=5" />
     <!-- Manifest PWA: injetado automaticamente pelo vite-plugin-pwa no build -->
 
     <link rel="preconnect" href="https://fonts.googleapis.com" />

@@ -1,12 +1,5 @@
 <svg viewBox="0 0 680 680" width="680" height="680" role="img" xmlns="http://www.w3.org/2000/svg">
   <title>FrostERP</title>
-<style>
-  @media (prefers-color-scheme: dark){
-    line, polygon { stroke:#FFFFFF !important; }
-    [fill]:not([fill="none"]){ fill:#FFFFFF !important; }
-    circle[stroke]{ stroke:#FFFFFF !important; }
-  }
-</style>
   <g stroke="#1B8FE8" stroke-linecap="round">
     <!-- 6 braços principais — centro 340,340, raio 240 -->
     <line x1="340" y1="340" x2="340" y2="100" stroke-width="5"/>
