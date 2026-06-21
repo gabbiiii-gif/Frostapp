@@ -1,0 +1,4 @@
+# App privado (login). Crawl liberado para que o <meta robots="noindex"> seja
+# lido, mas o conteudo nao e indexado. Marketing/SEO fica em frosterp.com.br.
+User-agent: *
+Allow: /

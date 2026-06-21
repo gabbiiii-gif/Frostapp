@@ -5,7 +5,31 @@
     <!-- Viewport otimizado para mobile: sem zoom automático em inputs -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <!-- CSP aplicado via servidor em produção; em dev o Vite precisa de ws: e eval para HMR -->
-    <title>FrostERP</title>
+    <title>FrostERP — Sistema de Gestão para Refrigeração</title>
+
+    <!-- ============ SEO ============ -->
+    <!-- App e privado (login): noindex p/ nao competir com a landing nem indexar
+         pagina de login. follow mantido. Marketing/ranqueamento fica em frosterp.com.br. -->
+    <meta name="robots" content="noindex, follow" />
+    <meta name="description" content="Acesse o FrostERP — sistema de gestão para empresas de refrigeração: ordens de serviço, agenda, financeiro e estoque." />
+    <link rel="canonical" href="https://app.frosterp.com.br/" />
+    <meta name="author" content="FrostERP" />
+    <!-- Open Graph (preview ao compartilhar o link do app) -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="FrostERP" />
+    <meta property="og:title" content="FrostERP — Sistema de Gestão para Refrigeração" />
+    <meta property="og:description" content="Acesse seu painel: OS, agenda de manutenção, financeiro e estoque num sistema só." />
+    <meta property="og:url" content="https://app.frosterp.com.br/" />
+    <meta property="og:image" content="https://app.frosterp.com.br/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="FrostERP — Sistema de gestão para empresas de refrigeração" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="FrostERP — Sistema de Gestão para Refrigeração" />
+    <meta name="twitter:description" content="Acesse seu painel: OS, agenda de manutenção, financeiro e estoque num sistema só." />
+    <meta name="twitter:image" content="https://app.frosterp.com.br/og-image.png" />
+    <!-- ============ /SEO ============ -->
 
     <!-- PWA: instalação e aparência nativa no Android/iOS -->
     <meta name="theme-color" content="#0f172a" />
