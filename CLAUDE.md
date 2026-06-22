@@ -397,6 +397,21 @@ Mudanças de status de OS disparam um webhook configurável que o n8n consome pa
   ```
 - **Setup n8n (resumo)**: criar workflow com nó `Webhook` (POST) → `Switch` por `status` → `HTTP Request` para Evolution API `/message/sendText/{instance}` com `number=clienteTelefone` e `text` montado conforme template por status.
 
+## Módulo Escola — anexos de ofício
+
+O portal externo da Vanda (`EscolaPortalVanda`) permite anexar **ofício(s)** (PDF ou imagem,
+opcional, múltiplos, com preview) ao abrir uma solicitação. Os arquivos são gravados em
+`erp:escola:<id>.oficios` como `[{ url, nome, tipo, tamanho }]` e exibidos no card do portal e
+no detalhe da demanda no painel interno (`EscolaModule`).
+
+- Bucket Supabase Storage **`escola-oficios`** (privado) — **criar manualmente no Dashboard**,
+  com RLS de pasta escopada por `company_id` (`foldername[1] = company_id`, igual a `os-fotos`).
+  Helper: `uploadEscolaOficio(file, demandaId)` em `src/supabase.js` (retorna signed URL ou null).
+- O anexo é **opcional**: se o upload falhar (offline/erro), a demanda já foi criada no kv_store
+  sem ofícios — não trava o fluxo.
+- A Vanda também gera **relatórios** das próprias solicitações no portal (PDF/CSV, presets
+  semana/mês/personalizado + filtro por escola), reusando `src/lib/escola-relatorio.js`.
+
 ## Supabase Sync Layer (`src/supabase.js`)
 
 The app syncs its `window.storage` key-value data to a Supabase table `kv_store` (columns: `key`, `value`, `updated_at`). Requires env vars `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. If absent, Supabase is disabled and the app runs fully local.
