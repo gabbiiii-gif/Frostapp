@@ -14,6 +14,8 @@ import {
   calcularMetricas,
   filtrarPorPeriodo,
   URGENCIA,
+  validarOficio,
+  OFICIO_MAX_BYTES,
 } from "./escola.js";
 
 function makeMemDb() {
@@ -185,5 +187,33 @@ describe("URGENCIA constantes", () => {
     expect(URGENCIA.baixo.rank).toBeLessThan(URGENCIA.medio.rank);
     expect(URGENCIA.medio.rank).toBeLessThan(URGENCIA.alto.rank);
     expect(URGENCIA.alto.rank).toBeLessThan(URGENCIA.urgente.rank);
+  });
+});
+
+describe("validarOficio", () => {
+  it("aceita PDF dentro do limite", () => {
+    const r = validarOficio({ name: "oficio.pdf", type: "application/pdf", size: 1024 });
+    expect(r.ok).toBe(true);
+  });
+
+  it("aceita imagem dentro do limite", () => {
+    const r = validarOficio({ name: "foto.jpg", type: "image/jpeg", size: 2048 });
+    expect(r.ok).toBe(true);
+  });
+
+  it("rejeita tipo não permitido", () => {
+    const r = validarOficio({ name: "a.docx", type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document", size: 10 });
+    expect(r.ok).toBe(false);
+    expect(r.motivo).toMatch(/PDF ou imagem/i);
+  });
+
+  it("rejeita arquivo acima do limite", () => {
+    const r = validarOficio({ name: "grande.pdf", type: "application/pdf", size: OFICIO_MAX_BYTES + 1 });
+    expect(r.ok).toBe(false);
+    expect(r.motivo).toMatch(/10 MB/i);
+  });
+
+  it("rejeita arquivo nulo", () => {
+    expect(validarOficio(null).ok).toBe(false);
   });
 });

@@ -18,6 +18,19 @@ export const URGENCIA = {
 };
 export const URGENCIA_OPCOES = ["baixo", "medio", "alto", "urgente"];
 
+// ─── Anexo de ofício (validação client-side, pura) ───────────────────────────
+// Limite de 10 MB por arquivo; só PDF ou imagem. Retorna { ok, motivo? }.
+export const OFICIO_MAX_BYTES = 10 * 1024 * 1024;
+
+export function validarOficio(file) {
+  if (!file) return { ok: false, motivo: "Arquivo inválido" };
+  const tipo = file.type || "";
+  const tipoOk = tipo === "application/pdf" || tipo.startsWith("image/");
+  if (!tipoOk) return { ok: false, motivo: "Apenas PDF ou imagem" };
+  if (file.size > OFICIO_MAX_BYTES) return { ok: false, motivo: "Máximo 10 MB por arquivo" };
+  return { ok: true };
+}
+
 // Estados possíveis de uma demanda. Mantemos o nome alinhado com STATUS_MAP
 // global (constants.js) sempre que possível para reusar StatusBadge.
 export const STATUS_ESCOLA = ["aguardando", "em_execucao", "concluido", "cancelado"];
