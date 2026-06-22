@@ -1225,6 +1225,32 @@ export async function deleteAssinaturaOS(url) {
   }
 }
 
+// ─── Storage: upload de ofícios do módulo Escola ─────────────────────────────
+// Bucket PRIVADO 'escola-oficios' (criar manualmente no Dashboard, RLS por pasta:
+// foldername[1] = company_id, igual a os-fotos/os-assinaturas).
+// Path: {companyId}/{demandaId}/{ts}_{rand}.{ext}. Retorna signed URL ou null.
+// Anexo é opcional no portal — se retornar null (offline/erro), a demanda já existe.
+export async function uploadEscolaOficio(file, demandaId) {
+  if (!supabase) return null;
+  const companyId = getCompanyId();
+  if (!companyId) { console.warn('uploadEscolaOficio: sem company_id.'); return null; }
+  try {
+    const ext = (file.name || 'oficio').split('.').pop();
+    const ts = Date.now();
+    const path = `${companyId}/${demandaId}/${ts}_${Math.random().toString(36).slice(2, 8)}.${ext}`;
+    const { error: upErr } = await supabase.storage
+      .from('escola-oficios')
+      .upload(path, file, { cacheControl: '3600', upsert: false, contentType: file.type });
+    if (upErr) { console.warn('Upload ofício erro:', upErr.message); return null; }
+    const { data, error: signErr } = await supabase.storage.from('escola-oficios').createSignedUrl(path, SIGNED_URL_TTL);
+    if (signErr) { console.warn('Signed URL ofício erro:', signErr.message); return null; }
+    return data?.signedUrl || null;
+  } catch (err) {
+    console.warn('Upload ofício falhou:', err.message);
+    return null;
+  }
+}
+
 // ─── Realtime: escuta mudanças no Supabase e atualiza o local ────────────────
 // O callback recebe { eventType, key } para que o consumidor possa fazer sync
 // incremental (re-ler só a fatia afetada) em vez de recarregar tudo.
