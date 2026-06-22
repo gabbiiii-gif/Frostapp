@@ -16,7 +16,7 @@ import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
 import SignaturePad from "./SignaturePad.jsx";
-import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength } from "./utils.js";
+import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength, passwordChecklist } from "./utils.js";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
 // Geração de PDF client-side dos documentos de OS/orçamento para envio via WhatsApp
@@ -2572,6 +2572,35 @@ function ForgotPasswordDialog({ initialEmail = "", onClose }) {
 // chamar supabase.auth.updateUser({ password }).
 // mode: "recovery" (esqueci senha — Fase 2.2) | "invite" (1º acesso por convite — Fase 2.3).
 // Ambos terminam chamando supabase.auth.updateUser({password}) — só muda copy.
+// Lista visual de requisitos de senha — cada item fica verde quando cumprido.
+// Não bloqueia nada sozinho; a validação real continua em validatePasswordStrength.
+function PasswordChecklist({ pwd }) {
+  const c = passwordChecklist(pwd);
+  const itens = [
+    { ok: c.min12, label: "Mínimo 12 caracteres" },
+    { ok: c.upper, label: "Uma letra maiúscula" },
+    { ok: c.lower, label: "Uma letra minúscula" },
+    { ok: c.number, label: "Um número" },
+    { ok: c.symbol, label: "Um caractere especial (!@#$…)" },
+    { ok: c.noSpace, label: "Sem espaços" },
+  ];
+  return (
+    <ul className="mt-2 space-y-1" aria-label="Requisitos da senha">
+      {itens.map((it) => (
+        <li
+          key={it.label}
+          className={`flex items-center gap-2 text-[12px] transition-colors ${it.ok ? "text-green-400" : "text-gray-400"}`}
+        >
+          <span aria-hidden="true" className={`inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px] ${it.ok ? "bg-green-500/20 text-green-400" : "bg-gray-700 text-gray-500"}`}>
+            {it.ok ? "✓" : "•"}
+          </span>
+          {it.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function ResetPasswordScreen({ onDone, addToast, mode = "recovery" }) {
   const [pwd, setPwd] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -2643,6 +2672,7 @@ function ResetPasswordScreen({ onDone, addToast, mode = "recovery" }) {
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
                 autoFocus
               />
+              <PasswordChecklist pwd={pwd} />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Confirmar senha</label>
@@ -2660,8 +2690,8 @@ function ResetPasswordScreen({ onDone, addToast, mode = "recovery" }) {
             )}
             <button
               onClick={handleSave}
-              disabled={busy}
-              className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50"
+              disabled={busy || !validatePasswordStrength(pwd).ok || pwd !== confirm}
+              className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {busy
                 ? "Salvando..."
