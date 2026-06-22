@@ -19,6 +19,13 @@ import {
   URGENCIA_OPCOES,
   validarOficio,
 } from "../lib/escola.js";
+import {
+  montarRelatorio,
+  gerarHtmlRelatorio,
+  gerarCsvRelatorio,
+  periodoSemana,
+  periodoMesCorrente,
+} from "../lib/escola-relatorio.js";
 import { formatDate } from "../utils.js";
 // notifyEscolaEvent: fire-and-forget. Falhas de email NÃO travam a criação
 // da demanda no client — kv_store já gravou e sync ao Supabase já rodou.
@@ -40,6 +47,7 @@ export default function EscolaPortalVanda({ user, onLogout, addToast, db }) {
   const [demandas, setDemandas] = useState([]);
   const [filtroStatus, setFiltroStatus] = useState("todos");
   const [refreshTick, setRefreshTick] = useState(0);
+  const [showRelatorio, setShowRelatorio] = useState(false);
 
   // Recarrega lista quando user muda, formulário envia, ou Realtime dispara.
   useEffect(() => {
@@ -189,13 +197,22 @@ export default function EscolaPortalVanda({ user, onLogout, addToast, db }) {
               Envie uma nova demanda para nossa equipe atender.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={handleAbrirForm}
-            className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg shadow-blue-900/40 transition"
-          >
-            + Nova Solicitação
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => setShowRelatorio(true)}
+              className="px-4 py-2.5 rounded-xl border border-gray-600 hover:border-gray-400 text-gray-200 hover:text-white font-semibold transition"
+            >
+              📊 Relatórios
+            </button>
+            <button
+              type="button"
+              onClick={handleAbrirForm}
+              className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold shadow-lg shadow-blue-900/40 transition"
+            >
+              + Nova Solicitação
+            </button>
+          </div>
         </section>
 
         {/* Lista de solicitações */}
@@ -418,6 +435,171 @@ export default function EscolaPortalVanda({ user, onLogout, addToast, db }) {
           </div>
         </div>
       )}
+
+      {showRelatorio && (
+        <RelatorioPortalModal
+          demandas={demandas}
+          empresaNome={user?.companyName || "FrostERP"}
+          onClose={() => setShowRelatorio(false)}
+          addToast={addToast}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Modal de Relatórios do portal (reusa o lib escola-relatorio.js) ─────────
+// Mesma lógica do painel interno, mas no tema escuro do portal. Opera só sobre
+// as demandas da própria Vanda (já filtradas por solicitante no componente pai).
+function RelatorioPortalModal({ demandas, empresaNome, onClose, addToast }) {
+  const semana = periodoSemana();
+  const [preset, setPreset] = useState("mes");
+  const [ini, setIni] = useState(periodoMesCorrente().ini);
+  const [fim, setFim] = useState(periodoMesCorrente().fim);
+  const [escolaFiltro, setEscolaFiltro] = useState("");
+
+  const handlePreset = useCallback((p) => {
+    setPreset(p);
+    if (p === "semana") { setIni(semana.ini); setFim(semana.fim); }
+    if (p === "mes") { const m = periodoMesCorrente(); setIni(m.ini); setFim(m.fim); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const relatorio = useMemo(
+    () => montarRelatorio(demandas, ini, fim, escolaFiltro),
+    [demandas, ini, fim, escolaFiltro]
+  );
+
+  const handlePDF = useCallback(() => {
+    try {
+      const html = gerarHtmlRelatorio(relatorio, empresaNome);
+      const w = window.open("", "_blank", "width=900,height=900");
+      if (!w) { addToast?.({ type: "error", message: "Pop-up bloqueado. Permita pop-ups e tente de novo." }); return; }
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+    } catch (err) {
+      addToast?.({ type: "error", message: err?.message || "Erro ao gerar PDF." });
+    }
+  }, [relatorio, empresaNome, addToast]);
+
+  const handleCSV = useCallback(() => {
+    try {
+      const csv = gerarCsvRelatorio(relatorio);
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `escola_${ini}_a_${fim}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      addToast?.({ type: "success", message: "CSV exportado." });
+    } catch (err) {
+      addToast?.({ type: "error", message: err?.message || "Erro ao exportar CSV." });
+    }
+  }, [relatorio, ini, fim, addToast]);
+
+  const { metricas } = relatorio;
+  const taxa = (metricas.taxa_conclusao * 100).toFixed(1);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="dlg-rel-titulo"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div className="w-full sm:max-w-xl bg-gray-900 border border-gray-700 rounded-t-2xl sm:rounded-2xl shadow-2xl max-h-[92vh] overflow-y-auto">
+        <div className="px-5 py-4 border-b border-gray-700 flex items-center justify-between sticky top-0 bg-gray-900">
+          <h3 id="dlg-rel-titulo" className="text-base font-bold text-white">Relatórios — Minhas solicitações</h3>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-white" aria-label="Fechar">✕</button>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div className="flex gap-1 rounded-lg border border-gray-700 bg-gray-800/40 p-1">
+            {[
+              { id: "semana", label: "Semana" },
+              { id: "mes", label: "Mês corrente" },
+              { id: "custom", label: "Personalizado" },
+            ].map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => handlePreset(p.id)}
+                className={`flex-1 px-3 py-1.5 text-xs font-semibold rounded ${preset === p.id ? "bg-gray-700 text-white" : "text-gray-400 hover:text-white"}`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label htmlFor="prel-ini" className="block text-xs font-semibold text-gray-300 mb-1">Início</label>
+              <input
+                id="prel-ini"
+                type="date"
+                value={ini}
+                onChange={(e) => { setIni(e.target.value); setPreset("custom"); }}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white"
+              />
+            </div>
+            <div>
+              <label htmlFor="prel-fim" className="block text-xs font-semibold text-gray-300 mb-1">Fim</label>
+              <input
+                id="prel-fim"
+                type="date"
+                value={fim}
+                onChange={(e) => { setFim(e.target.value); setPreset("custom"); }}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="prel-escola" className="block text-xs font-semibold text-gray-300 mb-1">Filtrar escola (opcional)</label>
+            <input
+              id="prel-escola"
+              type="search"
+              value={escolaFiltro}
+              onChange={(e) => setEscolaFiltro(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white"
+              placeholder="Ex: Vila Nova"
+            />
+          </div>
+
+          <div className="rounded-2xl border border-gray-700 bg-gray-800/40 p-4">
+            <h4 className="text-xs font-semibold text-gray-300 mb-3">Preview do período</h4>
+            <div className="grid grid-cols-4 gap-2 text-center">
+              <div className="rounded-lg bg-gray-900/60 p-2"><div className="text-[10px] uppercase tracking-wide text-gray-400">Total</div><div className="text-lg font-bold text-white">{metricas.total}</div></div>
+              <div className="rounded-lg bg-gray-900/60 p-2"><div className="text-[10px] uppercase tracking-wide text-gray-400">Concluídas</div><div className="text-lg font-bold text-white">{metricas.concluidas}</div></div>
+              <div className="rounded-lg bg-gray-900/60 p-2"><div className="text-[10px] uppercase tracking-wide text-gray-400">Em exec.</div><div className="text-lg font-bold text-white">{metricas.em_execucao}</div></div>
+              <div className="rounded-lg bg-gray-900/60 p-2"><div className="text-[10px] uppercase tracking-wide text-gray-400">Aguard.</div><div className="text-lg font-bold text-white">{metricas.aguardando}</div></div>
+            </div>
+            <div className="mt-3 text-[11px] text-gray-400">
+              Taxa de conclusão: <strong className="text-white">{taxa}%</strong>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-end gap-2 pt-2 border-t border-gray-800">
+            <button
+              type="button"
+              onClick={handleCSV}
+              className="px-4 py-2 rounded-lg border border-gray-600 hover:border-gray-400 text-gray-300 hover:text-white text-sm"
+            >
+              ⬇ CSV
+            </button>
+            <button
+              type="button"
+              onClick={handlePDF}
+              className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold"
+            >
+              ⬇ PDF
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
