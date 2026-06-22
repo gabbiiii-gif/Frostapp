@@ -1,2 +1,45 @@
-node_modules/
-dist/
+node_modules
+dist
+dev-dist
+.env
+.env.*
+*.local
+
+.vercel
+
+# Supabase CLI — cache local (.temp/), branches state, etc.
+supabase/.temp/
+supabase/.branches/
+
+# Configurações locais do Claude Code (não devem ir pro repo)
+.claude/settings.local.json
+
+# Obsidian (raiz do projeto = cofre do wiki em docs/)
+# Estado de UI pessoal não vai pro repo; configs compartilhadas (app.json) podem ir
+.obsidian/workspace*
+.obsidian/cache
+.obsidian/graph.json
+
+# Capacitor / Android build artifacts
+android/.gradle
+android/build
+android/app/build
+android/app/release
+android/local.properties
+android/.idea
+android/captures
+android/.cxx
+android/app/src/main/assets/public
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+*.keystore
+*.jks
+keystore.properties
+
+# iOS (futuro)
+ios/App/Pods
+ios/App/build
+ios/App/App/public
+ios/.DS_Store
+
+.vercel
