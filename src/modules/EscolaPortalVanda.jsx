@@ -247,6 +247,22 @@ export default function EscolaPortalVanda({ user, onLogout, addToast, db }) {
                     <span>Solicitado em <strong className="text-gray-300">{formatDate(d.data_solicitacao)}</strong></span>
                     {d.responsavel_nome && <span>Responsável: <strong className="text-gray-300">{d.responsavel_nome}</strong></span>}
                     {d.concluido_em && <span>Concluído em <strong className="text-gray-300">{formatDate(d.concluido_em)}</strong></span>}
+                    {Array.isArray(d.oficios) && d.oficios.length > 0 && (
+                      <span className="inline-flex items-center gap-1">
+                        📎 {d.oficios.length} anexo{d.oficios.length > 1 ? "s" : ""}
+                        {d.oficios.map((of, i) => (
+                          <a
+                            key={i}
+                            href={of.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="underline text-blue-300 hover:text-blue-200"
+                          >
+                            {i + 1}
+                          </a>
+                        ))}
+                      </span>
+                    )}
                   </div>
                 </li>
               ))}
