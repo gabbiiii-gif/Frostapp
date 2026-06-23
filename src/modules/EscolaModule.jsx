@@ -361,6 +361,27 @@ export default function EscolaModule({ user, addToast, db, reloadData }) {
                 <p className="text-sm text-gray-200 whitespace-pre-line">{demandaDetalhe.descricao}</p>
               </div>
 
+              {Array.isArray(demandaDetalhe.oficios) && demandaDetalhe.oficios.length > 0 && (
+                <div>
+                  <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Ofícios anexados</h4>
+                  <ul className="space-y-1.5">
+                    {demandaDetalhe.oficios.map((of, i) => (
+                      <li key={i}>
+                        <a
+                          href={of.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 text-sm text-blue-400 hover:text-blue-300"
+                        >
+                          <span aria-hidden="true">{(of.tipo || "").startsWith("image/") ? "🖼️" : "📄"}</span>
+                          <span className="truncate max-w-[320px]">{of.nome || `Anexo ${i + 1}`}</span>
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {demandaDetalhe.observacao_conclusao && (
                 <div>
                   <h4 className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Observação de conclusão</h4>

@@ -18,6 +18,7 @@ import {
   isModuleEnabledForCompany,
   calcDescontoOS,
   validatePasswordStrength,
+  passwordChecklist,
 } from './utils.js';
 
 describe('genId', () => {
@@ -370,5 +371,32 @@ describe("validatePasswordStrength", () => {
     expect(validatePasswordStrength("abc").strength).toBe("fraca");
     expect(validatePasswordStrength("Abcdef123").strength).toBe("média");
     expect(validatePasswordStrength("Abcdefgh1234!").strength).toBe("forte");
+  });
+});
+
+describe("passwordChecklist", () => {
+  it("marca todos os requisitos numa senha forte", () => {
+    const r = passwordChecklist("MinhaSenha123!"); // 14 chars
+    expect(r).toEqual({
+      min12: true, upper: true, lower: true,
+      number: true, symbol: true, noSpace: true,
+    });
+  });
+
+  it("reprova requisitos faltantes em senha fraca", () => {
+    const r = passwordChecklist("abc");
+    expect(r.min12).toBe(false);
+    expect(r.upper).toBe(false);
+    expect(r.number).toBe(false);
+    expect(r.symbol).toBe(false);
+    expect(r.lower).toBe(true);
+  });
+
+  it("noSpace é false quando há espaço", () => {
+    expect(passwordChecklist("Minha Senha 12!").noSpace).toBe(false);
+  });
+
+  it("noSpace é false para senha vazia", () => {
+    expect(passwordChecklist("").noSpace).toBe(false);
   });
 });

@@ -235,6 +235,22 @@ export function validatePasswordStrength(pwd) {
   return { ok, score, reasons, strength };
 }
 
+// ─── Checklist visual de requisitos de senha ────────────────────────────────
+// APENAS exibição: a política real continua em validatePasswordStrength (12 chars).
+// Retorna um booleano por requisito para a UI marcar cada item em verde ao vivo.
+// Helper puro — testado em utils.test.js.
+export function passwordChecklist(pwd) {
+  const s = String(pwd || "");
+  return {
+    min12: s.length >= 12,
+    upper: /[A-Z]/.test(s),
+    lower: /[a-z]/.test(s),
+    number: /\d/.test(s),
+    symbol: /[^\w\s]|_/.test(s),
+    noSpace: s.length > 0 && !/\s/.test(s),
+  };
+}
+
 // Decide se um módulo está habilitado para a empresa.
 // allowedModules: array da empresa (ou null/undefined = tudo ligado).
 // "dashboard" e "config" são sempre habilitados (regra de negócio: o admin
