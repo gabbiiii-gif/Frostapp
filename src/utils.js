@@ -260,3 +260,75 @@ export function isModuleEnabledForCompany(allowedModules, moduleId) {
   if (allowedModules == null) return true;
   return Array.isArray(allowedModules) && allowedModules.includes(moduleId);
 }
+
+// ─── Financeiro: despesas parceladas e fixas recorrentes ─────────────────────
+
+// Divide um valor TOTAL em N parcelas de valor igual, com a ÚLTIMA parcela
+// absorvendo o resto do arredondamento — assim a soma das parcelas bate
+// exatamente com o total (sem centavos perdidos). Trabalha em centavos para
+// evitar erro de ponto flutuante. Helper puro — testado em utils.test.js.
+export function splitParcelas(total, n) {
+  const parcelas = Math.max(1, Math.floor(Number(n) || 1));
+  const totalCents = Math.round((Number(total) || 0) * 100);
+  const base = Math.floor(totalCents / parcelas);
+  const out = new Array(parcelas).fill(base);
+  // A última parcela recebe o total menos a soma das anteriores (absorve o resto).
+  out[parcelas - 1] = totalCents - base * (parcelas - 1);
+  return out.map((c) => c / 100);
+}
+
+// Soma N meses a uma data "YYYY-MM-DD" preservando o dia, com clamp para o
+// último dia do mês de destino (ex.: 31/01 + 1 mês → 28/02). Helper puro.
+export function addMonthsKeepDay(dateISO, n) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(dateISO || ""));
+  if (!m) return String(dateISO || "");
+  const day = Number(m[3]);
+  const total = (Number(m[2]) - 1) + Math.trunc(Number(n) || 0);
+  const year = Number(m[1]) + Math.floor(total / 12);
+  const month = ((total % 12) + 12) % 12; // 0-based
+  const lastDay = new Date(year, month + 1, 0).getDate();
+  const d = Math.min(day, lastDay);
+  return `${year}-${String(month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+// "YYYY-MM-DD" (ou ISO) → "YYYY-MM". Chave de mês usada nas despesas recorrentes.
+export function monthKey(dateISO) {
+  return String(dateISO || "").slice(0, 7);
+}
+
+// Monta o vencimento "YYYY-MM-DD" de um mês-chave "YYYY-MM" com o dia informado,
+// fazendo clamp para o último dia do mês (ex.: dia 31 em fevereiro → 28/29).
+export function vencimentoNoMes(mesKey, dia) {
+  const m = /^(\d{4})-(\d{2})$/.exec(String(mesKey || ""));
+  if (!m) return null;
+  const year = Number(m[1]);
+  const month = Number(m[2]); // 1-based
+  const lastDay = new Date(year, month, 0).getDate();
+  const d = Math.min(Math.max(1, Math.floor(Number(dia) || 1)), lastDay);
+  return `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+}
+
+// Lista os meses "YYYY-MM" que ainda precisam ser materializados para uma
+// despesa fixa recorrente: do mês de início até o mês atual (inclusive),
+// excluindo os que já constam em `mesesGerados`. Idempotente e à prova de
+// exclusão — reprocessar não duplica. Guard de 240 meses evita loop infinito.
+export function mesesAMaterializar(mesInicio, mesAtual, mesesGerados = []) {
+  const s = /^(\d{4})-(\d{2})$/.exec(String(mesInicio || ""));
+  const e = /^(\d{4})-(\d{2})$/.exec(String(mesAtual || ""));
+  if (!s || !e) return [];
+  const done = new Set(mesesGerados || []);
+  const out = [];
+  let y = Number(s[1]);
+  let m = Number(s[2]);
+  const endY = Number(e[1]);
+  const endM = Number(e[2]);
+  let guard = 0;
+  while ((y < endY || (y === endY && m <= endM)) && guard < 240) {
+    const key = `${y}-${String(m).padStart(2, "0")}`;
+    if (!done.has(key)) out.push(key);
+    m++;
+    if (m > 12) { m = 1; y++; }
+    guard++;
+  }
+  return out;
+}
