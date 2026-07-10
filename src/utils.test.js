@@ -19,6 +19,11 @@ import {
   calcDescontoOS,
   validatePasswordStrength,
   passwordChecklist,
+  splitParcelas,
+  addMonthsKeepDay,
+  monthKey,
+  vencimentoNoMes,
+  mesesAMaterializar,
 } from './utils.js';
 
 describe('genId', () => {
@@ -398,5 +403,97 @@ describe("passwordChecklist", () => {
 
   it("noSpace é false para senha vazia", () => {
     expect(passwordChecklist("").noSpace).toBe(false);
+  });
+});
+
+describe("splitParcelas", () => {
+  it("divide exato quando total é múltiplo do nº de parcelas", () => {
+    expect(splitParcelas(300, 3)).toEqual([100, 100, 100]);
+  });
+
+  it("a última parcela absorve o resto do arredondamento", () => {
+    const p = splitParcelas(100, 3); // 33,33 + 33,33 + 33,34
+    expect(p).toEqual([33.33, 33.33, 33.34]);
+    const soma = p.reduce((a, b) => a + b, 0);
+    expect(Math.round(soma * 100) / 100).toBe(100);
+  });
+
+  it("soma das parcelas sempre bate com o total", () => {
+    for (const [total, n] of [[999.99, 7], [1234.56, 12], [0.10, 3], [50, 4]]) {
+      const soma = splitParcelas(total, n).reduce((a, b) => a + b, 0);
+      expect(Math.round(soma * 100) / 100).toBe(Math.round(total * 100) / 100);
+    }
+  });
+
+  it("n<=1 devolve o total inteiro numa parcela", () => {
+    expect(splitParcelas(150, 1)).toEqual([150]);
+    expect(splitParcelas(150, 0)).toEqual([150]);
+  });
+
+  it("total zero devolve parcelas zeradas", () => {
+    expect(splitParcelas(0, 3)).toEqual([0, 0, 0]);
+  });
+});
+
+describe("addMonthsKeepDay", () => {
+  it("soma meses preservando o dia", () => {
+    expect(addMonthsKeepDay("2026-01-15", 1)).toBe("2026-02-15");
+    expect(addMonthsKeepDay("2026-01-15", 3)).toBe("2026-04-15");
+  });
+
+  it("faz clamp para o último dia do mês de destino", () => {
+    expect(addMonthsKeepDay("2026-01-31", 1)).toBe("2026-02-28");
+    expect(addMonthsKeepDay("2024-01-31", 1)).toBe("2024-02-29"); // ano bissexto
+  });
+
+  it("vira o ano corretamente", () => {
+    expect(addMonthsKeepDay("2026-11-10", 3)).toBe("2027-02-10");
+  });
+
+  it("entrada inválida retorna a string original", () => {
+    expect(addMonthsKeepDay("", 1)).toBe("");
+  });
+});
+
+describe("monthKey", () => {
+  it("extrai YYYY-MM de uma data", () => {
+    expect(monthKey("2026-07-10")).toBe("2026-07");
+    expect(monthKey("2026-07-10T00:00:00.000Z")).toBe("2026-07");
+  });
+});
+
+describe("vencimentoNoMes", () => {
+  it("monta o vencimento no dia informado", () => {
+    expect(vencimentoNoMes("2026-07", 5)).toBe("2026-07-05");
+  });
+
+  it("faz clamp do dia para o fim do mês", () => {
+    expect(vencimentoNoMes("2026-02", 31)).toBe("2026-02-28");
+  });
+
+  it("mês inválido retorna null", () => {
+    expect(vencimentoNoMes("xxxx", 5)).toBe(null);
+  });
+});
+
+describe("mesesAMaterializar", () => {
+  it("lista do início ao mês atual inclusive", () => {
+    expect(mesesAMaterializar("2026-05", "2026-07", [])).toEqual(["2026-05", "2026-06", "2026-07"]);
+  });
+
+  it("exclui meses já gerados (idempotência / à prova de exclusão)", () => {
+    expect(mesesAMaterializar("2026-05", "2026-07", ["2026-05", "2026-06"])).toEqual(["2026-07"]);
+  });
+
+  it("retorna vazio quando tudo já foi gerado", () => {
+    expect(mesesAMaterializar("2026-05", "2026-06", ["2026-05", "2026-06"])).toEqual([]);
+  });
+
+  it("vira o ano na sequência de meses", () => {
+    expect(mesesAMaterializar("2025-11", "2026-02", [])).toEqual(["2025-11", "2025-12", "2026-01", "2026-02"]);
+  });
+
+  it("mês atual anterior ao início retorna vazio", () => {
+    expect(mesesAMaterializar("2026-07", "2026-05", [])).toEqual([]);
   });
 });

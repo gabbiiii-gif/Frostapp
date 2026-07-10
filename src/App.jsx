@@ -16,7 +16,7 @@ import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
 import SignaturePad from "./SignaturePad.jsx";
-import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength, passwordChecklist } from "./utils.js";
+import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength, passwordChecklist, splitParcelas, addMonthsKeepDay, monthKey, vencimentoNoMes, mesesAMaterializar } from "./utils.js";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
 // Geração de PDF client-side dos documentos de OS/orçamento para envio via WhatsApp
@@ -257,6 +257,8 @@ const SCOPED_PREFIXES = [
   "erp:os:",
   "erp:schedule:",
   "erp:finance:",
+  // Templates de despesa fixa mensal recorrente (materializados no Financeiro)
+  "erp:despesa_recorrente:",
   "erp:user:",
   "erp:webdesk:",
   "erp:invoice:",
@@ -1099,6 +1101,60 @@ function syncOSToFinance(os) {
   DB.set("erp:finance:" + newTx.id, newTx);
 }
 
+// ─── Materializa despesas fixas recorrentes ─────────────────────────────────
+// Para cada template ativo em erp:despesa_recorrente:, cria as despesas mensais
+// dos meses ainda não gerados — do mês de início até o mês atual (inclusive).
+//
+// Idempotente e à prova de exclusão: a transação de cada mês usa id
+// determinístico `rec_<templateId>_<YYYY-MM>` e o template rastreia os meses
+// já gerados em `mesesGerados`. Assim, reabrir o Financeiro não duplica e
+// excluir uma parcela materializada não faz ela ressuscitar. Mesmo padrão de
+// backfill de syncOSToFinance — roda no load do módulo Financeiro.
+function materializeRecurringExpenses() {
+  const templates = DB.list("erp:despesa_recorrente:") || [];
+  const mesAtual = monthKey(toISODate(new Date()));
+  templates.forEach((t) => {
+    if (!t || !t.id || t.ativo === false) return;
+    const jaGerados = Array.isArray(t.mesesGerados) ? t.mesesGerados : [];
+    const meses = mesesAMaterializar(t.mesInicio, mesAtual, jaGerados);
+    if (meses.length === 0) return;
+    const novosMeses = [];
+    meses.forEach((mes) => {
+      const recId = `rec_${t.id}_${mes}`;
+      const [ano, mm] = mes.split("-");
+      // Marca o mês como processado mesmo se a transação já existir (rodada
+      // anterior parcial) — evita reprocessar e mantém mesesGerados coerente.
+      novosMeses.push(mes);
+      if (DB.get("erp:finance:" + recId)) return;
+      const venc = vencimentoNoMes(mes, t.diaVencimento) || toISODate(new Date());
+      const numero = getNextNumber("DESP", [], "erp:finance:");
+      DB.set("erp:finance:" + recId, {
+        id: recId,
+        numero,
+        descricao: `${t.descricao} (${mm}/${ano})`,
+        valor: Number(t.valor) || 0,
+        tipo: "despesa",
+        categoria: t.categoria || "",
+        data: venc + "T00:00:00.000Z",
+        status: "pendente",
+        formaPagamento: t.formaPagamento || "PIX",
+        observacoes: t.observacoes || "Despesa fixa recorrente",
+        fornecedorId: t.fornecedorId || "",
+        fornecedorNome: t.fornecedorNome || "",
+        recorrenteId: t.id,
+        mesRef: mes,
+        osId: null,
+        createdAt: new Date().toISOString(),
+      });
+    });
+    // Persiste os meses recém-materializados no template (dedupe defensivo).
+    const merged = Array.from(new Set([...jaGerados, ...novosMeses]));
+    if (merged.length !== jaGerados.length) {
+      DB.set("erp:despesa_recorrente:" + t.id, { ...t, mesesGerados: merged });
+    }
+  });
+}
+
 // ─── Agenda mensagens de Pós-Venda ao finalizar OS ──────────────────────────
 // O pacote original previa um trigger SQL em `ordens_servico`, mas o FrostERP
 // guarda OS como JSON no kv_store — não existe tabela relacional pra disparar
@@ -1841,7 +1897,8 @@ function Modal({ isOpen, title, children, onClose, size = "md", disableHistory =
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 animate-fadeIn"
       style={{ backgroundColor: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}
-      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      // Clicar fora (no backdrop) NÃO fecha o modal — evita perda acidental de dados
+      // do formulário. Fechamento apenas via botão X, "Cancelar", salvar ou tecla Esc.
     >
       <div
         ref={ref}
@@ -5306,6 +5363,7 @@ function Dashboard({ user, dateFilter, onNavigate }) {
 //   - Cancelado  = informativo, não entra nas somas
 function FinanceModule({ user, dateFilter, addToast }) {
   const [transactions, setTransactions] = useState([]);
+  const [suppliers, setSuppliers] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [confirmDelete, setConfirmDelete] = useState(null);
@@ -5313,6 +5371,8 @@ function FinanceModule({ user, dateFilter, addToast }) {
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
+  // Painel de gestão das despesas fixas recorrentes (ativar/desativar/excluir)
+  const [showRecorrentes, setShowRecorrentes] = useState(false);
 
   const loadTransactions = useCallback(() => {
     // Backfill: garante que toda OS já finalizada tenha sua transação no Financeiro.
@@ -5322,7 +5382,11 @@ function FinanceModule({ user, dateFilter, addToast }) {
       (o) => ["finalizado", "concluido"].includes(o.status)
     );
     finalizedOS.forEach(syncOSToFinance);
+    // Materializa as despesas fixas recorrentes dos meses vencidos até hoje.
+    // Idempotente: reabrir o Financeiro não duplica lançamentos.
+    materializeRecurringExpenses();
     setTransactions(DB.list("erp:finance:"));
+    setSuppliers(DB.list("erp:supplier:"));
   }, []);
 
   useEffect(() => { loadTransactions(); }, [loadTransactions]);
@@ -5336,6 +5400,12 @@ function FinanceModule({ user, dateFilter, addToast }) {
     status: "pendente",
     formaPagamento: "PIX",
     observacoes: "",
+    // ─── Campos de despesa ───
+    fornecedorId: "",
+    fornecedorNome: "",
+    // Modo da despesa: "avulsa" (1 lançamento) | "parcelada" (N mensais) | "fixa" (recorrente)
+    despesaModo: "avulsa",
+    parcelas: "2",
   };
   const [form, setForm] = useState(emptyForm);
 
@@ -5432,6 +5502,12 @@ function FinanceModule({ user, dateFilter, addToast }) {
       status: row.status || "pendente",
       formaPagamento: row.formaPagamento || "PIX",
       observacoes: row.observacoes || "",
+      fornecedorId: row.fornecedorId || "",
+      fornecedorNome: row.fornecedorNome || "",
+      // Na edição sempre tratamos como lançamento único (parcelas/recorrência
+      // já foram materializadas — cada lançamento é editável individualmente).
+      despesaModo: "avulsa",
+      parcelas: "2",
     });
     setModalOpen(true);
   }, []);
@@ -5447,10 +5523,17 @@ function FinanceModule({ user, dateFilter, addToast }) {
       return;
     }
 
+    const isDespesa = form.tipo === "despesa";
+    // Fornecedor só faz sentido em despesas; resolve o nome pelo id selecionado.
+    const fornecedor = isDespesa ? suppliers.find((s) => s.id === form.fornecedorId) : null;
+    const fornecedorId = isDespesa ? (form.fornecedorId || "") : "";
+    const fornecedorNome = isDespesa ? (fornecedor?.nome || form.fornecedorNome || "") : "";
+    const descricaoBase = form.descricao.trim();
+
     if (editing) {
       const updated = {
         ...editing,
-        descricao: form.descricao.trim(),
+        descricao: descricaoBase,
         valor,
         tipo: form.tipo,
         categoria: form.categoria,
@@ -5458,33 +5541,108 @@ function FinanceModule({ user, dateFilter, addToast }) {
         status: form.status,
         formaPagamento: form.formaPagamento,
         observacoes: form.observacoes,
+        fornecedorId,
+        fornecedorNome,
         updatedAt: new Date().toISOString(),
       };
       DB.set("erp:finance:" + updated.id, updated);
       addToast("Transação atualizada.", "success");
-    } else {
-      const prefix = form.tipo === "receita" ? "REC" : "DESP";
-      const numero = getNextNumber(prefix, transactions, "erp:finance:");
-      const newTx = {
-        id: genId(),
-        numero,
-        descricao: form.descricao.trim(),
+      setModalOpen(false);
+      loadTransactions();
+      return;
+    }
+
+    const modo = isDespesa ? form.despesaModo : "avulsa";
+
+    // ─── Despesa PARCELADA: valor é o TOTAL, dividido em N mensais ───────────
+    if (modo === "parcelada") {
+      const n = Math.max(2, Math.floor(parseFloat(String(form.parcelas || "0").replace(",", ".")) || 0));
+      if (n < 2) { addToast("Informe pelo menos 2 parcelas.", "error"); return; }
+      const valores = splitParcelas(valor, n);
+      const parcelamentoId = genId();
+      valores.forEach((vParc, i) => {
+        // Cada parcela vence um mês após a anterior, preservando o dia.
+        const venc = addMonthsKeepDay(form.data, i);
+        const numero = getNextNumber("DESP", [], "erp:finance:");
+        // Chave do storage DEVE bater com o id para edição/exclusão funcionarem.
+        const parcelaTxId = genId();
+        DB.set("erp:finance:" + parcelaTxId, {
+          id: parcelaTxId,
+          numero,
+          descricao: `${descricaoBase} (${i + 1}/${n})`,
+          valor: vParc,
+          tipo: "despesa",
+          categoria: form.categoria,
+          data: venc + "T00:00:00.000Z",
+          status: form.status,
+          formaPagamento: form.formaPagamento,
+          observacoes: form.observacoes,
+          fornecedorId,
+          fornecedorNome,
+          parcelamentoId,
+          parcelaNum: i + 1,
+          parcelaTotal: n,
+          osId: null,
+          createdAt: new Date().toISOString(),
+        });
+      });
+      addToast(`${n} parcelas registradas.`, "success");
+      setModalOpen(false);
+      loadTransactions();
+      return;
+    }
+
+    // ─── Despesa FIXA mensal recorrente: salva template + materializa agora ──
+    if (modo === "fixa") {
+      const diaVencimento = parseInt(String(form.data).split("-")[2], 10) || 1;
+      const templateId = genId();
+      DB.set("erp:despesa_recorrente:" + templateId, {
+        id: templateId,
+        descricao: descricaoBase,
         valor,
-        tipo: form.tipo,
         categoria: form.categoria,
-        data: form.data + "T00:00:00.000Z",
-        status: form.status,
         formaPagamento: form.formaPagamento,
         observacoes: form.observacoes,
-        osId: null,
+        fornecedorId,
+        fornecedorNome,
+        diaVencimento,
+        mesInicio: monthKey(form.data),
+        ativo: true,
+        mesesGerados: [],
         createdAt: new Date().toISOString(),
-      };
-      DB.set("erp:finance:" + newTx.id, newTx);
-      addToast(`Transação ${numero} registrada.`, "success");
+      });
+      // Materializa imediatamente os meses do início até hoje (mín. o mês atual).
+      materializeRecurringExpenses();
+      addToast("Despesa fixa recorrente cadastrada.", "success");
+      setModalOpen(false);
+      loadTransactions();
+      return;
     }
+
+    // ─── Avulsa (receita ou despesa de lançamento único) ────────────────────
+    const prefix = isDespesa ? "DESP" : "REC";
+    const numero = getNextNumber(prefix, transactions, "erp:finance:");
+    const newTx = {
+      id: genId(),
+      numero,
+      descricao: descricaoBase,
+      valor,
+      tipo: form.tipo,
+      categoria: form.categoria,
+      data: form.data + "T00:00:00.000Z",
+      status: form.status,
+      formaPagamento: form.formaPagamento,
+      observacoes: form.observacoes,
+      fornecedorId,
+      fornecedorNome,
+      osId: null,
+      createdAt: new Date().toISOString(),
+    };
+    DB.set("erp:finance:" + newTx.id, newTx);
+    addToast(`Transação ${numero} registrada.`, "success");
     setModalOpen(false);
     loadTransactions();
-  }, [form, editing, transactions, loadTransactions, addToast]);
+  }, [form, editing, transactions, suppliers, loadTransactions, addToast]);
 
   const handleDelete = useCallback((row) => {
     setConfirmDelete(row);
@@ -5528,6 +5686,8 @@ function FinanceModule({ user, dateFilter, addToast }) {
     { key: "data", label: "Data", render: (v) => formatDate(v) },
     { key: "descricao", label: "Descrição" },
     { key: "categoria", label: "Categoria", render: (v) => v || "—" },
+    // Fornecedor: só relevante em despesas; receitas mostram "—"
+    { key: "fornecedorNome", label: "Fornecedor", render: (v, row) => (row.tipo === "despesa" && v) ? v : "—" },
     {
       key: "tipo",
       label: "Tipo",
@@ -5568,13 +5728,23 @@ function FinanceModule({ user, dateFilter, addToast }) {
           <h2 className="text-2xl font-bold text-white">Financeiro</h2>
           <p className="text-gray-400 text-sm mt-1">Receitas, despesas e saldo por status</p>
         </div>
-        <button
-          onClick={openCreate}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-2 min-h-[44px]"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
-          Nova Transação
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setShowRecorrentes(true)}
+            className="px-4 py-2 bg-gray-700 text-gray-200 rounded-lg hover:bg-gray-600 transition text-sm flex items-center gap-2 min-h-[44px]"
+            title="Gerenciar despesas fixas mensais recorrentes"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+            Despesas fixas
+          </button>
+          <button
+            onClick={openCreate}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition text-sm flex items-center gap-2 min-h-[44px]"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+            Nova Transação
+          </button>
+        </div>
       </div>
 
       {/* Cards de status — primeira linha: dinheiro "real" (pago) */}
@@ -5805,6 +5975,81 @@ function FinanceModule({ user, dateFilter, addToast }) {
             </div>
           </div>
 
+          {/* ─── Campos exclusivos de DESPESA: fornecedor, parcelamento, recorrência ─── */}
+          {form.tipo === "despesa" && (
+            <div className="space-y-4 rounded-lg border border-gray-700 bg-gray-900/40 p-3">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Fornecedor</label>
+                  <select name="fornecedorId"
+                    value={form.fornecedorId}
+                    onChange={(e) => setForm({ ...form, fornecedorId: e.target.value })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                  >
+                    <option value="">— Nenhum —</option>
+                    {[...suppliers].sort((a, b) => (a.nome || "").localeCompare(b.nome || "")).map((sup) => (
+                      <option key={sup.id} value={sup.id}>{sup.nome}</option>
+                    ))}
+                  </select>
+                  {suppliers.length === 0 && (
+                    <p className="text-xs text-gray-500 mt-1">Cadastre fornecedores em Cadastro → Fornecedores.</p>
+                  )}
+                </div>
+                {!editing && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1.5">Tipo de despesa</label>
+                    <select name="despesaModo"
+                      value={form.despesaModo}
+                      onChange={(e) => setForm({ ...form, despesaModo: e.target.value })}
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                    >
+                      <option value="avulsa">Avulsa (lançamento único)</option>
+                      <option value="parcelada">Parcelada</option>
+                      <option value="fixa">Fixa mensal (recorrente)</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+
+              {/* Parcelada: valor é o TOTAL, dividido em N mensais a partir do vencimento (campo Data) */}
+              {!editing && form.despesaModo === "parcelada" && (
+                <div className="grid grid-cols-2 gap-4 items-end">
+                  <div>
+                    <label className="block text-sm font-medium text-gray-300 mb-1.5">Nº de parcelas</label>
+                    <input name="parcelas"
+                      type="number"
+                      min="2"
+                      step="1"
+                      inputMode="numeric"
+                      value={form.parcelas}
+                      onChange={(e) => setForm({ ...form, parcelas: e.target.value })}
+                      className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition"
+                    />
+                  </div>
+                  {(() => {
+                    const n = Math.max(2, Math.floor(parseFloat(String(form.parcelas || "0").replace(",", ".")) || 0));
+                    const tot = parseFloat(String(form.valor || "0").replace(",", ".")) || 0;
+                    if (tot <= 0 || n < 2) return <div className="text-xs text-gray-500">O <strong>Valor</strong> é o total a dividir; a data é o vencimento da 1ª parcela.</div>;
+                    return (
+                      <div className="text-xs text-gray-400">
+                        Total <span className="text-white font-semibold">{formatCurrency(tot)}</span> ÷ {n} ≈ <span className="text-white font-semibold">{formatCurrency(tot / n)}</span>/mês.
+                        <br />Vencimentos mensais a partir da data informada.
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Fixa recorrente: materializada mês a mês ao abrir o Financeiro */}
+              {!editing && form.despesaModo === "fixa" && (
+                <p className="text-xs text-gray-400">
+                  Gera automaticamente <strong>uma despesa por mês</strong> (vencimento no dia da data informada), do mês inicial até o mês atual, e continua nos próximos meses.
+                  Gerencie/pare a recorrência no botão <strong>“Despesas fixas”</strong>.
+                </p>
+              )}
+            </div>
+          )}
+
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1.5">Observações</label>
             <textarea name="observacoes"
@@ -5832,7 +6077,122 @@ function FinanceModule({ user, dateFilter, addToast }) {
           onCancel={() => setConfirmDelete(null)}
         />
       )}
+
+      {/* Painel de gestão das despesas fixas mensais recorrentes */}
+      {showRecorrentes && (
+        <RecorrentesPanel
+          onClose={() => setShowRecorrentes(false)}
+          addToast={addToast}
+          onChanged={loadTransactions}
+          canDelete={canDelete}
+        />
+      )}
     </div>
+  );
+}
+
+// ─── Painel: Despesas fixas mensais recorrentes ─────────────────────────────
+// Gerencia os templates em erp:despesa_recorrente:. Permite pausar/reativar a
+// recorrência (sem apagar os lançamentos já materializados) e excluir o template.
+// Ao reativar, materializa imediatamente os meses pendentes.
+function RecorrentesPanel({ onClose, addToast, onChanged, canDelete }) {
+  const [templates, setTemplates] = useState([]);
+  const [confirmDel, setConfirmDel] = useState(null);
+
+  const load = useCallback(() => {
+    setTemplates(DB.list("erp:despesa_recorrente:").sort((a, b) => (a.descricao || "").localeCompare(b.descricao || "")));
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const toggleAtivo = useCallback((t) => {
+    const reativando = t.ativo === false;
+    DB.set("erp:despesa_recorrente:" + t.id, { ...t, ativo: reativando, updatedAt: new Date().toISOString() });
+    // Reativar deve preencher os meses que ficaram para trás durante a pausa.
+    if (reativando) materializeRecurringExpenses();
+    addToast(reativando ? "Recorrência reativada." : "Recorrência pausada.", "success");
+    load();
+    onChanged?.();
+  }, [addToast, load, onChanged]);
+
+  const doDelete = useCallback(() => {
+    if (!confirmDel) return;
+    DB.delete("erp:despesa_recorrente:" + confirmDel.id);
+    addToast("Despesa fixa removida. Os lançamentos já gerados foram mantidos.", "success");
+    setConfirmDel(null);
+    load();
+    onChanged?.();
+  }, [confirmDel, addToast, load, onChanged]);
+
+  return (
+    <Modal isOpen={true} title="Despesas fixas recorrentes" onClose={onClose} size="lg">
+      <div className="space-y-3">
+        <p className="text-sm text-gray-400">
+          Despesas mensais que se repetem (aluguel, internet, energia, mensalidades…). O sistema gera um
+          lançamento por mês automaticamente. Pausar interrompe os próximos meses; excluir remove o modelo
+          mas mantém os lançamentos já criados.
+        </p>
+
+        {templates.length === 0 ? (
+          <div className="text-center text-gray-500 py-10 text-sm">
+            Nenhuma despesa fixa cadastrada. Crie uma em <strong>Nova Transação → Despesa → Tipo: Fixa mensal</strong>.
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {templates.map((t) => {
+              const inativo = t.ativo === false;
+              const geradas = Array.isArray(t.mesesGerados) ? t.mesesGerados.length : 0;
+              return (
+                <div key={t.id} className={`rounded-lg border p-3 flex flex-wrap items-center gap-3 ${inativo ? "border-gray-700 bg-gray-900/40 opacity-70" : "border-gray-700 bg-gray-700/40"}`}>
+                  <div className="flex-1 min-w-[180px]">
+                    <div className="flex items-center gap-2">
+                      <span className="text-white font-medium">{t.descricao || "—"}</span>
+                      {inativo
+                        ? <span className="px-2 py-0.5 rounded-full text-xs bg-gray-600 text-gray-200">Pausada</span>
+                        : <span className="px-2 py-0.5 rounded-full text-xs bg-green-500/20 text-green-400">Ativa</span>}
+                    </div>
+                    <div className="text-xs text-gray-400 mt-0.5">
+                      {t.fornecedorNome ? `${t.fornecedorNome} · ` : ""}Vence dia {t.diaVencimento || "—"} · {geradas} mês(es) gerado(s)
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-white font-semibold tabular-nums">{formatCurrency(Number(t.valor) || 0)}</div>
+                    <div className="text-xs text-gray-500">/mês</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => toggleAtivo(t)}
+                      className="px-3 py-1.5 text-xs rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600 transition min-h-[36px]"
+                    >
+                      {inativo ? "Reativar" : "Pausar"}
+                    </button>
+                    {canDelete && (
+                      <button
+                        onClick={() => setConfirmDel(t)}
+                        className="px-3 py-1.5 text-xs rounded-lg bg-red-600/80 text-white hover:bg-red-600 transition min-h-[36px]"
+                      >
+                        Excluir
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex justify-end pt-3 border-t border-gray-700">
+          <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600 transition min-h-[44px]">Fechar</button>
+        </div>
+      </div>
+
+      {confirmDel && (
+        <ConfirmDialog
+          message={`Excluir a despesa fixa "${confirmDel.descricao}"? Os lançamentos mensais já gerados serão mantidos; apenas a recorrência futura para.`}
+          onConfirm={doDelete}
+          onCancel={() => setConfirmDel(null)}
+        />
+      )}
+    </Modal>
   );
 }
 
@@ -6451,11 +6811,15 @@ function generateOSHTML(os, clients) {
   const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
 
   const rowsServicos = servicos ? servicos.map((s) => {
+    // valor = valor unitário; qtd = quantidade (default 1); subtotal = valor × qtd
     const v = Number(s.valor) || 0;
+    const qtd = Math.max(1, Number(s.quantidade) || 1);
     return `<tr>
       <td><strong style="color:var(--ink-900)">${_h(s.tipo || "—")}</strong></td>
       <td class="muted">${_h(s.descricao || "—")}</td>
+      <td class="num">${qtd}</td>
       <td class="num">${_fmtBRL(v)}</td>
+      <td class="num">${_fmtBRL(v * qtd)}</td>
     </tr>`;
   }).join("") : "";
 
@@ -6499,9 +6863,11 @@ function generateOSHTML(os, clients) {
       <table>
         <thead>
           <tr>
-            <th style="width:28%">Tipo</th>
+            <th style="width:24%">Tipo</th>
             <th>Descrição</th>
-            <th class="num" style="width:130px">Valor</th>
+            <th class="num" style="width:60px">Qtd</th>
+            <th class="num" style="width:110px">Valor Unit.</th>
+            <th class="num" style="width:120px">Subtotal</th>
           </tr>
         </thead>
         <tbody>${rowsServicos}</tbody>
@@ -6575,11 +6941,15 @@ function generateReciboHTML(os, clients) {
   const pecas = Array.isArray(os.pecas) && os.pecas.length > 0 ? os.pecas : (os.itensUtilizados || []);
 
   const rowsServicos = servicos ? servicos.map((s) => {
+    // valor = valor unitário; qtd = quantidade (default 1); subtotal = valor × qtd
     const v = Number(s.valor) || 0;
+    const qtd = Math.max(1, Number(s.quantidade) || 1);
     return `<tr>
       <td><strong style="color:var(--ink-900)">${_h(s.tipo || "—")}</strong></td>
       <td class="muted">${_h(s.descricao || "—")}</td>
+      <td class="num">${qtd}</td>
       <td class="num">${_fmtBRL(v)}</td>
+      <td class="num">${_fmtBRL(v * qtd)}</td>
     </tr>`;
   }).join("") : "";
 
@@ -6626,9 +6996,11 @@ function generateReciboHTML(os, clients) {
       <table>
         <thead>
           <tr>
-            <th style="width:28%">Tipo</th>
+            <th style="width:24%">Tipo</th>
             <th>Descrição</th>
-            <th class="num" style="width:130px">Valor</th>
+            <th class="num" style="width:60px">Qtd</th>
+            <th class="num" style="width:110px">Valor Unit.</th>
+            <th class="num" style="width:120px">Subtotal</th>
           </tr>
         </thead>
         <tbody>${rowsServicos}</tbody>
@@ -6978,7 +7350,9 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
     servicoId: "",
     tipo: "Instalação",
     descricao: "",
+    // valor = valor UNITÁRIO do serviço; subtotal da linha = valor × quantidade
     valor: "",
+    quantidade: "1",
     equipamentoTipo: "central",
     equipamentoModelo: "",
     equipamentoCapacidade: "",
@@ -7000,8 +7374,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
   // Subtotal reativo: soma dos valores dos serviços + peças (antes do desconto)
   const valorTotalForm = useMemo(() => {
     const totalServicos = (form.servicos || []).reduce((acc, s) => {
+      // valor é unitário; multiplica pela quantidade (default 1) para o subtotal da linha
       const v = parseFloat(String(s.valor || "0").replace(",", ".")) || 0;
-      return acc + v;
+      const q = parseFloat(String(s.quantidade || "1").replace(",", ".")) || 1;
+      return acc + v * q;
     }, 0);
     const totalPecas = (form.pecas || []).reduce((acc, p) => {
       const qtd = parseFloat(String(p.quantidade || "0").replace(",", ".")) || 0;
@@ -7103,6 +7479,8 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
           tipo: s.tipo || "Instalação",
           descricao: s.descricao || "",
           valor: s.valor !== undefined && s.valor !== null ? String(s.valor) : "",
+          // OS antigas sem quantidade assumem 1 (retrocompatível)
+          quantidade: s.quantidade !== undefined && s.quantidade !== null ? String(s.quantidade) : "1",
           equipamentoTipo: s.equipamentoTipo || row.equipamentoTipo || "central",
           equipamentoModelo: s.equipamentoModelo || row.equipamentoModelo || "",
           equipamentoCapacidade: s.equipamentoCapacidade || row.equipamentoCapacidade || row.equipamentoBTUs || "",
@@ -7112,6 +7490,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
           tipo: row.tipo || "Instalação",
           descricao: row.descricao || "",
           valor: row.valor !== undefined && row.valor !== null ? String(row.valor) : "",
+          quantidade: "1",
           equipamentoTipo: row.equipamentoTipo || "central",
           equipamentoModelo: row.equipamentoModelo || "",
           equipamentoCapacidade: row.equipamentoCapacidade || row.equipamentoBTUs || "",
@@ -7157,7 +7536,9 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
         servicoId: s.servicoId || "",
         tipo: (s.tipo || "").trim(),
         descricao: (s.descricao || "").trim(),
+        // valor = valor unitário; quantidade = nº de unidades (mínimo 1)
         valor: parseFloat(String(s.valor || "0").replace(",", ".")) || 0,
+        quantidade: Math.max(1, parseFloat(String(s.quantidade || "1").replace(",", ".")) || 1),
         // Cada serviço carrega seu próprio tipo de equipamento
         equipamentoTipo: s.equipamentoTipo || "central",
         equipamentoModelo: (s.equipamentoModelo || "").trim(),
@@ -7221,9 +7602,9 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
 
     const cliente = (allClients || []).find((c) => c.id === form.clienteId);
     const tecnico = tecnicos.find((t) => t.id === form.tecnicoId);
-    // Subtotal da OS = soma dos serviços + soma das peças (qtd × valorUnit).
+    // Subtotal da OS = soma dos serviços (valor × qtd) + soma das peças (qtd × valorUnit).
     // O total final (campo `valor`) já vem com o desconto abatido.
-    const totalServicos = servicosLimpos.reduce((acc, s) => acc + s.valor, 0);
+    const totalServicos = servicosLimpos.reduce((acc, s) => acc + s.valor * (s.quantidade || 1), 0);
     const totalPecas = pecasLimpas.reduce((acc, p) => acc + p.quantidade * p.valorUnit, 0);
     const subtotalOS = totalServicos + totalPecas;
     const descontoTipoOS = form.descontoTipo === "percentual" ? "percentual" : "valor";
@@ -7907,7 +8288,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                       </div>
                     )}
 
-                    {/* Linha 1: Tipo serviço | Descrição | Valor */}
+                    {/* Linha 1: Tipo serviço | Descrição | Qtd | Valor unitário */}
                     <div className="grid grid-cols-12 gap-2">
                       <div className="col-span-12 sm:col-span-3">
                         <label className="block text-xs text-gray-400 mb-1">Tipo</label>
@@ -7921,7 +8302,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                           ))}
                         </select>
                       </div>
-                      <div className="col-span-12 sm:col-span-6">
+                      <div className="col-span-12 sm:col-span-4">
                         <label className="block text-xs text-gray-400 mb-1">Descrição</label>
                         <input name="descricao"
                           type="text"
@@ -7931,8 +8312,21 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                           className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
                         />
                       </div>
-                      <div className="col-span-12 sm:col-span-3">
-                        <label className="block text-xs text-gray-400 mb-1">Valor (R$)</label>
+                      <div className="col-span-4 sm:col-span-2">
+                        <label className="block text-xs text-gray-400 mb-1">Qtd</label>
+                        <input name="quantidade"
+                          type="number"
+                          step="1"
+                          min="1"
+                          inputMode="numeric"
+                          value={s.quantidade ?? "1"}
+                          onChange={(e) => updateServico(idx, { quantidade: e.target.value })}
+                          placeholder="1"
+                          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
+                        />
+                      </div>
+                      <div className="col-span-8 sm:col-span-3">
+                        <label className="block text-xs text-gray-400 mb-1">Valor unit. (R$)</label>
                         <input name="valor"
                           type="number"
                           step="0.01"
@@ -7944,6 +8338,19 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                         />
                       </div>
                     </div>
+
+                    {/* Subtotal da linha = valor unitário × quantidade */}
+                    {(() => {
+                      const vUnit = parseFloat(String(s.valor || "0").replace(",", ".")) || 0;
+                      const qtd = Math.max(1, parseFloat(String(s.quantidade || "1").replace(",", ".")) || 1);
+                      if (vUnit <= 0) return null;
+                      return (
+                        <div className="text-right text-xs text-gray-400">
+                          Subtotal: <span className="text-white font-semibold tabular-nums">{formatCurrency(vUnit * qtd)}</span>
+                          {qtd > 1 && <span className="text-gray-500"> ({qtd} × {formatCurrency(vUnit)})</span>}
+                        </div>
+                      );
+                    })()}
 
                     {/* Linha 2: Equipamento por serviço — tipo / picker de modelo cadastrado */}
                     <div className="grid grid-cols-12 gap-2 pt-2 border-t border-gray-700/60">
