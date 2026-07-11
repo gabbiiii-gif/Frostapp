@@ -16397,9 +16397,14 @@ export default function App() {
           }
         } catch { /* ignora */ }
       }
-      // Se não há nenhum usuário cadastrado, exige criação do super admin
+      // Se não há nenhum usuário cadastrado, exige criação do super admin.
+      // SÓ no modo local puro (sem Supabase): em produção multi-tenant quem cria
+      // empresas/admins é o Master, então um cache local vazio (ex.: ao recarregar
+      // sem sessão restaurada, ou em dispositivo novo) deve levar ao LoginScreen —
+      // NÃO à tela de "Primeiro acesso". Sem esse gate, todo reload sem sessão
+      // ativa caía no FirstUserSetup.
       const usersCount = DB.listAll("erp:user:").length;
-      if (usersCount === 0 && !masterMode) setNeedsFirstUser(true);
+      if (usersCount === 0 && !masterMode && !supabase) setNeedsFirstUser(true);
       // Restauração de sessão via sessionStorage — agora valida token contra hash do usuário
       try {
         const sessionRaw = sessionStorage.getItem("frost_session");
