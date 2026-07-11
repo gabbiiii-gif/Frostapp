@@ -1185,6 +1185,48 @@ export async function masterDeleteCompany(master, company) {
   return callMasterCompanies(master, 'delete', { company: { id: company?.id } });
 }
 
+// ─── Gestão de instâncias WhatsApp (Evolution) via edge evolution-manage ─────
+// A Global API Key do Evolution fica só na edge function (secret). O app nunca
+// a vê — pede create/connect(QR)/status/logout/delete e recebe o QR/estado.
+//
+// Dois callers:
+//   • Master (masterEvolution): create/delete + tudo, autenticado por token de
+//     sessão do master, passando company_id.
+//   • Admin da empresa (adminEvolution): connect/status/logout na PRÓPRIA empresa,
+//     autenticado pelo JWT do Supabase (supabase.functions.invoke injeta o token).
+async function _evoFetch(payload) {
+  const resp = await fetch(`${supabaseUrl}/functions/v1/evolution-manage`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: supabaseKey },
+    body: JSON.stringify(payload),
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok || !body.ok) return { ok: false, error: body.error || `HTTP ${resp.status}`, detail: body.detail };
+  return { ok: true, ...body };
+}
+
+// Master: gerencia a instância de QUALQUER empresa (passa companyId).
+export async function masterEvolution(master, action, companyId, extra = {}) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  if (!master?.id || !master?.sessionTokenHash) {
+    return { ok: false, error: 'Sessão do master expirada.' };
+  }
+  return _evoFetch({ action, company_id: companyId, masterId: master.id, sessionTokenHash: master.sessionTokenHash, ...extra });
+}
+
+// Admin: gerencia a instância da PRÓPRIA empresa (JWT via functions.invoke).
+export async function adminEvolution(action) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const { data, error } = await supabase.functions.invoke('evolution-manage', { body: { action } });
+    if (error) return { ok: false, error: error.message };
+    if (!data?.ok) return { ok: false, error: data?.error || 'falha', detail: data?.detail };
+    return { ok: true, ...data };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 // ─── Storage: upload/delete de fotos e assinaturas da OS ─────────────────────
 // HARDENING C0-2: buckets 'os-fotos' e 'os-assinaturas' passam a ser PRIVADOS.
 // Antes eram públicos: qualquer um com a URL lia foto/assinatura/CPF do cliente

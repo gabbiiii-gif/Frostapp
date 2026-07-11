@@ -11,7 +11,7 @@ import {
 import { animate } from "animejs";
 import { motion } from "motion/react";
 import gsap from "gsap";
-import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig } from "./supabase.js";
+import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, masterEvolution, adminEvolution, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -4142,6 +4142,204 @@ function MasterLoginScreen({ onLogin, onCancel, theme, setTheme }) {
   );
 }
 
+// Renderiza um QR (base64 cru ou data URL) do Evolution.
+function _qrSrc(qr) {
+  if (!qr) return null;
+  return String(qr).startsWith("data:") ? qr : `data:image/png;base64,${qr}`;
+}
+
+const WA_STATE_LABEL = {
+  carregando: { txt: "Verificando…", cls: "bg-gray-500/20 text-gray-300" },
+  none: { txt: "Sem conexão", cls: "bg-gray-500/20 text-gray-300" },
+  open: { txt: "Conectado", cls: "bg-green-500/20 text-green-400" },
+  connecting: { txt: "Conectando…", cls: "bg-yellow-500/20 text-yellow-300" },
+  close: { txt: "Desconectado", cls: "bg-red-500/20 text-red-400" },
+  unknown: { txt: "Desconhecido", cls: "bg-gray-500/20 text-gray-300" },
+};
+
+// Modal do Master: cria/gera QR/reconecta/exclui a instância de WhatsApp de uma empresa.
+function MasterWhatsAppModal({ master, company, onClose, addToast }) {
+  const [loading, setLoading] = useState(false);
+  const [state, setState] = useState("carregando");
+  const [instance, setInstance] = useState(null);
+  const [qr, setQr] = useState(null);
+  const [pairing, setPairing] = useState(null);
+
+  const refreshStatus = useCallback(async () => {
+    const r = await masterEvolution(master, "status", company.id);
+    if (r.ok) { setState(r.state || "unknown"); setInstance(r.instance || null); }
+    else setState("unknown");
+  }, [master, company.id]);
+
+  useEffect(() => { refreshStatus(); }, [refreshStatus]);
+
+  // Enquanto o QR está na tela, faz polling pra detectar quando conectar.
+  useEffect(() => {
+    if (!qr) return;
+    const id = setInterval(async () => {
+      const r = await masterEvolution(master, "status", company.id);
+      if (r.ok && r.state === "open") {
+        setQr(null); setState("open");
+        addToast?.("WhatsApp conectado! ✅", "success");
+      }
+    }, 4000);
+    return () => clearInterval(id);
+  }, [qr, master, company.id, addToast]);
+
+  const doConnect = useCallback(async () => {
+    setLoading(true);
+    const r = await masterEvolution(master, "connect", company.id);
+    setLoading(false);
+    if (!r.ok) { addToast?.(`Falha ao gerar QR: ${r.error}`, "error"); return; }
+    setQr(r.qr); setPairing(r.pairingCode || null);
+  }, [master, company.id, addToast]);
+
+  const doCreate = useCallback(async () => {
+    setLoading(true);
+    const r = await masterEvolution(master, "create", company.id);
+    setLoading(false);
+    if (!r.ok) {
+      if (r.error === "instance_exists") { doConnect(); return; }
+      addToast?.(`Falha ao criar conexão: ${r.error}${r.detail ? " — " + r.detail : ""}`, "error");
+      return;
+    }
+    setInstance(r.instance); setQr(r.qr); setPairing(r.pairingCode || null);
+    if (!r.webhookOk) addToast?.("Instância criada, mas o webhook falhou — a IA pode não responder. Verifique o secret WEBHOOK_TOKEN.", "warning");
+  }, [master, company.id, addToast, doConnect]);
+
+  const doDelete = useCallback(async () => {
+    if (!window.confirm("Excluir a conexão de WhatsApp desta empresa? A instância será removida do Evolution.")) return;
+    setLoading(true);
+    const r = await masterEvolution(master, "delete", company.id);
+    setLoading(false);
+    if (!r.ok) { addToast?.(`Falha ao excluir: ${r.error}`, "error"); return; }
+    setQr(null); setState("none"); setInstance(null);
+    addToast?.("Conexão de WhatsApp excluída.", "success");
+  }, [master, company.id, addToast]);
+
+  const lbl = WA_STATE_LABEL[state] || WA_STATE_LABEL.unknown;
+  const hasInstance = !!instance && state !== "none";
+
+  return (
+    <Modal isOpen={true} title={`WhatsApp — ${company.nome}`} onClose={onClose} size="md">
+      <div className="space-y-4">
+        <div className="flex items-center gap-2 text-sm">
+          <span className="text-gray-400">Status:</span>
+          <span className={`px-2 py-0.5 rounded-full text-xs ${lbl.cls}`}>{lbl.txt}</span>
+          {instance && <span className="text-xs text-gray-500 truncate">({instance})</span>}
+          <button onClick={refreshStatus} className="ml-auto text-xs text-cyan-300 hover:text-cyan-200">atualizar</button>
+        </div>
+
+        {qr ? (
+          <div className="text-center space-y-2">
+            <p className="text-sm text-gray-300">Abra o WhatsApp → <strong>Aparelhos conectados</strong> → <strong>Conectar aparelho</strong> e escaneie:</p>
+            <img src={_qrSrc(qr)} alt="QR Code WhatsApp" className="mx-auto w-56 h-56 bg-white rounded-lg p-2" />
+            {pairing && <p className="text-xs text-gray-400">Ou use o código: <strong className="text-white">{pairing}</strong></p>}
+            <p className="text-[11px] text-gray-500">A tela atualiza sozinha quando conectar.</p>
+          </div>
+        ) : (
+          <div className="text-sm text-gray-400">
+            {state === "open"
+              ? "✅ WhatsApp conectado e o agente de IA está ativo para esta empresa."
+              : hasInstance
+                ? "A instância existe, mas o número está desconectado. Gere o QR para (re)conectar."
+                : "Esta empresa ainda não tem conexão de WhatsApp. Crie uma para ativar o agente de IA."}
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-2 pt-2">
+          {!hasInstance && !qr && (
+            <button onClick={doCreate} disabled={loading} className="px-4 py-2 rounded-lg bg-green-600 hover:bg-green-700 text-white text-sm disabled:opacity-50">
+              {loading ? "Criando…" : "Criar conexão WhatsApp"}
+            </button>
+          )}
+          {hasInstance && (
+            <button onClick={doConnect} disabled={loading} className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-sm disabled:opacity-50">
+              {loading ? "Gerando…" : (state === "open" ? "Trocar número (novo QR)" : "Gerar QR / Reconectar")}
+            </button>
+          )}
+          {hasInstance && (
+            <button onClick={doDelete} disabled={loading} className="px-4 py-2 rounded-lg bg-red-600/20 hover:bg-red-600/40 text-red-300 text-sm disabled:opacity-50">
+              Excluir conexão
+            </button>
+          )}
+          <button onClick={onClose} className="px-4 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm ml-auto">Fechar</button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// Painel do ADMIN da empresa: status do WhatsApp + reconectar (QR) sozinho
+// quando o número cair. Usa adminEvolution (JWT) — age só na própria empresa.
+function AdminWhatsAppConnect({ addToast }) {
+  const [state, setState] = useState("carregando");
+  const [instance, setInstance] = useState(null);
+  const [qr, setQr] = useState(null);
+  const [pairing, setPairing] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = useCallback(async () => {
+    const r = await adminEvolution("status");
+    if (r.ok) { setState(r.state || "unknown"); setInstance(r.instance || null); }
+    else setState("unknown");
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (!qr) return;
+    const id = setInterval(async () => {
+      const r = await adminEvolution("status");
+      if (r.ok && r.state === "open") { setQr(null); setState("open"); addToast?.("WhatsApp conectado! ✅", "success"); }
+    }, 4000);
+    return () => clearInterval(id);
+  }, [qr, addToast]);
+
+  const reconnect = useCallback(async () => {
+    setLoading(true);
+    const r = await adminEvolution("connect");
+    setLoading(false);
+    if (!r.ok) {
+      addToast?.(r.error === "no_instance"
+        ? "Nenhuma conexão configurada. Peça ao administrador do sistema para criar."
+        : `Falha ao gerar QR: ${r.error}`, "error");
+      return;
+    }
+    setQr(r.qr); setPairing(r.pairingCode || null);
+  }, [addToast]);
+
+  const lbl = WA_STATE_LABEL[state] || WA_STATE_LABEL.unknown;
+  if (state === "none") return null; // sem instância criada pelo master: não mostra nada
+
+  return (
+    <div className="rounded-lg border border-slate-700 bg-slate-800/60 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-semibold text-white">Conexão do WhatsApp</span>
+        <span className={`px-2 py-0.5 rounded-full text-xs ${lbl.cls}`}>{lbl.txt}</span>
+        <button onClick={refresh} className="ml-auto text-xs text-cyan-300 hover:text-cyan-200">atualizar</button>
+      </div>
+      {qr ? (
+        <div className="text-center space-y-2">
+          <p className="text-sm text-slate-300">Abra o WhatsApp → <strong>Aparelhos conectados</strong> → <strong>Conectar aparelho</strong> e escaneie:</p>
+          <img src={_qrSrc(qr)} alt="QR Code WhatsApp" className="mx-auto w-52 h-52 bg-white rounded-lg p-2" />
+          {pairing && <p className="text-xs text-slate-400">Ou use o código: <strong className="text-white">{pairing}</strong></p>}
+          <p className="text-[11px] text-slate-500">Atualiza sozinho ao conectar.</p>
+        </div>
+      ) : state === "open" ? (
+        <p className="text-sm text-emerald-300">✅ Número conectado. O agente está atendendo no WhatsApp.</p>
+      ) : (
+        <div className="space-y-2">
+          <p className="text-sm text-slate-300">O WhatsApp está desconectado. Clique para reconectar e escanear o QR.</p>
+          <button onClick={reconnect} disabled={loading} className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-white text-sm disabled:opacity-50">
+            {loading ? "Gerando…" : "Conectar / Reconectar"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   const [companies, setCompanies] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -4151,6 +4349,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   const [confirmDelete, setConfirmDelete] = useState(null); // empresa a excluir
   const [editingCompany, setEditingCompany] = useState(null); // empresa em edição
   const [showAuditLog, setShowAuditLog] = useState(false);
+  const [waCompany, setWaCompany] = useState(null); // empresa gerenciando conexão WhatsApp
 
   // Form state
   const [cNome, setCNome] = useState("");
@@ -4563,11 +4762,25 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
                     Excluir
                   </button>
                 </div>
+                {Array.isArray(c.allowedModules) && c.allowedModules.includes("ia") && (
+                  <button onClick={() => setWaCompany(c)} className="mt-2 w-full text-xs py-2 rounded-lg bg-emerald-600/15 hover:bg-emerald-600/30 text-emerald-300 transition flex items-center justify-center gap-1.5" title="Conexão de WhatsApp / Agente de IA">
+                    💬 Conexão WhatsApp
+                  </button>
+                )}
               </div>
             );
           })}
         </div>
       </main>
+
+      {waCompany && (
+        <MasterWhatsAppModal
+          master={master}
+          company={waCompany}
+          onClose={() => setWaCompany(null)}
+          addToast={addToast}
+        />
+      )}
 
       {showForm && (
         <Modal isOpen={true} title={editingCompany ? "Editar empresa" : "Cadastrar nova empresa"} onClose={() => { setShowForm(false); resetForm(); }} size="lg">
@@ -15386,6 +15599,8 @@ function IAAtendimentoModule({ user, addToast }) {
                 <input value={config.evolution_url || ""} onChange={(e) => setConfig({ ...config, evolution_url: e.target.value })}
                   placeholder="https://evolution.seudominio.com" className="w-full px-3 py-2 bg-slate-700 text-white rounded text-sm" />
               </div>
+              {/* Status/reconexão do WhatsApp (a instância é criada pelo master) */}
+              <AdminWhatsAppConnect addToast={addToast} />
               <div>
                 <label className="block text-sm text-slate-300 mb-1">Prompt do sistema</label>
                 <textarea value={config.system_prompt || ""} onChange={(e) => setConfig({ ...config, system_prompt: e.target.value })}
