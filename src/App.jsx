@@ -4189,9 +4189,17 @@ function MasterWhatsAppModal({ master, company, onClose, addToast }) {
   const doConnect = useCallback(async () => {
     setLoading(true);
     const r = await masterEvolution(master, "connect", company.id);
+    if (r.ok && r.qr) { setQr(r.qr); setPairing(r.pairingCode || null); setLoading(false); return; }
+    // A instância configurada pode não existir mais no Evolution (foi apagada).
+    // Recria do zero pra recuperar a conexão.
+    const c = await masterEvolution(master, "create", company.id);
     setLoading(false);
-    if (!r.ok) { addToast?.(`Falha ao gerar QR: ${r.error}`, "error"); return; }
-    setQr(r.qr); setPairing(r.pairingCode || null);
+    if (c.ok) {
+      setInstance(c.instance); setQr(c.qr); setPairing(c.pairingCode || null);
+      if (!c.webhookOk) addToast?.("Instância recriada, mas o webhook falhou — verifique o secret WEBHOOK_TOKEN.", "warning");
+      return;
+    }
+    addToast?.(`Falha ao gerar QR: ${r.error || c.error}`, "error");
   }, [master, company.id, addToast]);
 
   const doCreate = useCallback(async () => {
@@ -4762,7 +4770,8 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
                     Excluir
                   </button>
                 </div>
-                {Array.isArray(c.allowedModules) && c.allowedModules.includes("ia") && (
+                {/* Empresas legadas com allowedModules nulo = todos os módulos liberados. */}
+                {(!Array.isArray(c.allowedModules) || c.allowedModules.includes("ia")) && (
                   <button onClick={() => setWaCompany(c)} className="mt-2 w-full text-xs py-2 rounded-lg bg-emerald-600/15 hover:bg-emerald-600/30 text-emerald-300 transition flex items-center justify-center gap-1.5" title="Conexão de WhatsApp / Agente de IA">
                     💬 Conexão WhatsApp
                   </button>
