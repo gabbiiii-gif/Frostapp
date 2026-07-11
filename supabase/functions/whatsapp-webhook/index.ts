@@ -103,7 +103,9 @@ Deno.serve(async (req) => {
   const text: string =
     msg.conversation || msg.extendedTextMessage?.text || msg.imageMessage?.caption || "";
   const hasImage = !!msg.imageMessage;
-  if (!text && !hasImage) return ok(); // áudio/outros — fase 2
+  // Nota de voz do WhatsApp: audioMessage (ou pttMessage em algumas versões).
+  const hasAudio = !!(msg.audioMessage || msg.pttMessage);
+  if (!text && !hasImage && !hasAudio) return ok(); // outros tipos — fase futura
 
   // ── 3. Responde 200 já; processa em background ─────────────────────────────
   const job = handleMessage({
@@ -112,6 +114,7 @@ Deno.serve(async (req) => {
     pushName: data?.pushName || "",
     text,
     hasImage,
+    hasAudio,
     fromMe,
     messageId: key.id || "",
   });
@@ -126,6 +129,7 @@ interface Job {
   pushName: string;
   text: string;
   hasImage: boolean;
+  hasAudio: boolean;
   fromMe: boolean;
   messageId: string;
 }
@@ -185,6 +189,39 @@ async function handleMessage(j: Job) {
     return;
   }
 
+  // ── Áudio (nota de voz): baixa da Evolution → transcreve (Groq Whisper) ───
+  // O texto transcrito passa a ser a mensagem do cliente e segue o fluxo normal
+  // do agente. Se não der pra entender, pede pra escrever.
+  let effectiveText = j.text;
+  if (j.hasAudio && apikey && evoBase) {
+    try {
+      const r = await fetch(`${evoBase}/chat/getBase64FromMediaMessage/${j.instance}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey },
+        body: JSON.stringify({ message: { key: { id: j.messageId } }, convertToMp4: false }),
+      });
+      if (r.ok) {
+        const jr = await r.json();
+        const b64: string | null = jr?.base64 || null;
+        if (b64) {
+          const transcricao = await transcreverAudio(b64, jr?.mimetype);
+          if (transcricao) effectiveText = transcricao;
+        }
+      }
+    } catch (e) { console.error("[whatsapp-webhook] audio:", e); }
+    if (!effectiveText) {
+      const fb = "Desculpe, não consegui entender o áudio. Pode escrever a sua mensagem, por favor? 🙏";
+      await enviarTexto(evoBase, j.instance, apikey, j.phone, fb);
+      await supabase.from("ai_messages").insert({
+        conversation_id: conv.id, company_id: cfg.company_id, role: "customer", content: "[áudio não reconhecido]",
+      });
+      await supabase.from("ai_messages").insert({
+        conversation_id: conv.id, company_id: cfg.company_id, role: "agent", content: fb,
+      });
+      return;
+    }
+  }
+
   // ── Resposta de pós-venda? ───────────────────────────────────────────────
   // Antes de acionar o agente conversacional de OS, verifica se este inbound é
   // a resposta do cliente a uma mensagem de pós-venda enviada (NPS, lembrete,
@@ -192,7 +229,7 @@ async function handleMessage(j: Job) {
   // grava em pos_venda_mensagens, manda um ack curto e escala humano (Inbox +
   // email) quando necessário — e NÃO cai no fluxo do agente. Só texto: respostas
   // de pós-venda são textuais (nota, "sim", "quero reagendar").
-  if (j.text && await handlePosVendaReply(supabase, cfg, j)) {
+  if (effectiveText && await handlePosVendaReply(supabase, cfg, { ...j, text: effectiveText })) {
     return;
   }
 
@@ -228,7 +265,7 @@ async function handleMessage(j: Job) {
     conversation_id: conv.id,
     company_id: cfg.company_id,
     role: "customer",
-    content: j.text || "[imagem enviada pelo cliente]",
+    content: j.hasAudio ? `🎤 ${effectiveText}` : (effectiveText || "[imagem enviada pelo cliente]"),
     media_url: mediaUrl,
   });
 
@@ -727,6 +764,35 @@ async function executarTool(
   }
 
   return "Ferramenta desconhecida.";
+}
+
+// Transcreve uma nota de voz (base64) via Groq Whisper (large-v3). OpenAI-compat.
+// Retorna o texto transcrito ou "" em caso de erro/sem chave. WhatsApp manda a
+// voz em OGG/Opus; Whisper aceita direto.
+async function transcreverAudio(base64: string, mimetype?: string): Promise<string> {
+  const key = Deno.env.get("GROQ_API_KEY");
+  if (!key) { console.warn("[whatsapp-webhook] GROQ_API_KEY ausente — áudio não transcrito"); return ""; }
+  try {
+    const bin = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0));
+    const type = mimetype || "audio/ogg";
+    const ext = /mp4|m4a|aac/.test(type) ? "m4a" : /mpeg|mp3/.test(type) ? "mp3" : /wav/.test(type) ? "wav" : "ogg";
+    const form = new FormData();
+    form.append("file", new Blob([bin], { type }), `audio.${ext}`);
+    form.append("model", "whisper-large-v3");
+    form.append("language", "pt");
+    form.append("response_format", "json");
+    const r = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}` },
+      body: form,
+    });
+    if (!r.ok) { console.error("[whatsapp-webhook] Groq transcrição:", r.status, (await r.text()).slice(0, 200)); return ""; }
+    const jr = await r.json();
+    return String(jr?.text || "").trim();
+  } catch (e) {
+    console.error("[whatsapp-webhook] transcreverAudio:", e);
+    return "";
+  }
 }
 
 async function enviarTexto(
