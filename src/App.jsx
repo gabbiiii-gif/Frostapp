@@ -4142,6 +4142,28 @@ function MasterLoginScreen({ onLogin, onCancel, theme, setTheme }) {
   );
 }
 
+// Exibe imagem do bucket PRIVADO `ai-media` (fotos que os clientes mandam pela
+// IA no WhatsApp) assinando a URL na hora — a RLS libera só a pasta da própria
+// empresa. Para URLs de outros buckets (ex.: os-fotos, já com URL assinada) ou
+// formatos diferentes, usa a URL como veio. Cobre imagens antigas e novas sem
+// migração, porque extrai o caminho do storage da própria URL guardada.
+function SignedImg({ url, alt, className, onClick }) {
+  const [src, setSrc] = useState(null);
+  useEffect(() => {
+    let cancelled = false;
+    const marker = "/ai-media/";
+    const idx = typeof url === "string" ? url.indexOf(marker) : -1;
+    if (idx === -1 || !supabase) { setSrc(url || null); return; }
+    const path = url.slice(idx + marker.length).split("?")[0];
+    supabase.storage.from("ai-media").createSignedUrl(path, 3600)
+      .then(({ data }) => { if (!cancelled) setSrc(data?.signedUrl || null); })
+      .catch(() => { if (!cancelled) setSrc(null); });
+    return () => { cancelled = true; };
+  }, [url]);
+  if (!src) return <div className={className} aria-label={alt} style={{ background: "rgba(148,163,184,0.12)" }} />;
+  return <img src={src} alt={alt} className={className} onClick={onClick} />;
+}
+
 // Renderiza um QR (base64 cru ou data URL) do Evolution.
 function _qrSrc(qr) {
   if (!qr) return null;
@@ -9165,9 +9187,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
                 <h4 className="text-xs font-semibold text-gray-400 mb-2">FOTOS ({reviewing.fotos.length})</h4>
                 <div className="grid grid-cols-3 gap-2">
                   {reviewing.fotos.map((url) => (
-                    <a key={url} href={url} target="_blank" rel="noopener" className="block aspect-square">
-                      <img src={url} alt="Foto serviço" className="w-full h-full object-cover rounded-lg hover:opacity-80 transition" />
-                    </a>
+                    <SignedImg key={url} url={url} alt="Foto serviço" className="w-full aspect-square object-cover rounded-lg hover:opacity-80 transition" />
                   ))}
                 </div>
               </div>
@@ -15442,7 +15462,7 @@ function IAAtendimentoModule({ user, addToast }) {
                       {Array.isArray(p.media_urls) && p.media_urls.length > 0 && (
                         <div className="flex flex-wrap gap-2 mt-3">
                           {p.media_urls.map((url, i) => (
-                            <img key={i} src={url} alt="anexo" className="w-16 h-16 object-cover rounded border border-slate-600" />
+                            <SignedImg key={i} url={url} alt="anexo" className="w-16 h-16 object-cover rounded border border-slate-600" />
                           ))}
                         </div>
                       )}
@@ -16360,8 +16380,8 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
                           className="w-full h-full object-cover"
                         />
                       ) : (
-                        <img
-                          src={url}
+                        <SignedImg
+                          url={url}
                           alt="Foto serviço"
                           className="w-full h-full object-cover"
                         />
