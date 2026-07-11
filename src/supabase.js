@@ -1130,6 +1130,61 @@ export async function deleteMasterRemote(_id, _callerTokenHash) {
   return false;
 }
 
+// ─── Empresas gerenciadas pelo Master (persistência server-side) ─────────────
+// O master não tem sessão Supabase Auth (JWT); autentica na edge function
+// `master-companies` reenviando { masterId, sessionTokenHash } — o mesmo hash
+// emitido no master-login e persistido em master_users.session_token_hash.
+//
+// Sem estas chamadas, empresas/admins criados pelo master ficavam APENAS no
+// localStorage do navegador do master (syncToSupabase é no-op sem company_id e
+// o admin nunca era provisionado em auth.users). Resultado: em outro dispositivo
+// o login dava "Usuário não encontrado" e a empresa sumia da lista.
+async function callMasterCompanies(master, action, payload = {}) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  const masterId = master?.id;
+  const sessionTokenHash = master?.sessionTokenHash;
+  if (!masterId || !sessionTokenHash) {
+    return { ok: false, error: 'Sessão do master expirada. Entre novamente.' };
+  }
+  try {
+    const resp = await fetch(`${supabaseUrl}/functions/v1/master-companies`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: supabaseKey },
+      body: JSON.stringify({ action, masterId, sessionTokenHash, ...payload }),
+    });
+    const body = await resp.json().catch(() => ({}));
+    if (!resp.ok || !body.ok) {
+      return { ok: false, error: body.error || `HTTP ${resp.status}`, reasons: body.reasons || null };
+    }
+    return { ok: true, ...body };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+// Cria empresa + admin inicial no backend. company = objeto rico do MasterApp;
+// admin = { nome, email, senha, legacyUserId }.
+export async function masterCreateCompany(master, company, adminInfo) {
+  return callMasterCompanies(master, 'create', { company, admin: adminInfo });
+}
+
+// Lista as empresas persistidas (fonte: kv_store erp:company:*). Usado no boot
+// do MasterApp pra que empresas apareçam em qualquer dispositivo após login.
+export async function masterListCompanies(master) {
+  const res = await callMasterCompanies(master, 'list');
+  return res.ok ? { ok: true, companies: res.companies || [] } : res;
+}
+
+// Atualiza dados/bloqueio da empresa (company = objeto rico final).
+export async function masterUpdateCompany(master, company) {
+  return callMasterCompanies(master, 'update', { company });
+}
+
+// Exclui empresa em cascata (kv_store + members + auth.users + companies).
+export async function masterDeleteCompany(master, company) {
+  return callMasterCompanies(master, 'delete', { company: { id: company?.id } });
+}
+
 // ─── Storage: upload/delete de fotos e assinaturas da OS ─────────────────────
 // HARDENING C0-2: buckets 'os-fotos' e 'os-assinaturas' passam a ser PRIVADOS.
 // Antes eram públicos: qualquer um com a URL lia foto/assinatura/CPF do cliente

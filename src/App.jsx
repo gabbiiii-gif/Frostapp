@@ -11,7 +11,7 @@ import {
 import { animate } from "animejs";
 import { motion } from "motion/react";
 import gsap from "gsap";
-import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig } from "./supabase.js";
+import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -4167,10 +4167,24 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   const [formError, setFormError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  // Carrega empresas (listAll para enxergar todas — master não tem companyId)
+  // Carrega empresas (listAll para enxergar todas — master não tem companyId).
+  // Mostra o cache local imediatamente e, em seguida, busca a fonte de verdade
+  // no backend (kv_store via edge master-companies) — sem isso, empresas criadas
+  // em outro dispositivo/sessão não apareceriam (o master não hidrata por
+  // company_id). O backend também sincroniza de volta o localStorage.
   useEffect(() => {
     setCompanies(DB.listAll("erp:company:"));
-  }, [reload]);
+    let cancelled = false;
+    (async () => {
+      const res = await masterListCompanies(master);
+      if (cancelled || !res.ok || !Array.isArray(res.companies)) return;
+      res.companies.forEach((c) => {
+        if (c && c.id) window.storage.setItem("erp:company:" + c.id, JSON.stringify(c));
+      });
+      setCompanies(DB.listAll("erp:company:"));
+    })();
+    return () => { cancelled = true; };
+  }, [reload, master]);
 
   // Audit log Master — registra ações do master (criar/bloquear/excluir empresa)
   const writeAudit = useCallback((action, payload) => {
@@ -4201,12 +4215,10 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
     e.preventDefault();
     setFormError("");
     if (!cNome.trim()) { setFormError("Informe o nome da empresa."); return; }
-    if (!adminNome.trim() || !adminEmail.trim() || !adminSenha) {
-      setFormError("Preencha o admin inicial (nome, email, senha)."); return;
-    }
-    {
-      const ps = validatePasswordStrength(adminSenha);
-      if (!ps.ok) { setFormError(`Senha do admin fraca: ${ps.reasons[0]}`); return; }
+    // Admin inicial: nome + email obrigatórios. A senha NÃO é digitada aqui —
+    // o admin recebe um e-mail de convite para definir a própria senha.
+    if (!adminNome.trim() || !adminEmail.trim()) {
+      setFormError("Preencha o admin inicial (nome e email)."); return;
     }
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const normalizedAdminEmail = adminEmail.trim().toLowerCase();
@@ -4234,53 +4246,88 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
         criadoEm: new Date().toISOString(),
         criadoPor: master?.id,
       };
-      // Persiste sem decoração (companies não pertencem a outra company)
+      const adminLegacyId = genId();
+
+      // ── Persiste no BACKEND primeiro (fonte de verdade) ──────────────────
+      // Cria companies + auth.users (admin) + company_members + kv_store.
+      // Sem isso o admin nunca existiria em auth.users e o login em outro
+      // dispositivo retornaria "Usuário não encontrado".
+      // Sem senha => convite por e-mail. O admin recebe link do Supabase e
+      // define a própria senha (redirectTo volta pro app como ?type=invite).
+      const backend = await masterCreateCompany(master, company, {
+        nome: adminNome.trim(),
+        email: normalizedAdminEmail,
+        legacyUserId: adminLegacyId,
+        redirectTo: `${window.location.origin}/?type=invite`,
+      });
+      if (!backend.ok) {
+        const msg = backend.error === "email_exists"
+          ? "Já existe usuário com este email."
+          : `Falha ao salvar no servidor: ${backend.error}`;
+        setFormError(msg);
+        setSaving(false);
+        return;
+      }
+
+      // ── Cache local (para exibição imediata na lista do master) ──────────
       window.storage.setItem("erp:company:" + companyId, JSON.stringify(company));
-      try { syncToSupabase("erp:company:" + companyId, company); } catch { /* ignora */ }
       writeAudit("create_company", { companyId, companyNome: company.nome });
 
-      // Cria admin inicial dessa empresa
+      // Espelha o admin no cache local (sem senha — auth real fica no Supabase).
+      // status 'pendente' até o admin aceitar o convite e definir a senha.
       const adminUser = {
-        id: genId(),
+        id: adminLegacyId,
         email: normalizedAdminEmail,
         nome: adminNome.trim(),
-        password: await hashPassword(adminSenha),
         role: "admin",
         avatar: adminNome.trim().slice(0, 2).toUpperCase(),
         createdAt: new Date().toISOString(),
-        status: "ativo",
-        forcePasswordChange: true,
+        status: "pendente",
         sessionTokenHash: null,
         customPermissions: null,
         isSuperAdmin: true,
+        authUserId: backend.auth_user_id || null,
+        invitedAt: new Date().toISOString(),
         companyId, // tag explícito (master opera sem company ativa)
       };
       window.storage.setItem("erp:user:" + adminUser.id, JSON.stringify(adminUser));
-      try { syncToSupabase("erp:user:" + adminUser.id, adminUser); } catch { /* ignora */ }
 
-      addToast(`Empresa "${company.nome}" criada com admin ${adminUser.email}.`, "success");
+      addToast(`Empresa "${company.nome}" criada. Convite enviado para ${adminUser.email}.`, "success");
       resetForm();
       setShowForm(false);
       setReload((r) => r + 1);
     } finally {
       setSaving(false);
     }
-  }, [cNome, cCnpj, cTelefone, cEmail, cLogoUrl, cMaxUsuarios, cAllowedModules, adminNome, adminEmail, adminSenha, master, addToast, writeAudit]);
+  }, [cNome, cCnpj, cTelefone, cEmail, cLogoUrl, cMaxUsuarios, cAllowedModules, adminNome, adminEmail, master, addToast, writeAudit]);
 
-  const toggleAtivo = useCallback((company) => {
+  const toggleAtivo = useCallback(async (company) => {
     const updated = { ...company, ativo: !company.ativo };
     window.storage.setItem("erp:company:" + company.id, JSON.stringify(updated));
-    try { syncToSupabase("erp:company:" + company.id, updated); } catch { /* ignora */ }
     setReload((r) => r + 1);
+    const res = await masterUpdateCompany(master, updated);
+    if (!res.ok) {
+      // Reverte o cache local se o servidor recusou (mantém consistência).
+      window.storage.setItem("erp:company:" + company.id, JSON.stringify(company));
+      setReload((r) => r + 1);
+      addToast(`Falha ao ${updated.ativo ? "ativar" : "bloquear"} no servidor: ${res.error}`, "error");
+      return;
+    }
     writeAudit(updated.ativo ? "unblock_company" : "block_company", { companyId: company.id, companyNome: company.nome });
     addToast(`Empresa ${updated.ativo ? "ativada" : "bloqueada"}.`, "info");
-  }, [addToast, writeAudit]);
+  }, [addToast, writeAudit, master]);
 
   // Excluir empresa em cascata — remove company + todos os registros decorados com companyId.
   // Itera prefixos com escopo (SCOPED_PREFIXES) e apaga o que pertencer à empresa.
-  const handleDelete = useCallback((company) => {
+  const handleDelete = useCallback(async (company) => {
     if (!company) return;
     const cid = company.id;
+    // Exclui no backend primeiro (cascata: kv_store + members + auth.users + companies).
+    const res = await masterDeleteCompany(master, company);
+    if (!res.ok) {
+      addToast(`Falha ao excluir no servidor: ${res.error}`, "error");
+      return;
+    }
     let removed = 0;
     SCOPED_PREFIXES.forEach((prefix) => {
       const rows = DB.listAll(prefix);
@@ -4296,7 +4343,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
     setReload((r) => r + 1);
     setConfirmDelete(null);
     addToast(`Empresa "${company.nome}" excluída. ${removed} registro(s) removido(s).`, "success");
-  }, [addToast, writeAudit]);
+  }, [addToast, writeAudit, master]);
 
   // Abrir modal em modo edição — preenche estado com dados atuais
   const openEdit = useCallback((c) => {
@@ -4316,7 +4363,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   }, []);
 
   // Salvar edição (sem mexer no admin/usuários)
-  const handleSaveEdit = useCallback((e) => {
+  const handleSaveEdit = useCallback(async (e) => {
     e.preventDefault();
     if (!editingCompany) return;
     if (!cNome.trim()) { setFormError("Informe o nome da empresa."); return; }
@@ -4331,14 +4378,17 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
       allowedModules: cAllowedModules,
       atualizadoEm: new Date().toISOString(),
     };
+    setSaving(true);
+    const res = await masterUpdateCompany(master, updated);
+    setSaving(false);
+    if (!res.ok) { setFormError(`Falha ao salvar no servidor: ${res.error}`); return; }
     window.storage.setItem("erp:company:" + updated.id, JSON.stringify(updated));
-    try { syncToSupabase("erp:company:" + updated.id, updated); } catch { /* ignora */ }
     writeAudit("update_company", { companyId: updated.id, companyNome: updated.nome });
     addToast("Empresa atualizada.", "success");
     setShowForm(false);
     resetForm();
     setReload((r) => r + 1);
-  }, [editingCompany, cNome, cCnpj, cTelefone, cEmail, cLogoUrl, cMaxUsuarios, cAllowedModules, addToast, writeAudit]);
+  }, [editingCompany, cNome, cCnpj, cTelefone, cEmail, cLogoUrl, cMaxUsuarios, cAllowedModules, addToast, writeAudit, master]);
 
   // Filtra empresas por busca e status
   const filteredCompanies = useMemo(() => {
@@ -4583,9 +4633,8 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
                 <div className="grid grid-cols-2 gap-3">
                   <input name="adminNome" type="text" value={adminNome} onChange={(e) => setAdminNome(e.target.value)} placeholder="Nome do admin *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
                   <input name="adminEmail" type="email" value={adminEmail} onChange={(e) => setAdminEmail(e.target.value)} placeholder="Email do admin *" className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
-                  <PasswordInput name="adminSenha" value={adminSenha} onChange={(e) => setAdminSenha(e.target.value)} placeholder="Senha provisória (12+ chars, A-z, 0-9, símbolo) *" strengthMeter containerClassName="col-span-2" className="w-full bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white" />
                 </div>
-                <p className="text-xs text-gray-400">O admin será forçado a trocar a senha no primeiro login.</p>
+                <p className="text-xs text-gray-400">📧 O admin receberá um e-mail de convite para definir a própria senha. Você não precisa digitar uma senha aqui.</p>
               </>
             )}
 
