@@ -452,64 +452,6 @@ function recordAudit(action, key, value, prevValue) {
   } catch { /* não-crítico */ }
 }
 
-// ─── Notificação WhatsApp ao mudar status de OS (via webhook n8n) ─────────────
-// Fire-and-forget POST para webhook configurado em erp:config.n8nWebhookOSStatusUrl.
-// n8n recebe payload, monta mensagem e envia via Evolution API ao telefone do cliente.
-// Não bloqueia a UI: falha silenciosa em network/timeout.
-function notifyOSStatusChange(prev, next) {
-  try {
-    if (!prev || !next) return;
-    if (prev.status === next.status) return;
-    const cfg = (() => {
-      try {
-        const raw = window.storage.getItem(rewriteSingletonKey("erp:config"));
-        return raw ? JSON.parse(raw) : null;
-      } catch { return null; }
-    })();
-    const url = cfg?.n8nWebhookOSStatusUrl;
-    if (!url) return;
-    // Busca telefone do cliente do registro local (não vem direto na OS)
-    let clienteTelefone = null;
-    try {
-      if (next.clienteId) {
-        const cli = JSON.parse(
-          window.storage.getItem(rewriteSingletonKey("erp:client:" + next.clienteId)) || "null"
-        );
-        clienteTelefone = cli?.telefone || null;
-      }
-    } catch { /* ignora */ }
-    const payload = {
-      event: "os.status_changed",
-      ts: new Date().toISOString(),
-      companyId: __activeCompanyId || null,
-      empresa: cfg?.nomeEmpresa || cfg?.razaoSocial || null,
-      osId: next.id,
-      numero: next.numero || null,
-      statusAnterior: prev.status,
-      status: next.status,
-      clienteId: next.clienteId || null,
-      clienteNome: next.clienteNome || null,
-      clienteTelefone,
-      valor: Number(next.valor) || 0,
-      tecnicoNome: next.tecnicoNome || next.tecnico?.nome || null,
-      dataAgendada: next.dataAgendada || null,
-      horaAgendada: next.horaAgendada || null,
-      endereco: next.endereco || null,
-    };
-    // Fire-and-forget: não aguarda resposta para não travar DB.set.
-    // Retorna a Promise pra o caller logar erro com osId (debuggability).
-    if (typeof fetch === "function") {
-      return fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-        keepalive: true,
-      });
-    }
-  } catch { /* não-crítico */ }
-  return undefined;
-}
-
 const DB = {
   get(key) {
     try {
@@ -552,18 +494,6 @@ const DB = {
       syncToSupabase(realKey, toStore);
       if (auditable) {
         recordAudit(prev ? "update" : "create", key, toStore, prev);
-      }
-      // Dispara webhook se status da OS mudou (n8n → WhatsApp via Evolution)
-      // Log do erro com osId pra facilitar debug se webhook quebrar.
-      if (isOsKey && prev) {
-        try {
-          const r = notifyOSStatusChange(prev, toStore);
-          if (r && typeof r.catch === "function") {
-            r.catch((err) => console.warn("notifyOSStatusChange falhou", { osId: toStore?.id, error: err?.message }));
-          }
-        } catch (err) {
-          console.warn("notifyOSStatusChange sync error", { osId: toStore?.id, error: err?.message });
-        }
       }
       // Fase 2.7: email pra admin/gerente + técnico quando OS criada
       // (prev null = create). Fire-and-forget — log do erro com osId pra debug.
@@ -13774,8 +13704,7 @@ function CompanySecurityPanel({ companyId, addToast }) {
           </span>
           <span className="block text-xs text-gray-400 mt-1">
             Notifica todos os admin/gerente ativos da empresa + o técnico atribuído
-            (se houver). Usa o sender configurado em SMTP (Resend). Mudanças de
-            status continuam indo pelo webhook WhatsApp (n8n).
+            (se houver). Usa o sender configurado em SMTP (Resend).
           </span>
         </span>
       </label>
@@ -13789,8 +13718,6 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
     logoUrl: "",
     pixChave: "", pixTipoChave: "CNPJ", pixFavorecido: "", pixBanco: "", pixQrUrl: "",
     mensagemAgradecimento: "",
-    // ─── Integrações externas (webhook n8n → Evolution WhatsApp) ───
-    n8nWebhookOSStatusUrl: "",
   });
   const [confirmReset, setConfirmReset] = useState(false);
   const [confirmResetFinal, setConfirmResetFinal] = useState(false);
@@ -13819,8 +13746,6 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
       pixQrUrl: cfg.pixQrUrl || "",
       // ─── Mensagem de agradecimento (Recibo) ──────────────────────────────
       mensagemAgradecimento: cfg.mensagemAgradecimento || "",
-      // ─── Webhook n8n para notificação WhatsApp de mudança de status de OS ───
-      n8nWebhookOSStatusUrl: cfg.n8nWebhookOSStatusUrl || "",
     });
 
     // Prefixos ativos após remoção dos módulos financeiro/fiscal/estoque/mensageria
@@ -13894,7 +13819,6 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
       pixBanco: config.pixBanco,
       pixQrUrl: config.pixQrUrl,
       mensagemAgradecimento: config.mensagemAgradecimento,
-      n8nWebhookOSStatusUrl: (config.n8nWebhookOSStatusUrl || "").trim(),
     };
     DB.set("erp:config", updated);
     addToast("Configurações salvas com sucesso.", "success");
@@ -14204,7 +14128,13 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
                   type="text"
                   value={config.pixChave}
                   onChange={(e) => setConfig({ ...config, pixChave: e.target.value })}
-                  placeholder="00.000.000/0000-00"
+                  placeholder={{
+                    CNPJ: "00.000.000/0000-00",
+                    CPF: "000.000.000-00",
+                    "E-mail": "nome@email.com",
+                    "Telefone": "+55 (DD) 90000-0000",
+                    "Aleatória": "chave aleatória (EVP)",
+                  }[config.pixTipoChave] || "Sua chave PIX"}
                   className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
                 />
               </div>
@@ -14304,39 +14234,6 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
             onCopy={handleCopyCalendarURL}
           />
         )}
-      </div>
-
-      {/* ─── Integrações externas: webhook n8n → WhatsApp via Evolution API ─── */}
-      <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
-        <div className="mb-4">
-          <h3 className="text-lg font-semibold text-white flex items-center gap-2">
-            🔔 Notificação WhatsApp ao mudar status de OS
-          </h3>
-          <p className="text-gray-400 text-sm mt-1">
-            Cole abaixo o URL do webhook do n8n. Cada vez que uma OS muda de status,
-            o cliente recebe uma mensagem no WhatsApp via Evolution API.
-          </p>
-        </div>
-        <label className="block text-sm font-medium text-gray-300 mb-1.5">
-          URL do Webhook n8n
-        </label>
-        <input
-          name="n8nWebhookOSStatusUrl"
-          type="url"
-          value={config.n8nWebhookOSStatusUrl}
-          onChange={(e) => setConfig({ ...config, n8nWebhookOSStatusUrl: e.target.value })}
-          placeholder="https://n8n.seudominio.com/webhook/os-status"
-          className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-        />
-        <p className="text-xs text-gray-500 mt-2">
-          Payload enviado (POST JSON): <code className="text-cyan-400">{"{ event, osId, numero, status, statusAnterior, clienteNome, clienteTelefone, valor, ... }"}</code>.
-          Deixe em branco para desativar.
-        </p>
-        <div className="flex justify-end mt-3">
-          <button onClick={handleSaveConfig} className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition">
-            Salvar
-          </button>
-        </div>
       </div>
 
       {/* Gerenciamento de Usuários (apenas admin) */}
