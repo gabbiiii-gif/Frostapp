@@ -17129,13 +17129,13 @@ export default function App() {
       { id: "agenda", label: "Agenda", iconName: "agenda", module: "agenda" },
       { id: "financeiro", label: "Financeiro", iconName: "financeiro", module: "financeiro" },
       { id: "cadastro", label: "Cadastros", iconName: "cadastros", module: "clientes" },
-      { id: "ia", label: "IA / Atendimento", iconName: "agenda", module: "ia" },
-      { id: "pos-venda", label: "Pós-Venda", iconName: "agenda", module: "pos-venda" },
-      { id: "lembrete", label: "Lembrete", iconName: "agenda", module: "lembrete" },
-      { id: "folha", label: "Folha de Pagamento", iconName: "financeiro", module: "folha" },
+      { id: "ia", label: "IA / Atendimento", iconName: "ia", module: "ia" },
+      { id: "pos-venda", label: "Pós-Venda", iconName: "posvenda", module: "pos-venda" },
+      { id: "lembrete", label: "Lembrete", iconName: "lembrete", module: "lembrete" },
+      { id: "folha", label: "Folha de Pagamento", iconName: "folha", module: "folha" },
       // Ponto: acessível por todos os roles internos (cada um vê o que lhe cabe
       // no próprio PontoModule).
-      { id: "ponto", label: "Ponto Eletrônico", iconName: "agenda", module: "ponto" },
+      { id: "ponto", label: "Ponto Eletrônico", iconName: "ponto", module: "ponto" },
       { id: "config", label: "Configurações", iconName: "config", module: "config" },
     ];
 

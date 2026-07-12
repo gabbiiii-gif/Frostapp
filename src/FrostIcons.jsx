@@ -83,6 +83,95 @@ const IC = {
     ),
   },
 
+  // ─── Módulos novos (balão IA, coração/pulso, despertador, folha+$, digital, capelo) ──
+  // Ícone próprio para cada módulo — antes reusavam agenda/financeiro na sidebar.
+  ia: {
+    minimal: ({ c }) => (
+      <>
+        <path
+          d="M20 11.2a7.3 7.3 0 0 1-7.3 7.3H8l-4 3 1.1-4.1A7.3 7.3 0 1 1 20 11.2z"
+          stroke={c}
+          strokeWidth="1"
+          fill="none"
+        />
+        <path
+          d="M12 8.5l.7 1.8 1.8.7-1.8.7-.7 1.8-.7-1.8-1.8-.7 1.8-.7z"
+          stroke={c}
+          strokeWidth="0.9"
+          fill="none"
+        />
+      </>
+    ),
+  },
+
+  posvenda: {
+    minimal: ({ c }) => (
+      <>
+        <path
+          d="M12 19.5s-6-4-7.9-7.7C2.6 9.4 3.6 6.9 6 6.2c1.6-.5 3.2.1 4.2 1.4l.8 1 .8-1c1-1.3 2.6-1.9 4.2-1.4 2.4.7 3.4 3.2 1.9 5.6C18 15.5 12 19.5 12 19.5z"
+          stroke={c}
+          strokeWidth="1"
+          fill="none"
+        />
+      </>
+    ),
+  },
+
+  lembrete: {
+    minimal: ({ c }) => (
+      <>
+        <circle cx="12" cy="13.5" r="6.8" stroke={c} strokeWidth="1" fill="none" />
+        <path d="M12 13.5V10" stroke={c} strokeWidth="1" />
+        <path d="M12 13.5l2.8 1.7" stroke={c} strokeWidth="1" />
+        <path d="M5 6.5 7.8 4" stroke={c} strokeWidth="1" />
+        <path d="M19 6.5 16.2 4" stroke={c} strokeWidth="1" />
+      </>
+    ),
+  },
+
+  folha: {
+    minimal: ({ c }) => (
+      <>
+        <path
+          d="M6.5 3.2h6.5L17.8 7.4V20a.8.8 0 0 1-.8.8H6.5a.8.8 0 0 1-.8-.8V4a.8.8 0 0 1 .8-.8z"
+          stroke={c}
+          strokeWidth="1"
+          fill="none"
+        />
+        <path d="M13 3.2V7.4h4.6" stroke={c} strokeWidth="1" />
+        <circle cx="11.7" cy="15" r="2.8" stroke={c} strokeWidth="1" fill="none" />
+        <path d="M11.7 13v4" stroke={c} strokeWidth="1" />
+      </>
+    ),
+  },
+
+  ponto: {
+    minimal: ({ c }) => (
+      <>
+        <path d="M5.5 11a6.5 6.5 0 0 1 13 0" stroke={c} strokeWidth="1" fill="none" />
+        <path d="M8 11.5a4 4 0 0 1 8 0" stroke={c} strokeWidth="1" fill="none" />
+        <path d="M12 12v7" stroke={c} strokeWidth="1" />
+        <path d="M9.5 13.5v5" stroke={c} strokeWidth="1" />
+        <path d="M14.5 13.5v4.2" stroke={c} strokeWidth="1" />
+      </>
+    ),
+  },
+
+  escola: {
+    minimal: ({ c }) => (
+      <>
+        <path d="M12 5 21 9l-9 4L3 9z" stroke={c} strokeWidth="1" fill="none" />
+        <path
+          d="M6.5 10.8v4c0 1.2 2.5 2.4 5.5 2.4s5.5-1.2 5.5-2.4v-4"
+          stroke={c}
+          strokeWidth="1"
+          fill="none"
+        />
+        <path d="M21 9v4" stroke={c} strokeWidth="1" />
+      </>
+    ),
+  },
+
   config: {
     minimal: ({ c }) => (
       <>
