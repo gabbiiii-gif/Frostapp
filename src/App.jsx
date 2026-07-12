@@ -112,11 +112,6 @@ import LembreteModule from "./modules/LembreteModule.jsx";
 // Ponto Eletrônico: registro de jornada via biometria/facial/PIN + banco de
 // horas + ocorrências/justificativas.
 import PontoModule from "./modules/PontoModule.jsx";
-// Escola: módulo isolado para demandas da cliente Vanda (sem integração com
-// OS comuns ou financeiro).
-import EscolaModule from "./modules/EscolaModule.jsx";
-// Portal externo da Vanda — shell completamente separado do ERP.
-import EscolaPortalVanda from "./modules/EscolaPortalVanda.jsx";
 // Catálogos de seed (serviços + produtos) são carregados sob demanda via dynamic
 // import dentro das funções de seed — evita inflar o bundle inicial com ~96KB
 // de JSON que só roda no primeiro boot do dispositivo.
@@ -1350,7 +1345,6 @@ const ALL_MODULES = [
   { id: "folha", label: "Folha de Pagamento" },
   // Novos módulos verticais
   { id: "ponto", label: "Ponto Eletrônico" },
-  { id: "escola", label: "Escola (Vanda)" },
   { id: "lembrete", label: "Lembrete" },
   { id: "config", label: "Configurações (admin)" },
 ];
@@ -1366,7 +1360,6 @@ const TOGGLEABLE_MODULES = [
   { id: "pos-venda", label: "Pós-Venda" },
   { id: "folha", label: "Folha de Pagamento" },
   { id: "ponto", label: "Ponto Eletrônico" },
-  { id: "escola", label: "Escola (Vanda)" },
   { id: "lembrete", label: "Lembrete" },
 ];
 
@@ -12638,8 +12631,6 @@ function UserManagement({ currentUser, addToast }) {
                 <option value="atendente">Atendente</option>
                 {/* Funcionário que só bate ponto — sem tela de técnico nem ERP. */}
                 <option value="ponto">Funcionário (só ponto)</option>
-                {/* Role da cliente externa Vanda: cai no portal isolado EscolaPortalVanda (sem ERP). */}
-                <option value="cliente_escola">Cliente Escola (Portal Vanda)</option>
               </select>
             </div>
             <div>
@@ -17143,10 +17134,8 @@ export default function App() {
       { id: "lembrete", label: "Lembrete", iconName: "agenda", module: "lembrete" },
       { id: "folha", label: "Folha de Pagamento", iconName: "financeiro", module: "folha" },
       // Ponto: acessível por todos os roles internos (cada um vê o que lhe cabe
-      // no próprio PontoModule). Escola: apenas admin/gerente no painel interno;
-      // a Vanda usa portal isolado (não passa pelo sidebar).
+      // no próprio PontoModule).
       { id: "ponto", label: "Ponto Eletrônico", iconName: "agenda", module: "ponto" },
-      { id: "escola", label: "Escola", iconName: "cadastros", module: "escola" },
       { id: "config", label: "Configurações", iconName: "config", module: "config" },
     ];
 
@@ -17400,18 +17389,6 @@ export default function App() {
       <>
         <ToastContainer toasts={toasts} removeToast={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
         <TecnicoMobileApp user={user} onLogout={handleLogout} addToast={addToast} theme={theme} setTheme={setTheme} />
-      </>
-    );
-  }
-
-  // ─── Roteamento por role: cliente_escola (Vanda) vê portal isolado ───
-  // Portal externo para a cliente Vanda solicitar e acompanhar demandas.
-  // NÃO tem sidebar, NÃO tem acesso a OS, financeiro nem cadastros.
-  if (user.role === "cliente_escola") {
-    return (
-      <>
-        <ToastContainer toasts={toasts} removeToast={(id) => setToasts((prev) => prev.filter((x) => x.id !== id))} />
-        <EscolaPortalVanda user={user} onLogout={handleLogout} addToast={addToast} db={DB} />
       </>
     );
   }
@@ -17794,9 +17771,6 @@ export default function App() {
             )}
             {activeModule === "ponto" && (
               <PontoModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} db={DB} />
-            )}
-            {activeModule === "escola" && (
-              <EscolaModule user={user} addToast={addToast} reloadData={loadAllData} db={DB} />
             )}
             {activeModule === "config" && (
               <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} theme={theme} setTheme={setTheme} />

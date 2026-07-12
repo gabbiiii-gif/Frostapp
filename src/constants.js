@@ -37,17 +37,11 @@ export const STATUS_MAP = {
 // Módulos novos:
 //   ponto  — Ponto Eletrônico (todos os usuários internos batem o próprio
 //            ponto; admin/gerente veem painel da equipe).
-//   escola — Demandas escolares (Vanda) — isolado do financeiro.
-//   cliente_escola é a role do portal externo da Vanda: vê APENAS o portal
-//   de solicitação. Não tem acesso a nenhum outro módulo do ERP.
 export const ROLE_PERMISSIONS = {
   admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha", "pos-venda", "ponto", "escola", "lembrete"],
+  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha", "pos-venda", "ponto", "lembrete"],
   tecnico: ["dashboard", "os", "agenda", "ponto"],
   atendente: ["dashboard", "clientes", "os", "agenda", "ia", "pos-venda", "ponto"],
-  // Role exclusiva do portal da Vanda. Único módulo: "escola-portal".
-  // Render branch em App.jsx detecta esta role e mostra EscolaPortalVanda.
-  cliente_escola: ["escola-portal"],
   // Funcionário que SÓ bate ponto (motorista, ajudante, administrativo que não
   // é técnico). Não vê a tela de técnico nem o ERP — só o Ponto Eletrônico.
   // Render branch em App.jsx detecta esta role e mostra o PontoShell.
