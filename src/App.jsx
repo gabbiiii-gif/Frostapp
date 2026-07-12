@@ -2111,34 +2111,35 @@ function DateFilterBar({ dateFilter, setDateFilter }) {
   ];
 
   return (
-    <div className="flex flex-wrap items-center gap-2">
+    // Versão compacta: pills menores (px/py/texto reduzidos) e espaçamento mais justo
+    <div className="flex flex-wrap items-center gap-1">
       {periods.map((p) => (
         <button
           key={p.value}
           onClick={() => setDateFilter({ ...dateFilter, period: p.value })}
-          className={`px-3 py-1.5 text-sm rounded-lg transition ${dateFilter.period === p.value ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
+          className={`px-2 py-0.5 text-xs rounded-md transition ${dateFilter.period === p.value ? "bg-blue-600 text-white" : "bg-gray-700 text-gray-300 hover:bg-gray-600"}`}
         >
           {p.label}
         </button>
       ))}
       {dateFilter.period === "custom" && (
-        <div className="flex items-center gap-2 ml-2">
+        <div className="flex items-center gap-1 ml-1">
           <input
             type="date"
             value={dateFilter.startDate || ""}
             onChange={(e) => setDateFilter({ ...dateFilter, startDate: e.target.value })}
             aria-label="Data inicial"
             name="startDate"
-            className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+            className="bg-gray-700 border border-gray-600 rounded-md px-2 py-0.5 text-xs text-white focus:outline-none focus:border-blue-500"
           />
-          <span className="text-gray-400">até</span>
+          <span className="text-gray-400 text-xs">até</span>
           <input
             type="date"
             value={dateFilter.endDate || ""}
             onChange={(e) => setDateFilter({ ...dateFilter, endDate: e.target.value })}
             aria-label="Data final"
             name="endDate"
-            className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+            className="bg-gray-700 border border-gray-600 rounded-md px-2 py-0.5 text-xs text-white focus:outline-none focus:border-blue-500"
           />
         </div>
       )}
@@ -17563,8 +17564,8 @@ export default function App() {
               <span className="text-white font-medium truncate max-w-[180px]">{activeModuleLabel}</span>
             </div>
 
-            {/* Filtro de data — só aparece em páginas que usam período */}
-            {["dashboard", "processos", "agenda"].includes(activeModule) && (
+            {/* Filtro de data — apenas no Dashboard (KPIs/gráficos por período) */}
+            {activeModule === "dashboard" && (
               <div className="hidden xl:block ml-4">
                 <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
               </div>
@@ -17730,8 +17731,8 @@ export default function App() {
             </button>
           </div>
 
-          {/* Filtro de data mobile — só aparece em páginas que usam período */}
-          {["dashboard", "processos", "agenda"].includes(activeModule) && (
+          {/* Filtro de data mobile — apenas no Dashboard (KPIs/gráficos por período) */}
+          {activeModule === "dashboard" && (
             <div className="xl:hidden mt-3">
               <DateFilterBar dateFilter={dateFilter} setDateFilter={setDateFilter} />
             </div>
