@@ -137,3 +137,12 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - sem mudança de schema: reusa ai_conversations.status + whatsapp_processed_messages. Backup: botão "Reativar IA" no app.
 - deploy: whatsapp-webhook v10. commit/push main.
 - touched: supabase/functions/whatsapp-webhook/index.ts, modules/ia-atendimento.md
+
+## [2026-07-12] ingest | resumo do dono geral + fixes Pós-Venda + auditoria multi-empresa
+- gatilho: usuário pediu (1) resumo do dono virar panorama geral sem inventar dados; (2) auditar o Pós-Venda e ver se é eficaz
+- resumo do dono (Lembrete): montarFatosDono() em lembrete-dispatch + lembrete-teste — OS abertas por status + manutenções vencendo + visitas agendadas (sempre, independe de agendados_ativo) + total de clientes. IA recebe só os fatos com instrução de não inventar; fallback determinístico. Deploy MCP: lembrete-dispatch v6 (verify_jwt=false), lembrete-teste v5 (verify_jwt=true). commit/push main.
+- fix Pós-Venda #1: scheduleOSPosVenda não roda mais na criação de OS da IA (criarOSdeProposta) — NPS caía em now+24h antes do serviço. Só na finalização. commit/push main → Vercel.
+- fix Pós-Venda #2: removido toggle "Proposta de reagendamento" da UI (ConfigTab) — nenhum gerador cria mensagens tipo reagendamento; era promessa vazia. Intenção reagenda continua indo pro Inbox.
+- auditoria #4 (verificado via MCP, prod rbwzhglsztmjvwrcydcy): tabelas pos_venda_* têm company_id mas pos-venda-dispatch ignora em todas as queries (config .maybeSingle sem filtro; ai_agent_config .limit(1); fila sem company_id). Bug LATENTE — hoje 1 empresa com pós-venda + 1 ai_agent_config enabled (2 existem). Quebra quando 2ª empresa ligar. NÃO corrigido (fora do escopo "investigar"). lembrete-dispatch tem o mesmo germe no fetch de ai_agent_config.
+- touched: modules/pos-venda.md (scheduleOSPosVenda + nova seção "Dívida: dispatcher não é multi-empresa"), src/App.jsx, src/modules/PosVendaModule.jsx, supabase/functions/lembrete-dispatch, supabase/functions/lembrete-teste
+- PENDENTE (a decidir com usuário): corrigir escopo multi-empresa do dispatcher; reagendamento automático de verdade (feature nova, precisa design)
