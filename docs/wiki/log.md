@@ -161,5 +161,6 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - PosVendaModule: toggle "Proposta de reagendamento" re-adicionado (hint verdadeiro) + volta ao payload
 - whatsapp-webhook handlePosVendaReply: resposta positiva a lembrete → envia proposta na hora + grava linha reagendamento (enviada); idempotente por os_id, sem loop, pula ack; resposta a reagendamento → precisa_humano (Inbox)
 - verificação: esbuild OK (webhook), build Vite OK. commit/push main 9a2ae96.
-- DEPLOY PENDENTE: whatsapp-webhook NÃO redeployado (852 linhas/40KB, muitos escapes — transcrição manual no MCP é arriscada pra infra crítica; CLI sem token). Frontend (App/PosVenda) já vai pela Vercel. Rodar: `supabase functions deploy whatsapp-webhook` (project rbwzhglsztmjvwrcydcy). Sem isso, o lembrete grava o metadata mas a proposta não dispara.
+- DEPLOY: whatsapp-webhook deployado pelo usuário via CLI (`supabase functions deploy whatsapp-webhook --no-verify-jwt`) → v18, 2026-07-13. verify_jwt=false confirmado via MCP; conteúdo live == código commitado (deploy do arquivo real, sem transcrição). Frontend (App/PosVenda) via Vercel. Feature 100% no ar.
+- Nota de operação: para o fluxo disparar, ligar o toggle "Proposta de reagendamento" em Pós-Venda → Configurações (só lembretes agendados DEPOIS carregam o metadata da proposta).
 - touched: src/App.jsx, src/modules/PosVendaModule.jsx, supabase/functions/whatsapp-webhook/index.ts, specs/2026-07-12-reagendamento-automatico-pos-venda-design.md, modules/pos-venda.md
