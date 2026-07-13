@@ -67,95 +67,107 @@ Deno.serve(async (req) => {
     return json({ error: "unauthorized" }, 401);
   }
 
-  // ── Config global do pos-venda ───────────────────────────────────────────
-  const { data: config, error: cfgErr } = await supabase
+  // ── Configs ativas por empresa ───────────────────────────────────────────
+  // Multi-tenant: cada empresa tem sua propria pos_venda_config global
+  // (cliente_id IS NULL). Iteramos por empresa e escopamos TODAS as queries por
+  // company_id (Evolution, fila e updates). `ativo` null conta como ativo
+  // (so `false` desliga), preservando o comportamento anterior.
+  const { data: configs, error: cfgErr } = await supabase
     .from("pos_venda_config")
-    .select("modo_disparo, ativo")
-    .is("cliente_id", null)
-    .maybeSingle();
+    .select("company_id, modo_disparo, ativo")
+    .is("cliente_id", null);
   if (cfgErr) return json({ error: "config_query_failed", detail: cfgErr.message }, 500);
-  if (!config || config.ativo === false) {
-    return json({ skipped: "agente_inativo", sent: 0 });
-  }
-
-  // ── Evolution (reusa ai_agent_config + secret) ───────────────────────────
-  const { data: evo } = await supabase
-    .from("ai_agent_config")
-    .select("evolution_url, evolution_instance, enabled, metadata")
-    .eq("enabled", true)
-    .limit(1)
-    .maybeSingle();
-  // apikey: prioriza ai_agent_config.metadata.evolution_apikey (padrao do projeto,
-  // mesma fonte usada por whatsapp-webhook e frost-notify-approval). Fallback pro
-  // env EVOLUTION_APIKEY por compatibilidade com setups antigos.
-  const apikey = String((evo?.metadata as Record<string, unknown> | null)?.evolution_apikey || "")
-    || Deno.env.get("EVOLUTION_APIKEY") || "";
-  if (!evo?.evolution_url || !evo?.evolution_instance || !apikey) {
-    return json({ skipped: "evolution_nao_configurada", sent: 0 });
-  }
-  const base = evo.evolution_url.replace(/\/+$/, "");
-  const endpoint = `${base}/message/sendText/${evo.evolution_instance}`;
-
-  // ── Mensagens elegiveis ──────────────────────────────────────────────────
-  const statuses = config.modo_disparo === "auto"
-    ? ["aprovada", "pendente"]
-    : ["aprovada"];
-
-  const { data: msgs, error: qErr } = await supabase
-    .from("pos_venda_mensagens")
-    .select("id, telefone, conteudo, tentativas, status")
-    .in("status", statuses)
-    .lte("agendada_para", new Date().toISOString())
-    .not("telefone", "is", null)
-    .neq("telefone", "")
-    .order("agendada_para", { ascending: true })
-    .limit(MAX_BATCH);
-  if (qErr) return json({ error: "fila_query_failed", detail: qErr.message }, 500);
-  if (!msgs || msgs.length === 0) return json({ sent: 0, failed: 0, nada: true });
+  if (!configs || configs.length === 0) return json({ skipped: "sem_config", sent: 0 });
 
   let sent = 0;
   let failed = 0;
+  let processados = 0;
+  const skipped: Record<string, string> = {};
 
-  for (const m of msgs) {
-    const numero = normalizarTelefoneBR(m.telefone);
-    if (!numero) {
-      await supabase.from("pos_venda_mensagens")
-        .update({ status: "erro", erro_envio: "telefone invalido" })
-        .eq("id", m.id);
-      failed++;
+  for (const config of configs) {
+    const companyId = String(config.company_id || "");
+    if (!companyId) continue;
+    if (config.ativo === false) { skipped[companyId] = "agente_inativo"; continue; }
+
+    // ── Evolution DESSA empresa (reusa ai_agent_config + secret) ────────────
+    // apikey: prioriza ai_agent_config.metadata.evolution_apikey (padrao do
+    // projeto, mesma fonte do whatsapp-webhook). Fallback pro env EVOLUTION_APIKEY.
+    const { data: evo } = await supabase
+      .from("ai_agent_config")
+      .select("evolution_url, evolution_instance, enabled, metadata")
+      .eq("company_id", companyId)
+      .eq("enabled", true)
+      .limit(1)
+      .maybeSingle();
+    const apikey = String((evo?.metadata as Record<string, unknown> | null)?.evolution_apikey || "")
+      || Deno.env.get("EVOLUTION_APIKEY") || "";
+    if (!evo?.evolution_url || !evo?.evolution_instance || !apikey) {
+      skipped[companyId] = "evolution_nao_configurada";
       continue;
     }
-    try {
-      const resp = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", apikey },
-        body: JSON.stringify({ number: numero, text: m.conteudo }),
-      });
-      if (!resp.ok) {
-        const txt = await resp.text().catch(() => "");
-        throw new Error(`Evolution ${resp.status}: ${txt.slice(0, 200)}`);
+    const base = evo.evolution_url.replace(/\/+$/, "");
+    const endpoint = `${base}/message/sendText/${evo.evolution_instance}`;
+
+    // ── Mensagens elegiveis DESSA empresa ───────────────────────────────────
+    const statuses = config.modo_disparo === "auto"
+      ? ["aprovada", "pendente"]
+      : ["aprovada"];
+
+    const { data: msgs, error: qErr } = await supabase
+      .from("pos_venda_mensagens")
+      .select("id, telefone, conteudo, tentativas, status")
+      .eq("company_id", companyId)
+      .in("status", statuses)
+      .lte("agendada_para", new Date().toISOString())
+      .not("telefone", "is", null)
+      .neq("telefone", "")
+      .order("agendada_para", { ascending: true })
+      .limit(MAX_BATCH);
+    if (qErr) { skipped[companyId] = `fila_query_failed: ${qErr.message}`; continue; }
+    if (!msgs || msgs.length === 0) continue;
+    processados += msgs.length;
+
+    for (const m of msgs) {
+      const numero = normalizarTelefoneBR(m.telefone);
+      if (!numero) {
+        await supabase.from("pos_venda_mensagens")
+          .update({ status: "erro", erro_envio: "telefone invalido" })
+          .eq("id", m.id);
+        failed++;
+        continue;
       }
-      await supabase.from("pos_venda_mensagens")
-        .update({
-          status: "enviada",
-          enviada_em: new Date().toISOString(),
-          canal: "whatsapp",
-          erro_envio: null,
-        })
-        .eq("id", m.id);
-      sent++;
-    } catch (e) {
-      const tentativas = (m.tentativas || 0) + 1;
-      await supabase.from("pos_venda_mensagens")
-        .update({
-          tentativas,
-          erro_envio: String((e as Error).message || e).slice(0, 500),
-          status: tentativas >= MAX_TENTATIVAS ? "erro" : m.status,
-        })
-        .eq("id", m.id);
-      failed++;
+      try {
+        const resp = await fetch(endpoint, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", apikey },
+          body: JSON.stringify({ number: numero, text: m.conteudo }),
+        });
+        if (!resp.ok) {
+          const txt = await resp.text().catch(() => "");
+          throw new Error(`Evolution ${resp.status}: ${txt.slice(0, 200)}`);
+        }
+        await supabase.from("pos_venda_mensagens")
+          .update({
+            status: "enviada",
+            enviada_em: new Date().toISOString(),
+            canal: "whatsapp",
+            erro_envio: null,
+          })
+          .eq("id", m.id);
+        sent++;
+      } catch (e) {
+        const tentativas = (m.tentativas || 0) + 1;
+        await supabase.from("pos_venda_mensagens")
+          .update({
+            tentativas,
+            erro_envio: String((e as Error).message || e).slice(0, 500),
+            status: tentativas >= MAX_TENTATIVAS ? "erro" : m.status,
+          })
+          .eq("id", m.id);
+        failed++;
+      }
     }
   }
 
-  return json({ sent, failed, processados: msgs.length });
+  return json({ sent, failed, processados, skipped });
 });

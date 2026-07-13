@@ -117,7 +117,7 @@ Deno.serve(async (req) => {
     const companyId = cfg.company_id as string;
 
     const { data: evo } = await sb.from("ai_agent_config")
-      .select("evolution_url, evolution_instance, enabled, metadata").eq("enabled", true).limit(1).maybeSingle();
+      .select("evolution_url, evolution_instance, enabled, metadata").eq("company_id", companyId).eq("enabled", true).limit(1).maybeSingle();
     const apikey = String((evo?.metadata as Record<string, unknown> | null)?.evolution_apikey || "") || Deno.env.get("EVOLUTION_APIKEY") || "";
     const evoBase = evo?.evolution_url ? String(evo.evolution_url).replace(/\/+$/, "") : "";
     const evoInstance = evo?.evolution_instance ? String(evo.evolution_instance) : "";
