@@ -1191,6 +1191,17 @@ async function scheduleOSPosVenda(os) {
       agendada.setDate(agendada.getDate() - 3);
       const [h, m] = String(config.horario_envio || "09:00").split(":");
       agendada.setHours(Number(h) || 9, Number(m) || 0, 0, 0);
+      // Reagendamento automático: pré-renderiza a proposta (com a data prevista) e
+      // guarda no metadata do lembrete. Quando o cliente responde positivo ao lembrete,
+      // o whatsapp-webhook (handlePosVendaReply) lê esse texto e dispara a proposta na
+      // hora — evita o edge ter que buscar template/empresa/equipamento. Só quando o
+      // reagendamento está ligado; senão o campo nem existe e o webhook não faz nada.
+      let metadataLembrete = null;
+      if (config.enviar_reagendamento) {
+        const reagText = aplicarVars(tplByTipo.reagendamento ||
+          "Que bom! Podemos agendar sua manutenção para {{data_sugerida}}? É só confirmar que já deixo marcado. 🗓️");
+        metadataLembrete = { data_sugerida: proximaVisita.toISOString(), reagendamento_conteudo: reagText };
+      }
       rows.push({
         os_id: os.id,
         cliente_id: os.clienteId,
@@ -1202,6 +1213,7 @@ async function scheduleOSPosVenda(os) {
           "Oi! Já fazem alguns meses do seu último serviço. Que tal agendar uma manutenção preventiva?"),
         telefone,
         agendada_para: agendada.toISOString(),
+        ...(metadataLembrete ? { metadata: metadataLembrete } : {}),
       });
     }
 

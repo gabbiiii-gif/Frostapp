@@ -452,7 +452,9 @@ async function handlePosVendaReply(supabase: SupabaseClient, cfg: any, j: Job): 
 
   const precisaHumano =
     ["duvida", "cancela", "parar"].includes(cls.intencao) ||
-    (alvo.tipo === "nps" && cls.nps_score != null && cls.nps_score <= 6);
+    (alvo.tipo === "nps" && cls.nps_score != null && cls.nps_score <= 6) ||
+    // Resposta a uma proposta de reagendamento: o humano fecha o agendamento (Inbox).
+    alvo.tipo === "reagendamento";
 
   // Atualiza a linha da fila com a resposta classificada.
   const metaPrev = (alvo.metadata && typeof alvo.metadata === "object") ? alvo.metadata as Record<string, unknown> : {};
@@ -475,14 +477,55 @@ async function handlePosVendaReply(supabase: SupabaseClient, cfg: any, j: Job): 
     }); // erro de duplicado é ignorado (cliente já opt-out)
   }
 
-  // Ack curto pro cliente não ficar no vácuo.
-  const ack = ackPosVenda(cls.intencao, alvo.tipo);
   const evoBase = String(cfg.evolution_url || "").replace(/\/+$/, "");
   const apikey = cfg.metadata?.evolution_apikey || "";
-  if (ack && evoBase && apikey) {
-    try {
-      await enviarTexto(evoBase, cfg.evolution_instance, apikey, j.phone, ack);
-    } catch (e) { console.error("[pos-venda] ack erro:", e); }
+
+  // Reagendamento automático: resposta positiva a um lembrete → propõe a data prevista.
+  // O texto vem pré-renderizado do App.jsx (metadata.reagendamento_conteudo, só quando
+  // enviar_reagendamento está ligado). Envia na hora e grava a linha `reagendamento`
+  // (status enviada) pra próxima resposta do cliente casar e cair no Inbox. Só uma
+  // proposta por OS (idempotência) e só nasce de resposta a lembrete (sem loop).
+  let reagendamentoEnviado = false;
+  if (alvo.tipo === "lembrete_visita" && ["confirma", "reagenda"].includes(cls.intencao) && alvo.os_id && alvo.cliente_id) {
+    const reagText = (alvo.metadata && typeof alvo.metadata === "object")
+      ? (alvo.metadata as Record<string, unknown>).reagendamento_conteudo
+      : null;
+    if (reagText && evoBase && apikey) {
+      const { data: jaReag } = await supabase.from("pos_venda_mensagens")
+        .select("id").eq("company_id", cfg.company_id).eq("os_id", alvo.os_id).eq("tipo", "reagendamento").limit(1);
+      if (!jaReag || jaReag.length === 0) {
+        try {
+          await enviarTexto(evoBase, cfg.evolution_instance, apikey, j.phone, String(reagText));
+          await supabase.from("pos_venda_mensagens").insert({
+            company_id: cfg.company_id,
+            os_id: alvo.os_id,
+            cliente_id: alvo.cliente_id,
+            cliente_nome: alvo.cliente_nome,
+            os_numero: alvo.os_numero,
+            tipo: "reagendamento",
+            status: "enviada",
+            canal: "whatsapp",
+            conteudo: String(reagText),
+            telefone: alvo.telefone,
+            agendada_para: new Date().toISOString(),
+            enviada_em: new Date().toISOString(),
+          });
+          reagendamentoEnviado = true;
+        } catch (e) { console.error("[pos-venda] reagendamento erro:", e); }
+      } else {
+        reagendamentoEnviado = true; // já proposto antes → não manda ack genérico duplicado
+      }
+    }
+  }
+
+  // Ack curto pro cliente não ficar no vácuo (pulado quando já mandamos a proposta).
+  if (!reagendamentoEnviado) {
+    const ack = ackPosVenda(cls.intencao, alvo.tipo);
+    if (ack && evoBase && apikey) {
+      try {
+        await enviarTexto(evoBase, cfg.evolution_instance, apikey, j.phone, ack);
+      } catch (e) { console.error("[pos-venda] ack erro:", e); }
+    }
   }
 
   // Escala humano: Inbox (precisa_humano já setado) + email pra admin/gerente.
