@@ -145,4 +145,11 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - fix Pós-Venda #2: removido toggle "Proposta de reagendamento" da UI (ConfigTab) — nenhum gerador cria mensagens tipo reagendamento; era promessa vazia. Intenção reagenda continua indo pro Inbox.
 - auditoria #4 (verificado via MCP, prod rbwzhglsztmjvwrcydcy): tabelas pos_venda_* têm company_id mas pos-venda-dispatch ignora em todas as queries (config .maybeSingle sem filtro; ai_agent_config .limit(1); fila sem company_id). Bug LATENTE — hoje 1 empresa com pós-venda + 1 ai_agent_config enabled (2 existem). Quebra quando 2ª empresa ligar. NÃO corrigido (fora do escopo "investigar"). lembrete-dispatch tem o mesmo germe no fetch de ai_agent_config.
 - touched: modules/pos-venda.md (scheduleOSPosVenda + nova seção "Dívida: dispatcher não é multi-empresa"), src/App.jsx, src/modules/PosVendaModule.jsx, supabase/functions/lembrete-dispatch, supabase/functions/lembrete-teste
-- PENDENTE (a decidir com usuário): corrigir escopo multi-empresa do dispatcher; reagendamento automático de verdade (feature nova, precisa design)
+- PENDENTE (a decidir com usuário): reagendamento automático de verdade (feature nova, precisa design)
+
+## [2026-07-12] fix | dispatchers escopados por company_id (multi-empresa)
+- gatilho: usuário aprovou corrigir a dívida #4 da auditoria do pós-venda
+- pos-venda-dispatch: reestruturado de "1 config global + 1 evo + toda a fila" para iterar por empresa (pos_venda_config por company_id) e escopar ai_agent_config/fila/updates por company_id. Retorno agora { sent, failed, processados, skipped{company_id:motivo} }. `ativo` null preservado como ativo. Deploy MCP v14.
+- lembrete-dispatch: fetch de ai_agent_config ganhou .eq("company_id", companyId) (mesmo germe). Deploy MCP v7.
+- verificação: esbuild OK nos dois; SQL confirmou empresa ativa cmp_default (ativo, modo auto, 1 evo enabled, 11 na fila) → sem regressão. commit/push main efe369d.
+- touched: supabase/functions/pos-venda-dispatch/index.ts, supabase/functions/lembrete-dispatch/index.ts, modules/pos-venda.md (seção dívida → corrigido)

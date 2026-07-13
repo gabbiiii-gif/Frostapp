@@ -41,16 +41,12 @@ Envia mensagens automáticas de pós-venda (ex.: pesquisa de satisfação) após
 
 Reusa `ai_agent_config` (`evolution_url`/`evolution_instance`, `enabled=true`, `metadata.evolution_apikey`) — ver [[../concepts/evolution-multitenant]]. Sem Evolution configurada → no-op gracioso (fila acumula). Env do dispatcher: `DISPATCH_KEY`, `EVOLUTION_APIKEY` (fallback) (+ `SUPABASE_URL`/`SUPABASE_SERVICE_ROLE_KEY` injetadas pelo runtime). A apikey canônica vive em `ai_agent_config.metadata.evolution_apikey` (por empresa), não em env.
 
-## ⚠️ Dívida: dispatcher não é multi-empresa (bug latente)
+## Escopo multi-empresa do dispatcher (corrigido 2026-07-12)
 
-> **Verificado em 2026-07-12** (schema + contagem no projeto prod `rbwzhglsztmjvwrcydcy`). Não causa dano **hoje**, mas quebra assim que uma 2ª empresa ligar o pós-venda.
+> **Bug encontrado e corrigido em 2026-07-12** (verificado no prod `rbwzhglsztmjvwrcydcy`). Era latente — não causava dano porque só havia 1 empresa com pós-venda ativo — mas quebraria assim que uma 2ª empresa ligasse.
 
-Todas as tabelas `pos_venda_*` **têm coluna `company_id`** (são multi-tenant por design), mas `pos-venda-dispatch` **ignora `company_id` em todas as queries**:
+Todas as tabelas `pos_venda_*` têm coluna `company_id` (multi-tenant por design), mas o `pos-venda-dispatch` **ignorava `company_id` em todas as queries**: pegava uma config global (`.maybeSingle()` sem filtro — erraria com 2 configs), uma instância Evolution arbitrária (`.limit(1)`) e **toda** a fila sem filtro → mandaria mensagens de todas as empresas pela conta WhatsApp errada.
 
-- `pos_venda_config` → `.is("cliente_id", null).maybeSingle()` — sem filtro por empresa; com 2 configs globais o `.maybeSingle()` **erra** (múltiplas linhas).
-- `ai_agent_config` → `.eq("enabled", true).limit(1).maybeSingle()` — pega **uma** instância Evolution arbitrária.
-- `pos_venda_mensagens` (fila elegível) → filtra só por `status`/`agendada_para`, **sem `company_id`** → varre mensagens de **todas** as empresas e dispara todas pela **única** instância Evolution pega acima (envio cross-tenant pela conta WhatsApp errada; ignora `ativo`/`modo_disparo` por empresa).
+**Correção (deploy pos-venda-dispatch v14):** o dispatcher agora itera por `pos_venda_config` **por empresa** (como o `lembrete-dispatch` faz com `lembrete_config`) e escopa `ai_agent_config`, a fila `pos_venda_mensagens` e os updates por `company_id`. Retorna `{ sent, failed, processados, skipped }` (o `skipped` mapeia `company_id → motivo`). Preserva `ativo` null = ativo.
 
-**Por que não quebra agora:** hoje há **1** empresa com `pos_venda_config`/mensagens e **1** `ai_agent_config` com `enabled=true` (embora já existam **2** empresas com `ai_agent_config`). O `.limit(1)` acerta por sorte.
-
-**Correção sugerida (não feita — fora do escopo de "investigar"):** o dispatcher deveria iterar por `pos_venda_config` **por empresa** (como o `lembrete-dispatch` faz com `lembrete_config`) e filtrar `ai_agent_config`/`pos_venda_mensagens` por `company_id` dentro de cada iteração. Nota: o `lembrete-dispatch`, apesar de iterar por empresa, também busca `ai_agent_config` com `.limit(1)` sem filtrar por `companyId` — mesmo germe de bug para a instância Evolution.
+**Mesmo germe no `lembrete-dispatch` (deploy v7):** apesar de já iterar por empresa, ele buscava `ai_agent_config` com `.limit(1)` sem filtrar por `companyId` — corrigido com `.eq("company_id", companyId)`.
