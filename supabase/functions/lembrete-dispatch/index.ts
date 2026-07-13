@@ -40,6 +40,60 @@ async function kvList(sb: SupabaseClient, companyId: string, suffix: string) {
   return (bare.data || []).map((r: { value: unknown }) => r.value as Record<string, unknown>);
 }
 
+// Rótulos pt-BR dos status de OS (alinhado ao STATUS_MAP do app). Os fechados são ignorados.
+const STATUS_LABEL_OS: Record<string, string> = {
+  aguardando: "Aguardando", agendado: "Agendado", confirmado: "Confirmado",
+  em_deslocamento: "Em Deslocamento", em_execucao: "Em Execução", em_andamento: "Em Andamento",
+  em_servico: "Em Serviço", aguardando_finalizacao: "Aguardando Finalização", pendente: "Pendente",
+};
+const STATUS_OS_FECHADO = new Set(["finalizado", "cancelado", "recusado"]);
+
+// Monta o bloco de FATOS operacionais do dono a partir de OS + clientes já carregados.
+// Não faz query nova nem inventa nada: só conta/filtra o que existe. Retorna o texto que
+// alimenta a IA e um fallback determinístico (usado se a IA falhar/timeout).
+function montarFatosDono(p: {
+  oss: Record<string, unknown>[]; clientes: Record<string, unknown>[];
+  vencendoLinhas: string[]; vencendoQtd: number; agora: Date; lookaheadDias: number;
+}): { texto: string; fallback: string } {
+  // 1. OS abertas por status (exclui finalizado/cancelado/recusado)
+  const contagem: Record<string, number> = {};
+  let totalAbertas = 0;
+  for (const os of p.oss) {
+    const st = String(os.status || "");
+    if (!st || STATUS_OS_FECHADO.has(st)) continue;
+    contagem[st] = (contagem[st] || 0) + 1; totalAbertas++;
+  }
+  const linhasStatus = Object.entries(contagem).sort((a, b) => b[1] - a[1])
+    .map(([st, n]) => `  - ${STATUS_LABEL_OS[st] || st}: ${n}`).join("\n") || "  - nenhuma";
+
+  // 2. Visitas agendadas nos próximos N dias — SEMPRE (independe do flag de lembrete ao cliente)
+  const limite = new Date(p.agora); limite.setDate(limite.getDate() + p.lookaheadDias);
+  const agendadas: { quando: Date; txt: string }[] = [];
+  for (const os of p.oss) {
+    if (STATUS_OS_FECHADO.has(String(os.status || ""))) continue;
+    if (!os.dataAgendada) continue;
+    const quando = new Date(String(os.dataAgendada).slice(0, 10) + "T" + String(os.horaAgendada || "08:00") + ":00");
+    if (isNaN(quando.getTime()) || quando < p.agora || quando > limite) continue;
+    agendadas.push({ quando, txt: `  - ${fmtData(quando.toISOString())} — ${String(os.clienteNome || "cliente")} (${String(os.equipamentoTipo || "—")})` });
+  }
+  agendadas.sort((a, b) => a.quando.getTime() - b.quando.getTime());
+  const linhasAgend = agendadas.slice(0, 20).map((a) => a.txt).join("\n") || "  - nenhuma";
+
+  // 3. Manutenções vencendo (já vêm formatadas)
+  const linhasVenc = p.vencendoLinhas.length ? p.vencendoLinhas.slice(0, 20).map((l) => `  ${l}`).join("\n") : "  - nenhuma";
+
+  const texto = [
+    `OS abertas (${totalAbertas}):`, linhasStatus, "",
+    `Manutencoes vencendo (${p.vencendoQtd}):`, linhasVenc, "",
+    `Visitas agendadas proximos ${p.lookaheadDias} dias (${agendadas.length}):`, linhasAgend, "",
+    `Total de clientes cadastrados: ${p.clientes.length}`,
+  ].join("\n");
+
+  const fallback = `Resumo do dia: ${totalAbertas} OS aberta(s), ${p.vencendoQtd} manutencao(oes) vencendo, ${agendadas.length} visita(s) agendada(s) nos proximos ${p.lookaheadDias} dias. ${p.clientes.length} clientes cadastrados.`;
+
+  return { texto, fallback };
+}
+
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
   const sb = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
@@ -158,9 +212,11 @@ Deno.serve(async (req) => {
       if (dentroJanela) {
         if (await marcar("resumo_dono", null, hojeStr, "dono", "whatsapp")) {
           try {
-            const linhasVenc = vencendo.slice(0, 20).map((v) => `- ${v.nome} (${v.equip}) — vence ${v.proxima}`).join("\n") || "nenhum";
-            const sys = "Voce escreve um resumo curto, cordial e em pt-BR para o DONO de uma assistencia tecnica de refrigeracao, sobre os proximos servicos. Seja objetivo, sem inventar dados.";
-            const user = `Clientes vencendo a manutencao:\n${linhasVenc}\n\nEscreva 1 mensagem de WhatsApp resumindo pro dono o que precisa de atencao hoje.`;
+            // Panorama operacional geral — só dados reais (OS + clientes já carregados)
+            const vencendoLinhas = vencendo.slice(0, 20).map((v) => `- ${v.nome} (${v.equip}) — vence ${v.proxima}`);
+            const fatos = montarFatosDono({ oss, clientes, vencendoLinhas, vencendoQtd: vencendo.length, agora, lookaheadDias: Number(cfg.lookahead_dias) || 7 });
+            const sys = "Voce escreve um resumo operacional curto, cordial e em pt-BR para o DONO de uma assistencia tecnica de refrigeracao. Use SOMENTE os dados fornecidos abaixo — nao estime, nao invente e nao adicione numeros que nao estejam nos fatos.";
+            const user = `Fatos de hoje (${empresaNome}):\n\n${fatos.texto}\n\nEscreva 1 mensagem de WhatsApp com um panorama do dia pro dono, destacando o que precisa de atencao.`;
             const r = await fetch(ANTHROPIC_URL, {
               method: "POST",
               headers: { "x-api-key": Deno.env.get("ANTHROPIC_API_KEY")!, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -168,7 +224,7 @@ Deno.serve(async (req) => {
             });
             const jr = await r.json();
             const texto = (jr.content || []).filter((x: { type: string }) => x.type === "text").map((x: { text: string }) => x.text).join("\n").trim()
-              || `Resumo do dia: ${vencendo.length} cliente(s) vencendo a manutencao.`;
+              || fatos.fallback;
             await sendWhats(String(cfg.dono_telefone), texto);
             resumos++;
           } catch { falhas++; }
