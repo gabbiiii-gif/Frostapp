@@ -153,3 +153,13 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - lembrete-dispatch: fetch de ai_agent_config ganhou .eq("company_id", companyId) (mesmo germe). Deploy MCP v7.
 - verificação: esbuild OK nos dois; SQL confirmou empresa ativa cmp_default (ativo, modo auto, 1 evo enabled, 11 na fila) → sem regressão. commit/push main efe369d.
 - touched: supabase/functions/pos-venda-dispatch/index.ts, supabase/functions/lembrete-dispatch/index.ts, modules/pos-venda.md (seção dívida → corrigido)
+
+## [2026-07-12] feat | reagendamento automático do pós-venda (propõe data, humano fecha)
+- gatilho: usuário aprovou implementar o reagendamento (única pendência da auditoria); brainstorm → opção A (propor data + humano fecha), data = próxima visita
+- spec: docs/superpowers/specs/2026-07-12-reagendamento-automatico-pos-venda-design.md
+- App.jsx scheduleOSPosVenda: se enviar_reagendamento, pré-renderiza template reagendamento e grava metadata { data_sugerida, reagendamento_conteudo } na linha do lembrete
+- PosVendaModule: toggle "Proposta de reagendamento" re-adicionado (hint verdadeiro) + volta ao payload
+- whatsapp-webhook handlePosVendaReply: resposta positiva a lembrete → envia proposta na hora + grava linha reagendamento (enviada); idempotente por os_id, sem loop, pula ack; resposta a reagendamento → precisa_humano (Inbox)
+- verificação: esbuild OK (webhook), build Vite OK. commit/push main 9a2ae96.
+- DEPLOY PENDENTE: whatsapp-webhook NÃO redeployado (852 linhas/40KB, muitos escapes — transcrição manual no MCP é arriscada pra infra crítica; CLI sem token). Frontend (App/PosVenda) já vai pela Vercel. Rodar: `supabase functions deploy whatsapp-webhook` (project rbwzhglsztmjvwrcydcy). Sem isso, o lembrete grava o metadata mas a proposta não dispara.
+- touched: src/App.jsx, src/modules/PosVendaModule.jsx, supabase/functions/whatsapp-webhook/index.ts, specs/2026-07-12-reagendamento-automatico-pos-venda-design.md, modules/pos-venda.md
