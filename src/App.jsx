@@ -1328,7 +1328,10 @@ function createOSFromProposal(p) {
     createdAt: new Date().toISOString(),
   };
   DB.set("erp:os:" + newOS.id, newOS);
-  scheduleOSPosVenda(newOS);
+  // NÃO agenda pós-venda aqui: a OS nasce "aguardando" (serviço ainda não feito).
+  // O NPS/lembrete são agendados só na finalização (changeStatus / revisão do admin),
+  // que é quando dataConclusao existe. Agendar na criação mandaria NPS 24h depois de
+  // abrir a OS, antes do atendimento acontecer.
   return newOS;
 }
 

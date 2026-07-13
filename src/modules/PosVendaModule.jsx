@@ -426,7 +426,6 @@ function ConfigTab({ supabase }) {
         dias_proxima_visita: config.dias_proxima_visita,
         enviar_nps: config.enviar_nps,
         enviar_lembrete: config.enviar_lembrete,
-        enviar_reagendamento: config.enviar_reagendamento,
         modo_disparo: config.modo_disparo,
         horario_envio: config.horario_envio,
         ativo: config.ativo,
@@ -500,12 +499,10 @@ function ConfigTab({ supabase }) {
             label="Lembrete de proxima visita"
             hint="Avisa o cliente 3 dias antes da data calculada."
           />
-          <Toggle
-            checked={config.enviar_reagendamento}
-            onChange={(v) => update('enviar_reagendamento', v)}
-            label="Proposta de reagendamento"
-            hint="Apos resposta positiva ao lembrete, propoe nova data."
-          />
+          {/* Reagendamento automatico ainda nao implementado (nenhum gerador cria
+              mensagens tipo 'reagendamento'). Quando o cliente responde pedindo
+              reagendar, o webhook marca precisa_humano e a resposta aparece no Inbox
+              para tratamento manual. Toggle removido pra nao prometer automacao inexistente. */}
         </div>
       </Card>
 
