@@ -10,8 +10,15 @@
 //      ai_agent_config.metadata.evolution_apikey (por empresa).
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { podeAutoReligar } from "./auto-resume.ts";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+// Auto-religamento: se a IA foi pausada para um humano mas ninguém do time
+// respondeu nesse tempo, a IA reassume a conversa quando o cliente voltar a
+// escrever. Evita conversas mortas em 'pending_human' pra sempre. Configurável
+// via env AUTO_RESUME_HOURS (padrão 6h).
+const AUTO_RESUME_MS =
+  (Number(Deno.env.get("AUTO_RESUME_HOURS")) || 6) * 3600 * 1000;
 // Sonnet 4.6: raciocínio bem melhor que o Haiku pra conduzir o atendimento,
 // seguir o fluxo (nome primeiro, reconhecer cliente, regras de desconto) e
 // interpretar imagens. Custo/latência maiores, aceitos pra qualidade do bot.
@@ -270,7 +277,17 @@ async function handleMessage(j: Job) {
   });
 
   // ── Gate 1: conversa não-'active' (humano assumiu) ───────────────────────
-  if (conv.status !== "active") return;
+  // A IA fica muda em conversas pausadas. Mas se o time não respondeu há
+  // AUTO_RESUME_MS, a IA REASSUME quando o cliente volta a escrever — senão a
+  // conversa morre em 'pending_human' pra sempre (causa raiz do "IA parou").
+  if (conv.status !== "active") {
+    const lastAgentAtMs = await ultimaMsgAgenteMs(supabase, conv.id);
+    if (!podeAutoReligar(conv.status, lastAgentAtMs, Date.now(), AUTO_RESUME_MS)) return;
+    await supabase.from("ai_conversations")
+      .update({ status: "active", ai_handoff_reason: null })
+      .eq("id", conv.id);
+    // segue o fluxo normal abaixo: a IA responde com a conversa já reativada.
+  }
 
   // ── Gate 2: fora do horário comercial ────────────────────────────────────
   if (!dentroDoHorario(cfg.business_hours)) {
@@ -346,6 +363,24 @@ async function handleMessage(j: Job) {
   if (handoff) {
     await supabase.from("ai_conversations").update({ status: "pending_human" }).eq("id", conv.id);
   }
+}
+
+// Timestamp (ms) da última mensagem SAINDO do número (role=agent) — seja da
+// IA ou de um operador humano. É o proxy de "quando o time falou por último"
+// usado pelo auto-religamento. Retorna null se não há nenhuma.
+async function ultimaMsgAgenteMs(
+  supabase: SupabaseClient, conversationId: string,
+): Promise<number | null> {
+  const { data } = await supabase
+    .from("ai_messages")
+    .select("created_at")
+    .eq("conversation_id", conversationId)
+    .eq("role", "agent")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const ts = (data as { created_at?: string } | null)?.created_at;
+  return ts ? new Date(ts).getTime() : null;
 }
 
 // Trata mensagem que SAIU do número do negócio (fromMe). Decide entre eco,
