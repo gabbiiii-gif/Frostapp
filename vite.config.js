@@ -97,6 +97,8 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     globals: true,
-    include: ['src/**/*.test.{js,jsx}'],
+    // Inclui os testes de lógica pura das edge functions (Deno) que não
+    // dependem de imports por URL — ex.: auto-religamento do agente WhatsApp.
+    include: ['src/**/*.test.{js,jsx}', 'supabase/functions/**/*.test.ts'],
   },
 })
