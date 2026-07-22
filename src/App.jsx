@@ -11,7 +11,7 @@ import {
 import { animate } from "animejs";
 import { motion } from "motion/react";
 import gsap from "gsap";
-import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, masterEvolution, adminEvolution, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig } from "./supabase.js";
+import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, masterEvolution, adminEvolution, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig, deviceEnroll, deviceVerify, masterDevices } from "./supabase.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -2697,6 +2697,31 @@ function ResetPasswordScreen({ onDone, addToast, mode = "recovery" }) {
             </button>
           </div>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// Tela exibida quando o aparelho não está aprovado (Fase 1 do travamento por
+// aparelho). Sem acesso ao ERP. status: 'pending'/'needs_enroll' (aguardando
+// aprovação do superadmin) | 'denied' (aparelho não autorizado — preso a outro).
+function DeviceGateScreen({ status, onLogout }) {
+  const pendente = status === "pending" || status === "needs_enroll";
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-100 p-6">
+      <div className="max-w-md w-full bg-slate-800 rounded-2xl p-8 text-center shadow-xl">
+        <div className="text-5xl mb-4">{pendente ? "⏳" : "🔒"}</div>
+        <h1 className="text-xl font-semibold mb-2">
+          {pendente ? "Aguardando aprovação do aparelho" : "Aparelho não autorizado"}
+        </h1>
+        <p className="text-slate-300 text-sm mb-6">
+          {pendente
+            ? "Este aparelho foi registrado e está aguardando liberação pelo administrador do sistema. Assim que aprovado, você poderá acessar normalmente."
+            : "Seu acesso está vinculado a outro aparelho. Fale com o administrador do sistema para liberar este aparelho."}
+        </p>
+        <button onClick={onLogout} className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">
+          Sair
+        </button>
       </div>
     </div>
   );
@@ -17230,10 +17255,27 @@ export default function App() {
   }, [handleMasterLogin]);
 
   // ─── Login Handler — salva sessão e verifica troca de senha obrigatória ───
+  // Portão de aparelho (Fase 1): status quando o aparelho não está aprovado
+  // ('pending' | 'needs_enroll' | 'denied'). Null = liberado / sem bloqueio.
+  const [deviceGate, setDeviceGate] = useState(null);
+
   const handleLogin = useCallback(async (u) => {
     if (u.forcePasswordChange) {
       setPendingPasswordChange(u);
       return;
+    }
+    // Portão de aparelho: registra + verifica antes de liberar o ERP. O Master
+    // não passa por aqui. Soft nesta fase — se falhar por rede, libera (não trava
+    // o usuário legítimo offline); o bloqueio duro entra com o RLS (Fase 3).
+    try {
+      await deviceEnroll();
+      const chk = await deviceVerify();
+      if (chk.ok && chk.status !== "approved") {
+        setDeviceGate(chk.status);
+        return;
+      }
+    } catch (e) {
+      console.warn("portão de aparelho falhou (soft, libera):", e.message);
     }
     const sessUser = await startSession(u);
     setUser(sessUser);
@@ -17381,6 +17423,17 @@ export default function App() {
             window.location.replace(window.location.origin);
           }}
         />
+      </>
+    );
+  }
+
+  // Portão de aparelho (Fase 1): aparelho não aprovado → tela de bloqueio,
+  // sem acesso ao ERP. Sair limpa o estado e encerra a sessão.
+  if (deviceGate) {
+    return (
+      <>
+        <StyleSheet />
+        <DeviceGateScreen status={deviceGate} onLogout={() => { setDeviceGate(null); handleLogout(); }} />
       </>
     );
   }
