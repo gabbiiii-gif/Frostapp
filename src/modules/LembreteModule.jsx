@@ -155,7 +155,7 @@ export default function LembreteModule({ db, addToast, companyId }) {
           </label>
           <div className="grid grid-cols-2 gap-3">
             <label className="block"><span className="text-xs text-gray-300">Telefone do dono</span>
-              <input type="text" value={cfg.dono_telefone || ""} onChange={(e) => upd("dono_telefone", e.target.value)} placeholder="5593991106818"
+              <input type="text" value={cfg.dono_telefone || ""} onChange={(e) => upd("dono_telefone", e.target.value)} placeholder="DDD + número (só dígitos)"
                 className="mt-1 w-full px-3 py-2 rounded-lg bg-gray-900 border border-gray-700 text-white text-sm" /></label>
             <label className="block"><span className="text-xs text-gray-300">Hora do resumo</span>
               <input type="time" value={cfg.resumo_hora || "07:00"} onChange={(e) => upd("resumo_hora", e.target.value)}
