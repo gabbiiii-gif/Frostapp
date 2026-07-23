@@ -69,6 +69,18 @@ Deno.serve(async (req: Request) => {
     return json({ ok: true, devices: enriched });
   }
 
+  // ─── ENFORCEMENT — kill-switch global do RLS por aparelho (Fase 3) ───
+  // Sem `enabled` no corpo: só consulta o estado. Com boolean: liga/desliga.
+  if (action === "enforcement") {
+    if (typeof body.enabled === "boolean") {
+      const { error } = await admin.from("device_enforcement")
+        .update({ enabled: body.enabled, updated_at: new Date().toISOString() }).eq("id", 1);
+      if (error) { console.error("master-devices enforcement:", error.message); return json({ ok: false, error: error.message }, 500); }
+    }
+    const { data: row } = await admin.from("device_enforcement").select("enabled").eq("id", 1).maybeSingle();
+    return json({ ok: true, enabled: !!row?.enabled });
+  }
+
   const deviceId = String(body.deviceId || "");
   if (!deviceId) return json({ ok: false, error: "missing_device" }, 400);
 

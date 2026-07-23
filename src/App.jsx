@@ -4417,16 +4417,28 @@ function MasterDevicesPanel({ master, addToast }) {
   const [devices, setDevices] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [enforcement, setEnforcement] = useState(null); // kill-switch do RLS (null = carregando)
 
   const load = useCallback(async () => {
     setLoading(true);
     const res = await masterDevices(master, "list");
     if (res.ok) setDevices(res.devices || []);
     else addToast?.(res.error || "Falha ao listar aparelhos", "error");
+    const enf = await masterDevices(master, "enforcement");
+    if (enf.ok) setEnforcement(!!enf.enabled);
     setLoading(false);
   }, [master, addToast]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Liga/desliga o cadeado real (RLS por aparelho). Confirmação obrigatória ao ligar.
+  const toggleEnforcement = useCallback(async () => {
+    const novo = !enforcement;
+    if (novo && !window.confirm("LIGAR o bloqueio por aparelho (RLS)?\n\nApós ligar, quem NÃO tiver aparelho aprovado e provado deixa de acessar QUALQUER dado. Confirme só depois de aprovar os aparelhos dos membros ativos.")) return;
+    const res = await masterDevices(master, "enforcement", { enabled: novo });
+    if (res.ok) { setEnforcement(!!res.enabled); addToast?.(res.enabled ? "Bloqueio por aparelho LIGADO." : "Bloqueio por aparelho DESLIGADO.", "success"); }
+    else addToast?.(res.error || "Falha ao alterar o bloqueio", "error");
+  }, [enforcement, master, addToast]);
 
   async function act(deviceId, action) {
     setBusyId(deviceId);
@@ -4442,10 +4454,26 @@ function MasterDevicesPanel({ master, addToast }) {
 
   return (
     <div className="p-1 sm:p-2">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-3">
         <p className="text-sm text-gray-400">Aprove o aparelho de cada membro. Só aparelhos aprovados acessam o app.</p>
         <button onClick={load} className="text-sm px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600">Atualizar</button>
       </div>
+      {enforcement !== null && (
+        <div className={`mb-4 rounded-lg p-3 flex items-center justify-between gap-3 ${enforcement ? "bg-emerald-900/40 border border-emerald-700" : "bg-amber-900/30 border border-amber-700"}`}>
+          <div className="text-sm">
+            <span className="font-semibold">Bloqueio por aparelho (RLS): {enforcement ? "LIGADO 🔒" : "DESLIGADO"}</span>
+            <p className="text-xs text-gray-400 mt-0.5">
+              {enforcement
+                ? "Sem aparelho aprovado e provado, o membro não acessa nenhum dado. Se algo travar, desligue aqui na hora."
+                : "Interruptor de segurança do cadeado. Só ligue depois de aprovar os aparelhos dos membros ativos."}
+            </p>
+          </div>
+          <button onClick={toggleEnforcement}
+            className={`text-sm px-3 py-1.5 rounded-lg whitespace-nowrap font-medium ${enforcement ? "bg-red-600 hover:bg-red-500" : "bg-emerald-600 hover:bg-emerald-500"}`}>
+            {enforcement ? "Desligar" : "Ligar bloqueio"}
+          </button>
+        </div>
+      )}
       {devices.length === 0 ? (
         <div className="text-gray-400 text-sm py-6 text-center">Nenhum aparelho registrado ainda.</div>
       ) : (
@@ -16926,6 +16954,9 @@ export default function App() {
                 migrateLegacyConfigOnce(savedUser.companyId || DEFAULT_COMPANY_ID);
                 try { ensureAutoBackup(savedUser.companyId || DEFAULT_COMPANY_ID); } catch { /* ignora */ }
                 setUser(savedUser);
+                // Fase 3: renova a device_session (base do RLS por aparelho) para a
+                // sessão em cache. Fire-and-forget; se o aparelho foi revogado, gateia.
+                deviceVerify().then((chk) => { if (chk?.ok && chk.status === "denied") setDeviceGate("denied"); }).catch(() => {});
                 lastActivityRef.current = Date.now();
                 sessionStorage.setItem("frost_session", JSON.stringify({ ...session, lastActivity: Date.now() }));
               }

@@ -13,7 +13,7 @@ const CORS = {
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 }
-const SESSION_TTL_MIN = 15;
+const SESSION_TTL_MIN = 720; // 12h — dura a sessão de trabalho (base do RLS, Fase 3)
 
 // ─── Utils base64url / crypto ────────────────────────────────────────────────
 function b64urlToBytes(b64url: string): Uint8Array {

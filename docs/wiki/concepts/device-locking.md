@@ -46,11 +46,21 @@ Servidor = admin principal (`isSuperAdmin` / `company_members.is_super_admin = t
 Terminais = demais membros. Camada de exibição no `UserManagement` (título "Servidor e
 Terminais", badge por linha, "Novo Terminal") — papéis/permissões não mudam.
 
-## Fases seguintes
+## Fases
 
-2 (chave de hardware: Android Keystore/StrongBox + WebAuthn de plataforma;
-`device_challenges` + assinaturas), 3 (RLS total via `current_device_ok()`),
-4 (rename Servidor/Terminais na UI), 5 (passe offline + endurecimento).
+- ✅ 1 — fundação + portão soft (device_uuid).
+- ✅ 2 — WebAuthn no web (`src/webauthn.js`): passkey de plataforma, `device_challenges`,
+  `device-challenge`, verificação de assinatura ECDSA no `device-verify`. Android nativo
+  (Keystore) fica para depois.
+- ✅ 3 — RLS por aparelho: `current_device_ok()` + política restritiva `device_gate` em
+  12 tabelas, com **kill-switch** `device_enforcement` (começa OFF). device_session TTL 12h;
+  renovada no login e no boot. Toggle no painel Aparelhos (`master-devices` action `enforcement`).
+- ✅ 4 — rename Servidor/Terminais na UI.
+- 🔜 5 — passe offline + endurecimento (root/emulador, rejeitar passkey sincronizada).
+
+> **Ligar o cadeado:** aprovar os aparelhos dos membros ativos → confirmar que
+> `device_sessions` estão sendo criadas → ligar o kill-switch no painel. Se travar,
+> desligar na hora (RLS volta a no-op).
 
 > Migração no rollout: **sem grandfather** — todos caem pendentes; o superadmin
 > aprova cada aparelho.
