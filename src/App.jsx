@@ -4418,6 +4418,7 @@ function MasterDevicesPanel({ master, addToast }) {
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
   const [enforcement, setEnforcement] = useState(null); // kill-switch do RLS (null = carregando)
+  const [showHistory, setShowHistory] = useState(false); // mostrar rejeitados/revogados
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -4449,14 +4450,34 @@ function MasterDevicesPanel({ master, addToast }) {
   }
 
   const statusPt = { pending: "Pendente", approved: "Aprovado", rejected: "Rejeitado", revoked: "Revogado" };
+  // Por padrão só mostra o que importa (pendente + aprovado); histórico fica oculto.
+  const visibleDevices = showHistory ? devices : devices.filter((d) => d.status === "pending" || d.status === "approved");
+  const temHistorico = devices.some((d) => d.status === "rejected" || d.status === "revoked");
+  // Nome amigável do aparelho a partir do fingerprint (web esconde o modelo real).
+  const deviceLabel = (d) => {
+    const m = d.fingerprint?.model || "";
+    let nome;
+    if (d.platform === "android" || m === "K" || /android/i.test(m)) nome = "Android";
+    else if (/windows/i.test(m)) nome = "Windows";
+    else if (d.platform === "ios" || /iphone|ipad|mac/i.test(m)) nome = "Apple";
+    else nome = d.platform === "web" ? "Navegador" : (m || d.platform || "—");
+    return `${nome} · ${(d.device_uuid || "").slice(0, 6)}`;
+  };
 
   if (loading) return <div className="p-6 text-slate-300">Carregando aparelhos…</div>;
 
   return (
     <div className="p-1 sm:p-2">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
         <p className="text-sm text-gray-400">Aprove o aparelho de cada membro. Só aparelhos aprovados acessam o app.</p>
-        <button onClick={load} className="text-sm px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600">Atualizar</button>
+        <div className="flex gap-2">
+          {temHistorico && (
+            <button onClick={() => setShowHistory((v) => !v)} className="text-sm px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600">
+              {showHistory ? "Ocultar histórico" : "Mostrar histórico"}
+            </button>
+          )}
+          <button onClick={load} className="text-sm px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600">Atualizar</button>
+        </div>
       </div>
       {enforcement !== null && (
         <div className={`mb-4 rounded-lg p-3 flex items-center justify-between gap-3 ${enforcement ? "bg-emerald-900/40 border border-emerald-700" : "bg-amber-900/30 border border-amber-700"}`}>
@@ -4474,8 +4495,8 @@ function MasterDevicesPanel({ master, addToast }) {
           </button>
         </div>
       )}
-      {devices.length === 0 ? (
-        <div className="text-gray-400 text-sm py-6 text-center">Nenhum aparelho registrado ainda.</div>
+      {visibleDevices.length === 0 ? (
+        <div className="text-gray-400 text-sm py-6 text-center">Nenhum aparelho ativo ou pendente.{temHistorico ? " (há histórico oculto — use “Mostrar histórico”)" : ""}</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
@@ -4491,13 +4512,13 @@ function MasterDevicesPanel({ master, addToast }) {
               </tr>
             </thead>
             <tbody className="text-gray-200">
-              {devices.map((d) => (
+              {visibleDevices.map((d) => (
                 <tr key={d.id} className="border-t border-gray-700">
                   <td className="py-2 pr-3">{d.company_nome}</td>
                   <td className="py-2 pr-3">{d.member_nome}{d.is_super_admin ? " (Servidor)" : ""}</td>
                   <td className="py-2 pr-3">{d.role || "—"}</td>
                   <td className="py-2 pr-3">{d.platform}</td>
-                  <td className="py-2 pr-3" title={d.device_uuid}>{d.fingerprint?.model || (d.device_uuid || "").slice(0, 8)}</td>
+                  <td className="py-2 pr-3" title={`${d.fingerprint?.model || ""} · ${d.device_uuid || ""}`}>{deviceLabel(d)}</td>
                   <td className="py-2 pr-3">{statusPt[d.status] || d.status}</td>
                   <td className="py-2 pr-3 whitespace-nowrap">
                     {d.status !== "approved" && (
