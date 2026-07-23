@@ -4334,6 +4334,90 @@ function AdminWhatsAppConnect({ addToast }) {
   );
 }
 
+// Painel do superadmin: lista aparelhos e permite aprovar/rejeitar/revogar.
+// Só o master controla vínculos de aparelho (decisão de projeto — spec 2026-07-22).
+function MasterDevicesPanel({ master, addToast }) {
+  const [devices, setDevices] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const res = await masterDevices(master, "list");
+    if (res.ok) setDevices(res.devices || []);
+    else addToast?.(res.error || "Falha ao listar aparelhos", "error");
+    setLoading(false);
+  }, [master, addToast]);
+
+  useEffect(() => { load(); }, [load]);
+
+  async function act(deviceId, action) {
+    setBusyId(deviceId);
+    const res = await masterDevices(master, action, { deviceId });
+    if (res.ok) { addToast?.("Feito.", "success"); await load(); }
+    else addToast?.(res.error || "Falha na ação", "error");
+    setBusyId(null);
+  }
+
+  const statusPt = { pending: "Pendente", approved: "Aprovado", rejected: "Rejeitado", revoked: "Revogado" };
+
+  if (loading) return <div className="p-6 text-slate-300">Carregando aparelhos…</div>;
+
+  return (
+    <div className="p-1 sm:p-2">
+      <div className="flex items-center justify-between mb-4">
+        <p className="text-sm text-gray-400">Aprove o aparelho de cada membro. Só aparelhos aprovados acessam o app.</p>
+        <button onClick={load} className="text-sm px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600">Atualizar</button>
+      </div>
+      {devices.length === 0 ? (
+        <div className="text-gray-400 text-sm py-6 text-center">Nenhum aparelho registrado ainda.</div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="text-gray-400 text-left">
+              <tr>
+                <th className="py-2 pr-3">Empresa</th>
+                <th className="py-2 pr-3">Membro</th>
+                <th className="py-2 pr-3">Papel</th>
+                <th className="py-2 pr-3">Plataforma</th>
+                <th className="py-2 pr-3">Aparelho</th>
+                <th className="py-2 pr-3">Status</th>
+                <th className="py-2 pr-3">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="text-gray-200">
+              {devices.map((d) => (
+                <tr key={d.id} className="border-t border-gray-700">
+                  <td className="py-2 pr-3">{d.company_nome}</td>
+                  <td className="py-2 pr-3">{d.member_nome}{d.is_super_admin ? " (Servidor)" : ""}</td>
+                  <td className="py-2 pr-3">{d.role || "—"}</td>
+                  <td className="py-2 pr-3">{d.platform}</td>
+                  <td className="py-2 pr-3" title={d.device_uuid}>{d.fingerprint?.model || (d.device_uuid || "").slice(0, 8)}</td>
+                  <td className="py-2 pr-3">{statusPt[d.status] || d.status}</td>
+                  <td className="py-2 pr-3 whitespace-nowrap">
+                    {d.status !== "approved" && (
+                      <button disabled={busyId === d.id} onClick={() => act(d.id, "approve")}
+                        className="px-2 py-1 mr-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50">Aprovar</button>
+                    )}
+                    {d.status === "pending" && (
+                      <button disabled={busyId === d.id} onClick={() => act(d.id, "reject")}
+                        className="px-2 py-1 mr-1 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-50">Rejeitar</button>
+                    )}
+                    {d.status === "approved" && (
+                      <button disabled={busyId === d.id} onClick={() => act(d.id, "revoke")}
+                        className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 disabled:opacity-50">Revogar</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   const [companies, setCompanies] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -4343,6 +4427,7 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   const [confirmDelete, setConfirmDelete] = useState(null); // empresa a excluir
   const [editingCompany, setEditingCompany] = useState(null); // empresa em edição
   const [showAuditLog, setShowAuditLog] = useState(false);
+  const [showDevices, setShowDevices] = useState(false); // painel de aprovação de aparelhos
   const [waCompany, setWaCompany] = useState(null); // empresa gerenciando conexão WhatsApp
 
   // Form state
@@ -4693,6 +4778,9 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
             <button onClick={() => setShowAuditLog(true)} className="px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition" title="Histórico de ações do Master">
               📜 Auditoria
             </button>
+            <button onClick={() => setShowDevices(true)} className="px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition" title="Aprovar aparelhos dos membros">
+              📱 Aparelhos
+            </button>
             <button onClick={() => { resetForm(); setShowForm(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition shadow-lg shadow-blue-600/20">
               + Nova Empresa
             </button>
@@ -4872,6 +4960,13 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
       {showAuditLog && (
         <Modal isOpen={true} title="Auditoria — Ações do Master" onClose={() => setShowAuditLog(false)} size="lg">
           <MasterAuditLog onClose={() => setShowAuditLog(false)} />
+        </Modal>
+      )}
+
+      {/* Aparelhos — aprovação de vínculo aparelho↔membro (só o Master controla) */}
+      {showDevices && (
+        <Modal isOpen={true} title="Aparelhos — Aprovação de acesso" onClose={() => setShowDevices(false)} size="lg">
+          <MasterDevicesPanel master={master} addToast={addToast} />
         </Modal>
       )}
     </div>

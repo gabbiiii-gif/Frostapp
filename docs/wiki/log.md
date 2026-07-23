@@ -10,6 +10,14 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - criado: docs/wiki/log.md (este arquivo)
 - próximo passo: humano dropa primeira fonte em docs/raw/ e pede ingest
 
+## [2026-07-22] feature | Travamento por aparelho — Fase 1
+- spec: docs/superpowers/specs/2026-07-22-device-locking-servidor-terminais-design.md
+- plan: docs/superpowers/plans/2026-07-22-device-locking-fase-1.md
+- new pages: concepts/device-locking.md
+- touched: index.md
+- entregue: member_devices + device_sessions; edges device-enroll/verify/master-devices; painel Aparelhos no MasterApp; portão no login (soft)
+- pendente: aplicar migration + deploy das edges (credenciais); Fases 2-5 (hardware, RLS total, rename Servidor/Terminais, offline)
+
 ## [2026-05-10] ingest | concepts/ db-layer + supabase-sync + role-permissions
 - gatilho: humano pediu páginas pra concepts/
 - fontes lidas: src/App.jsx (140-650, ALL_MODULES, hasPermission), src/supabase.js (inteiro)
