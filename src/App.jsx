@@ -12803,12 +12803,15 @@ function UserManagement({ currentUser, addToast }) {
     loadUsers();
   }, [currentUser.id, users, addToast, loadUsers]);
 
+  // Servidor = acesso principal (isSuperAdmin); se ausente, o admin. Demais = Terminais.
+  const servidorId = (users.find((u) => u.isSuperAdmin) || users.find((u) => u.role === "admin"))?.id || null;
+
   return (
     <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h3 className="text-lg font-semibold text-white">Usuários do Sistema</h3>
-          <p className="text-gray-400 text-sm mt-0.5">Gerencie quem tem acesso e o que cada um pode fazer.</p>
+          <h3 className="text-lg font-semibold text-white">Servidor e Terminais</h3>
+          <p className="text-gray-400 text-sm mt-0.5">O Servidor é o acesso principal; os Terminais são os demais. Cada um fica preso ao seu aparelho.</p>
           {/* Mostra uso vs. limite definido pelo Master */}
           {(() => {
             if (!currentUser?.companyId) return null;
@@ -12819,7 +12822,7 @@ function UserManagement({ currentUser, addToast }) {
             const cor = ativos >= limit ? "text-red-400" : ativos >= limit * 0.8 ? "text-yellow-400" : "text-gray-400";
             return (
               <p className={`text-xs mt-1 ${cor}`}>
-                Uso: <strong>{ativos}</strong> de <strong>{limit}</strong> usuário(s) permitidos
+                Uso: <strong>{ativos}</strong> de <strong>{limit}</strong> acesso(s) permitido(s)
                 {ativos >= limit && " — limite atingido"}
               </p>
             );
@@ -12829,7 +12832,7 @@ function UserManagement({ currentUser, addToast }) {
           onClick={openCreate}
           className="px-4 py-2 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition"
         >
-          + Novo Usuário
+          + Novo Terminal
         </button>
       </div>
 
@@ -12847,12 +12850,15 @@ function UserManagement({ currentUser, addToast }) {
           </thead>
           <tbody>
             {users.length === 0 && (
-              <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500">Nenhum usuário cadastrado.</td></tr>
+              <tr><td colSpan={6} className="px-3 py-6 text-center text-gray-500">Nenhum terminal cadastrado.</td></tr>
             )}
             {users.map((u) => (
               <tr key={u.id} className="border-b border-gray-700/50 hover:bg-gray-700/30">
                 <td className="px-3 py-2 text-white">
                   {u.nome}
+                  {u.id === servidorId
+                    ? <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300">Servidor</span>
+                    : <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-cyan-500/20 text-cyan-300">Terminal</span>}
                   {u.id === currentUser.id && <span className="ml-2 text-xs text-blue-400">(você)</span>}
                 </td>
                 <td className="px-3 py-2 text-gray-300">{u.email}</td>
@@ -12905,7 +12911,7 @@ function UserManagement({ currentUser, addToast }) {
       {/* Modal de criação/edição */}
       <Modal
         isOpen={modalOpen}
-        title={editing ? "Editar Usuário" : "Novo Usuário"}
+        title={editing ? (editing.id === servidorId ? "Editar Servidor" : "Editar Terminal") : "Novo Terminal"}
         onClose={() => setModalOpen(false)}
         size="lg"
       >
@@ -13858,7 +13864,7 @@ function TwoFactorAuthPanel({ user, addToast, reloadData }) {
             {busy ? "Desativando…" : "Desativar 2FA"}
           </button>
           <p className="text-xs text-gray-500">
-            Perdeu o celular? Peça pra um admin/gerente resetar seu 2FA em Settings → Usuários.
+            Perdeu o celular? Peça pra um admin/gerente resetar seu 2FA em Settings → Servidor e Terminais.
           </p>
         </div>
       )}

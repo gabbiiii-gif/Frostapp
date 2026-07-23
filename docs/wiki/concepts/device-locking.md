@@ -40,10 +40,11 @@ login → `deviceEnroll` (cria pendente) → `deviceVerify`. Se ≠ approved, Ap
 mostra `DeviceGateScreen` (aguardando/negado) e não carrega o ERP. Superadmin
 aprova no painel Aparelhos → próximo login libera.
 
-## Terminologia (planejada)
+## Terminologia (Fase 4 — aplicada)
 
-Servidor = admin principal (`company_members.is_super_admin = true`); Terminais =
-demais membros. Rename amplo na UI fica para a Fase 4.
+Servidor = admin principal (`isSuperAdmin` / `company_members.is_super_admin = true`);
+Terminais = demais membros. Camada de exibição no `UserManagement` (título "Servidor e
+Terminais", badge por linha, "Novo Terminal") — papéis/permissões não mudam.
 
 ## Fases seguintes
 
