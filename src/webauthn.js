@@ -87,7 +87,7 @@ export async function getDeviceAssertion({ challenge, credentialId }) {
       challenge: b64urlToBuf(challenge),
       rpId: currentRpId(),
       allowCredentials: [{ type: 'public-key', id: b64urlToBuf(credentialId) }],
-      userVerification: 'preferred',
+      userVerification: 'discouraged',
       timeout: 60000,
     },
   });
@@ -100,4 +100,14 @@ export async function getDeviceAssertion({ challenge, credentialId }) {
     signature: bufToB64url(resp.signature),
     rpId: currentRpId(),
   };
+}
+
+// Guarda local do credentialId — evita recriar a passkey a cada login (a criação
+// só precisa acontecer uma vez por aparelho; a prova de posse roda a cada login).
+const CRED_KEY = 'frost_device_credential';
+export function getStoredCredentialId() {
+  try { return localStorage.getItem(CRED_KEY) || null; } catch { return null; }
+}
+export function setStoredCredentialId(id) {
+  try { if (id) localStorage.setItem(CRED_KEY, id); } catch { /* ignora */ }
 }

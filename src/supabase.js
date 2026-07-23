@@ -7,7 +7,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { buildDevicePayload } from './device-identity.js';
 import { isDemoMode } from './demo.js';
-import { isWebAuthnSupported, hasPlatformAuthenticator, createDeviceCredential, getDeviceAssertion } from './webauthn.js';
+import { isWebAuthnSupported, hasPlatformAuthenticator, createDeviceCredential, getDeviceAssertion, getStoredCredentialId, setStoredCredentialId } from './webauthn.js';
 
 export const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 export const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -1208,13 +1208,15 @@ export async function deviceEnroll() {
   try {
     const payload = await buildDevicePayload();
     let webauthn = null;
-    if (await _canWebAuthn()) {
+    // Cria a passkey de hardware só na 1ª vez neste aparelho (evita recriar a cada login).
+    if (await _canWebAuthn() && !getStoredCredentialId()) {
       try {
         const ch = await supabase.functions.invoke('device-challenge', { body: { purpose: 'enroll' } });
         const challenge = ch?.data?.challenge;
         if (challenge) {
           const { data: { user } } = await supabase.auth.getUser();
           webauthn = await createDeviceCredential({ challenge, userId: user?.id || 'user', userName: user?.email || 'terminal' });
+          setStoredCredentialId(webauthn.credentialId);
         }
       } catch (e) { console.warn('[device] WebAuthn enroll falhou, cai no soft:', e.message); }
     }
