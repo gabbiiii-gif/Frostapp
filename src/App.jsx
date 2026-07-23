@@ -12,6 +12,7 @@ import { animate } from "animejs";
 import { motion } from "motion/react";
 import gsap from "gsap";
 import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, masterEvolution, adminEvolution, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig, deviceEnroll, deviceVerify, masterDevices } from "./supabase.js";
+import { isDemoMode, DEMO_COMPANY_ID, markDemoStarted, resetDemoData, buildDemoUser, recordDemoLead } from "./demo.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -2698,6 +2699,81 @@ function ResetPasswordScreen({ onDone, addToast, mode = "recovery" }) {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+// Formulário de captura de lead antes de liberar a Demonstração. Pede nome +
+// (WhatsApp OU email). Ao enviar, chama onStart(lead) — que registra o lead e
+// entra na demo semeada. É a primeira tela quando o app abre em ?demo=1.
+function DemoLeadForm({ onStart }) {
+  const [nome, setNome] = useState("");
+  const [whatsapp, setWhatsapp] = useState("");
+  const [email, setEmail] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [erro, setErro] = useState("");
+
+  async function submit(e) {
+    e.preventDefault();
+    if (!nome.trim() || (!whatsapp.trim() && !email.trim())) {
+      setErro("Preencha seu nome e ao menos um contato (WhatsApp ou email).");
+      return;
+    }
+    setErro("");
+    setBusy(true);
+    try {
+      await onStart({ nome: nome.trim(), whatsapp: whatsapp.trim(), email: email.trim() });
+    } catch {
+      // Mesmo se o registro do lead falhar, onStart entra na demo (best-effort).
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-100 p-6">
+      <form onSubmit={submit} className="max-w-md w-full bg-slate-800 rounded-2xl p-8 shadow-xl">
+        <div className="text-center mb-6">
+          <div className="text-4xl mb-2">❄️</div>
+          <h1 className="text-xl font-bold">Demonstração do FrostERP</h1>
+          <p className="text-slate-400 text-sm mt-1">Preencha para iniciar sua demonstração interativa. Você vai explorar o sistema com dados de exemplo.</p>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="text-xs font-semibold text-slate-400 mb-1 block">Nome</label>
+            <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome"
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:outline-none focus:border-cyan-500" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-400 mb-1 block">WhatsApp</label>
+            <input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="(00) 00000-0000"
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:outline-none focus:border-cyan-500" />
+          </div>
+          <div>
+            <label className="text-xs font-semibold text-slate-400 mb-1 block">Email</label>
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com"
+              className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:outline-none focus:border-cyan-500" />
+          </div>
+        </div>
+        {erro && <p className="text-red-400 text-xs mt-3">{erro}</p>}
+        <button type="submit" disabled={busy}
+          className="w-full mt-5 py-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-sm font-bold">
+          {busy ? "Preparando sua demo…" : "Iniciar demonstração"}
+        </button>
+        <p className="text-slate-500 text-[11px] mt-3 text-center">Ao continuar, você concorda em ser contatado sobre o FrostERP.</p>
+      </form>
+    </div>
+  );
+}
+
+// Barra fixa no rodapé durante a demo: avisa que é demonstração, permite resetar
+// os dados de exemplo e leva o prospect a falar com a equipe (conversão).
+function DemoBanner({ onReset }) {
+  const waUrl = "https://wa.me/5593984166832?text=" + encodeURIComponent("Olá! Testei a demonstração do FrostERP e quero falar com a equipe.");
+  return (
+    <div className="fixed bottom-0 left-0 right-0 z-50 bg-cyan-700 text-white text-sm px-4 py-2 flex items-center justify-center gap-3 flex-wrap shadow-lg">
+      <span className="font-semibold">🧪 Modo Demonstração</span>
+      <span className="text-cyan-100 hidden sm:inline">— dados de exemplo, nada é salvo de verdade.</span>
+      <button onClick={onReset} className="px-3 py-1 rounded bg-cyan-800 hover:bg-cyan-900 text-xs font-medium">Resetar demo</button>
+      <a href={waUrl} target="_blank" rel="noopener" className="px-3 py-1 rounded bg-white text-cyan-800 hover:bg-cyan-50 text-xs font-bold">Gostei — falar com a equipe</a>
     </div>
   );
 }
@@ -16590,6 +16666,13 @@ export default function App() {
 
     // Real init — restaura sessão Supabase (se houver), só então hidrata.
     // RLS bloqueia leitura sem auth, então sem session hydrate é no-op (e isso é OK).
+    // Modo Demonstração: boot isolado — pula o fluxo Supabase real. O seed e a
+    // injeção do usuário demo ocorrem após o formulário de lead (handleDemoStart).
+    if (isDemoMode()) {
+      setLoading(false);
+      return () => clearTimeout(t1);
+    }
+
     ensureMemberLoaded().then(() => flushOutbox()).then(() => hydrateFromSupabase()).then(async (hydrated) => {
       // Inicialização: popula dados demo se for o primeiro acesso (sem usuários)
       await seedDatabase();
@@ -17354,6 +17437,30 @@ export default function App() {
   // ('pending' | 'needs_enroll' | 'denied'). Null = liberado / sem bloqueio.
   const [deviceGate, setDeviceGate] = useState(null);
 
+  // Modo Demonstração: inicia a demo (lead best-effort + seed cmp_demo + usuário
+  // demo) e permite resetar o estado da demo a qualquer momento.
+  const handleDemoStart = useCallback(async (lead) => {
+    markDemoStarted();
+    try { await recordDemoLead(lead); } catch { /* best-effort — não bloqueia a demo */ }
+    setActiveCompanyId(DEMO_COMPANY_ID);
+    resetDemoData();
+    await seedDatabase();
+    const demoUser = buildDemoUser();
+    setActiveUser(demoUser);
+    setUser(demoUser);
+    setActiveModule("dashboard");
+    lastActivityRef.current = Date.now();
+    loadAllData();
+  }, [loadAllData]);
+
+  const handleDemoReset = useCallback(async () => {
+    setActiveCompanyId(DEMO_COMPANY_ID);
+    resetDemoData();
+    await seedDatabase();
+    loadAllData();
+    addToast("Demo reiniciada com dados de exemplo.", "success");
+  }, [loadAllData, addToast]);
+
   const handleLogin = useCallback(async (u) => {
     if (u.forcePasswordChange) {
       setPendingPasswordChange(u);
@@ -17522,6 +17629,17 @@ export default function App() {
     );
   }
 
+  // Modo Demonstração: ainda sem usuário demo injetado → mostra o formulário de
+  // lead. Após enviar, handleDemoStart semeia a demo e injeta o usuário.
+  if (isDemoMode() && !user) {
+    return (
+      <>
+        <StyleSheet />
+        <DemoLeadForm onStart={handleDemoStart} />
+      </>
+    );
+  }
+
   // Portão de aparelho (Fase 1): aparelho não aprovado → tela de bloqueio,
   // sem acesso ao ERP. Sair limpa o estado e encerra a sessão.
   if (deviceGate) {
@@ -17572,6 +17690,8 @@ export default function App() {
   return (
     <div className="flex h-screen bg-gray-900 text-gray-100 font-['DM_Sans'] fade-in">
       <StyleSheet />
+      {/* Banner da demo — fixed, sai do fluxo flex (não interfere no layout) */}
+      {isDemoMode() && <DemoBanner onReset={handleDemoReset} />}
 
       {/* Aviso de sessão Supabase caída — gravações não estão sincronizando */}
       {sessionLost && (
