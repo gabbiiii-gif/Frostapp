@@ -7,6 +7,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { buildDevicePayload } from './device-identity.js';
 import { isDemoMode } from './demo.js';
+import { isWebAuthnSupported, hasPlatformAuthenticator, createDeviceCredential, getDeviceAssertion } from './webauthn.js';
 
 export const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 export const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
@@ -1191,13 +1192,33 @@ export async function masterDeleteCompany(master, company) {
   return callMasterCompanies(master, 'delete', { company: { id: company?.id } });
 }
 
-// ─── Travamento por aparelho (Fase 1) ───────────────────────────────────────
+// ─── Travamento por aparelho (Fase 1 soft + Fase 2 WebAuthn) ─────────────────
+// Decide se dá pra usar WebAuthn (web com autenticador de plataforma). No app
+// nativo ou navegador sem suporte, cai no modo soft (device_uuid).
+async function _canWebAuthn() {
+  try { return isWebAuthnSupported() && await hasPlatformAuthenticator(); }
+  catch { return false; }
+}
+
 // Registra o aparelho atual do membro logado como pendente. Idempotente.
+// Fase 2: se possível, cria uma credencial WebAuthn (chave de hardware) e a envia
+// junto — a prova de posse é validada no deviceVerify.
 export async function deviceEnroll() {
   if (!supabase) return { ok: false, error: 'no_supabase' };
   try {
     const payload = await buildDevicePayload();
-    const { data, error } = await supabase.functions.invoke('device-enroll', { body: payload });
+    let webauthn = null;
+    if (await _canWebAuthn()) {
+      try {
+        const ch = await supabase.functions.invoke('device-challenge', { body: { purpose: 'enroll' } });
+        const challenge = ch?.data?.challenge;
+        if (challenge) {
+          const { data: { user } } = await supabase.auth.getUser();
+          webauthn = await createDeviceCredential({ challenge, userId: user?.id || 'user', userName: user?.email || 'terminal' });
+        }
+      } catch (e) { console.warn('[device] WebAuthn enroll falhou, cai no soft:', e.message); }
+    }
+    const { data, error } = await supabase.functions.invoke('device-enroll', { body: { ...payload, webauthn } });
     if (error) return { ok: false, error: error.message };
     return data?.ok ? data : { ok: false, error: data?.error || 'enroll_failed' };
   } catch (e) { return { ok: false, error: e.message }; }
@@ -1205,10 +1226,24 @@ export async function deviceEnroll() {
 
 // Verifica se o aparelho atual está aprovado. Retorna status
 // 'approved' | 'pending' | 'denied' | 'needs_enroll'.
+// Fase 2: se o servidor indicar credencial WebAuthn aprovada, prova posse
+// assinando o desafio com a chave de hardware; senão, verifica pelo device_uuid.
 export async function deviceVerify() {
   if (!supabase) return { ok: false, error: 'no_supabase' };
   try {
     const { device_uuid } = await buildDevicePayload();
+    if (await _canWebAuthn()) {
+      try {
+        const ch = await supabase.functions.invoke('device-challenge', { body: { purpose: 'verify' } });
+        const challenge = ch?.data?.challenge;
+        const credentialId = ch?.data?.webauthn_credential_id;
+        if (challenge && credentialId) {
+          const assertion = await getDeviceAssertion({ challenge, credentialId });
+          const { data, error } = await supabase.functions.invoke('device-verify', { body: { device_uuid, webauthn: assertion } });
+          if (!error && data?.ok) return data; // WebAuthn resolveu; senão, cai no soft
+        }
+      } catch (e) { console.warn('[device] WebAuthn verify falhou, cai no soft:', e.message); }
+    }
     const { data, error } = await supabase.functions.invoke('device-verify', { body: { device_uuid } });
     if (error) return { ok: false, error: error.message };
     return data?.ok ? data : { ok: false, error: data?.error || 'verify_failed' };

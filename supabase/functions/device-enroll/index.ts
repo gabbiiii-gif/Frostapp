@@ -1,7 +1,8 @@
 // Edge Function: device-enroll (verify_jwt = true)
-// Registra o aparelho atual do membro autenticado como 'pending' (se ainda não
-// existir). Idempotente por (member_user_id, device_uuid). Não aprova nada — a
-// aprovação é exclusiva do superadmin (edge master-devices).
+// Registra o aparelho atual do membro autenticado como 'pending'. Idempotente por
+// (member_user_id, device_uuid). Fase 2: se vier uma credencial WebAuthn, guarda a
+// chave pública (SPKI) + credentialId — a prova de posse é validada no device-verify.
+// Não aprova nada — a aprovação é exclusiva do superadmin (edge master-devices).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const CORS = {
@@ -22,7 +23,6 @@ Deno.serve(async (req: Request) => {
   const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY");
   if (!SUPABASE_URL || !SERVICE_KEY || !ANON_KEY) return json({ ok: false, error: "server_misconfigured" }, 500);
 
-  // Identifica o caller pelo JWT.
   const authHeader = req.headers.get("Authorization") || "";
   const userClient = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
   const { data: userData, error: userErr } = await userClient.auth.getUser();
@@ -38,25 +38,30 @@ Deno.serve(async (req: Request) => {
     return json({ ok: false, error: "invalid_device" }, 400);
   }
 
+  // Fase 2: credencial WebAuthn (opcional). Se ausente, aparelho continua "soft".
+  const wa = (body.webauthn && typeof body.webauthn === "object") ? body.webauthn as Record<string, unknown> : null;
+  const credentialId = wa ? String(wa.credentialId || "") : null;
+  const publicKey = wa ? String(wa.publicKey || "") : null;
+  const attestationUncertain = wa ? !!wa.be : false; // BE=1 → passkey pode ser sincronizada
+
   const admin = createClient(SUPABASE_URL, SERVICE_KEY, { auth: { persistSession: false, autoRefreshToken: false } });
 
-  // Descobre a company_id do membro.
   const { data: member } = await admin
     .from("company_members").select("company_id").eq("user_id", userId).maybeSingle();
   if (!member?.company_id) return json({ ok: false, error: "no_membership" }, 403);
 
-  // Já existe linha para (membro, device)? Preserva status; senão cria pending.
   const { data: existing } = await admin
     .from("member_devices")
     .select("id, status")
     .eq("member_user_id", userId).eq("device_uuid", deviceUuid).maybeSingle();
 
+  const waPatch = wa ? { credential_id: credentialId, public_key: publicKey, attestation_uncertain: attestationUncertain } : {};
+
   if (existing) {
-    // Atualiza fingerprint/plataforma para exibição; não altera status.
     await admin.from("member_devices")
-      .update({ platform, fingerprint, updated_at: new Date().toISOString() })
+      .update({ platform, fingerprint, updated_at: new Date().toISOString(), ...waPatch })
       .eq("id", existing.id);
-    return json({ ok: true, status: existing.status, device_id: existing.id });
+    return json({ ok: true, status: existing.status, device_id: existing.id, mode: wa ? "webauthn" : "soft" });
   }
 
   const { data: inserted, error: insErr } = await admin.from("member_devices").insert({
@@ -66,8 +71,9 @@ Deno.serve(async (req: Request) => {
     platform,
     device_uuid: deviceUuid,
     fingerprint,
+    ...waPatch,
   }).select("id").single();
   if (insErr) { console.error("device-enroll insert:", insErr.message); return json({ ok: false, error: "internal" }, 500); }
 
-  return json({ ok: true, status: "pending", device_id: inserted.id });
+  return json({ ok: true, status: "pending", device_id: inserted.id, mode: wa ? "webauthn" : "soft" });
 });
