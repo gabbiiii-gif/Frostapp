@@ -13,6 +13,7 @@ import { motion } from "motion/react";
 import gsap from "gsap";
 import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, masterEvolution, adminEvolution, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig, deviceEnroll, deviceVerify, masterDevices } from "./supabase.js";
 import { isDemoMode, DEMO_COMPANY_ID, markDemoStarted, resetDemoData, buildDemoUser, recordDemoLead } from "./demo.js";
+import { computePaymentState } from "./lib/pagamentos.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -5827,6 +5828,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
     data: toISODate(new Date()),
     status: "pendente",
     formaPagamento: "PIX",
+    vencimento: "",
     observacoes: "",
     // ─── Campos de despesa ───
     fornecedorId: "",
@@ -5874,26 +5876,25 @@ function FinanceModule({ user, dateFilter, addToast }) {
       canceladosCount: 0,
     };
     for (const t of filteredTransactions) {
-      const v = Number(t.valor) || 0;
       const isReceita = t.tipo === "receita";
-      switch (t.status) {
-        case "pago":
-          if (isReceita) acc.receitaPaga += v; else acc.despesaPaga += v;
-          break;
-        case "pendente":
-          if (isReceita) acc.receitaPendente += v; else acc.despesaPendente += v;
-          break;
-        case "em_andamento":
-          if (isReceita) acc.receitaEmAndamento += v; else acc.despesaEmAndamento += v;
-          break;
-        case "atrasado":
-          if (isReceita) acc.receitaAtrasada += v; else acc.despesaAtrasada += v;
-          break;
-        case "cancelado":
-          acc.canceladosCount += 1;
-          break;
-        default:
-          break;
+      // Cancelado e "em andamento" mantêm o comportamento anterior (não têm
+      // pagamentos parciais). O resto usa o estado derivado (parcial/atrasado).
+      if (t.status === "cancelado") { acc.canceladosCount += 1; continue; }
+      if (t.status === "em_andamento") {
+        const v = Number(t.valor) || 0;
+        if (isReceita) acc.receitaEmAndamento += v; else acc.despesaEmAndamento += v;
+        continue;
+      }
+      const { valorPago, saldo, status } = computePaymentState(t);
+      // Realizado = soma dos pagamentos efetivos (inclui parciais).
+      if (isReceita) acc.receitaPaga += valorPago; else acc.despesaPaga += valorPago;
+      // Saldo em aberto vai para pendente ou atrasado (conforme vencimento).
+      if (saldo > 0) {
+        if (status === "atrasado") {
+          if (isReceita) acc.receitaAtrasada += saldo; else acc.despesaAtrasada += saldo;
+        } else {
+          if (isReceita) acc.receitaPendente += saldo; else acc.despesaPendente += saldo;
+        }
       }
     }
     // Saldo realizado (em caixa): receita paga - despesa paga
@@ -5929,6 +5930,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
       data: row.data ? row.data.split("T")[0] : toISODate(new Date()),
       status: row.status || "pendente",
       formaPagamento: row.formaPagamento || "PIX",
+      vencimento: row.vencimento ? row.vencimento.split("T")[0] : "",
       observacoes: row.observacoes || "",
       fornecedorId: row.fornecedorId || "",
       fornecedorNome: row.fornecedorNome || "",
@@ -5968,6 +5970,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
         data: form.data + "T00:00:00.000Z",
         status: form.status,
         formaPagamento: form.formaPagamento,
+        vencimento: form.tipo === "receita" ? (form.vencimento || null) : null,
         observacoes: form.observacoes,
         fornecedorId,
         fornecedorNome,
@@ -6060,6 +6063,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
       data: form.data + "T00:00:00.000Z",
       status: form.status,
       formaPagamento: form.formaPagamento,
+      vencimento: form.tipo === "receita" ? (form.vencimento || null) : null,
       observacoes: form.observacoes,
       fornecedorId,
       fornecedorNome,
@@ -6085,10 +6089,54 @@ function FinanceModule({ user, dateFilter, addToast }) {
     }
   }, [confirmDelete, loadTransactions, addToast]);
 
-  // Atalho: marcar como pago direto da tabela
+  // Estado do modal de "Registrar pagamento" (parcial ou total).
+  const [payRow, setPayRow] = useState(null);
+  const [payForm, setPayForm] = useState({ valor: "", forma: "PIX", data: "" });
+
+  // Abre o modal de pagamento com o saldo restante pré-preenchido.
+  const openPay = useCallback((row) => {
+    const { saldo } = computePaymentState(row);
+    setPayForm({ valor: String(saldo || row.valor || 0), forma: row.formaPagamento || "PIX", data: toISODate(new Date()) });
+    setPayRow(row);
+  }, []);
+
+  // Registra um pagamento (parcial ou total) na lista `pagamentos` do lançamento.
+  // O status "parcial" é derivado por computePaymentState; aqui só marcamos "pago"
+  // quando o saldo zera, senão mantemos "pendente" (a UI mostra "Parcial").
+  const confirmPay = useCallback(() => {
+    if (!payRow) return;
+    const valor = parseFloat(String(payForm.valor).replace(",", "."));
+    if (isNaN(valor) || valor <= 0) { addToast("Informe um valor de pagamento válido.", "error"); return; }
+    const pagamentos = [
+      ...(Array.isArray(payRow.pagamentos) ? payRow.pagamentos : []),
+      { id: genId(), valor, data: (payForm.data || toISODate(new Date())) + "T00:00:00.000Z", forma: payForm.forma },
+    ];
+    const { saldo } = computePaymentState({ ...payRow, pagamentos });
+    const quitado = saldo <= 0.005;
+    const updated = {
+      ...payRow,
+      pagamentos,
+      status: quitado ? "pago" : "pendente",
+      ...(quitado ? { dataPagamento: new Date().toISOString() } : {}),
+      updatedAt: new Date().toISOString(),
+    };
+    DB.set("erp:finance:" + updated.id, updated);
+    addToast(quitado ? "Pagamento registrado — lançamento quitado!" : `Pagamento registrado. Saldo restante: ${formatCurrency(saldo)}.`, "success");
+    setPayRow(null);
+    loadTransactions();
+  }, [payRow, payForm, loadTransactions, addToast]);
+
+  // Atalho: quitar direto da tabela. Se havia parciais, lança o saldo restante.
   const markAsPaid = useCallback((row) => {
-    if (row.status === "pago") return;
-    const updated = { ...row, status: "pago", dataPagamento: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const { saldo, status } = computePaymentState(row);
+    if (status === "pago" || row.status === "cancelado") return;
+    let updated;
+    if (Array.isArray(row.pagamentos) && row.pagamentos.length > 0 && saldo > 0) {
+      const pagamentos = [...row.pagamentos, { id: genId(), valor: saldo, data: new Date().toISOString(), forma: row.formaPagamento || "PIX" }];
+      updated = { ...row, pagamentos, status: "pago", dataPagamento: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    } else {
+      updated = { ...row, status: "pago", dataPagamento: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    }
     DB.set("erp:finance:" + updated.id, updated);
     addToast(`${row.descricao}: marcada como paga.`, "success");
     loadTransactions();
@@ -6096,6 +6144,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
 
   const STATUS_LABELS_FIN = {
     pago: "Pago",
+    parcial: "Parcial",
     pendente: "Pendente",
     em_andamento: "Em Andamento",
     atrasado: "Atrasado",
@@ -6103,6 +6152,7 @@ function FinanceModule({ user, dateFilter, addToast }) {
   };
   const STATUS_COLORS_FIN = {
     pago: "bg-green-500",
+    parcial: "bg-amber-500",
     pendente: "bg-yellow-500",
     em_andamento: "bg-blue-500",
     atrasado: "bg-red-500",
@@ -6129,20 +6179,34 @@ function FinanceModule({ user, dateFilter, addToast }) {
     {
       key: "status",
       label: "Status",
-      render: (v) => (
-        <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white ${STATUS_COLORS_FIN[v] || "bg-gray-500"}`}>
-          {STATUS_LABELS_FIN[v] || v}
-        </span>
-      ),
+      render: (v, row) => {
+        // Status derivado: reflete pagamentos parciais + vencimento (parcial/atrasado).
+        const st = row.status === "em_andamento" ? "em_andamento" : computePaymentState(row).status;
+        return (
+          <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium text-white ${STATUS_COLORS_FIN[st] || "bg-gray-500"}`}>
+            {STATUS_LABELS_FIN[st] || st}
+          </span>
+        );
+      },
     },
     {
       key: "valor",
       label: "Valor",
-      render: (v, row) => (
-        <span className={`font-medium ${row.tipo === "receita" ? "text-green-400" : "text-red-400"}`}>
-          {row.tipo === "despesa" ? "- " : ""}{formatCurrency(v)}
-        </span>
-      ),
+      render: (v, row) => {
+        // Mostra o saldo devedor abaixo do valor quando há pagamento parcial.
+        const { saldo, valorPago, status } = computePaymentState(row);
+        const mostraSaldo = row.tipo === "receita" && saldo > 0 && valorPago > 0;
+        return (
+          <div className={`font-medium ${row.tipo === "receita" ? "text-green-400" : "text-red-400"}`}>
+            <div>{row.tipo === "despesa" ? "- " : ""}{formatCurrency(v)}</div>
+            {mostraSaldo && (
+              <div className={`text-xs ${status === "atrasado" ? "text-red-400" : "text-amber-400"}`}>
+                Saldo: {formatCurrency(saldo)}{row.vencimento ? ` · vence ${formatDate(row.vencimento)}` : ""}
+              </div>
+            )}
+          </div>
+        );
+      },
     },
   ];
 
@@ -6292,20 +6356,82 @@ function FinanceModule({ user, dateFilter, addToast }) {
         data={filteredTransactions}
         onEdit={openEdit}
         onDelete={canDelete ? handleDelete : undefined}
-        actions={(row) => (
-          row.status !== "pago" && row.status !== "cancelado" ? (
-            <button
-              onClick={() => markAsPaid(row)}
-              className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition"
-              title="Marcar como pago"
-              aria-label={`Marcar ${row.descricao} como pago`}
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
-            </button>
-          ) : null
-        )}
+        actions={(row) => {
+          const { status } = computePaymentState(row);
+          if (status === "pago" || status === "cancelado") return null;
+          return (
+            <div className="flex items-center gap-1">
+              {row.tipo === "receita" && (
+                <button
+                  onClick={() => openPay(row)}
+                  className="p-1.5 rounded-lg text-gray-400 hover:text-cyan-400 hover:bg-gray-700 transition"
+                  title="Registrar pagamento (parcial ou total)"
+                  aria-label={`Registrar pagamento de ${row.descricao}`}
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 9v1m0-1c-1.11 0-2.08-.402-2.599-1" /></svg>
+                </button>
+              )}
+              <button
+                onClick={() => markAsPaid(row)}
+                className="p-1.5 rounded-lg text-gray-400 hover:text-green-400 hover:bg-gray-700 transition"
+                title="Quitar (marcar como pago)"
+                aria-label={`Marcar ${row.descricao} como pago`}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" /></svg>
+              </button>
+            </div>
+          );
+        }}
         emptyMessage="Nenhuma transação encontrada."
       />
+
+      {/* Modal: Registrar pagamento (parcial ou total) de um a-receber */}
+      <Modal isOpen={!!payRow} title="Registrar pagamento" onClose={() => setPayRow(null)} size="md">
+        {payRow && (() => {
+          const { saldo, valorPago, total } = computePaymentState(payRow);
+          return (
+            <div className="space-y-4">
+              <div className="text-sm text-gray-300">
+                <p className="font-medium text-white">{payRow.descricao}</p>
+                <p className="mt-1">Total: {formatCurrency(total)} · Pago: {formatCurrency(valorPago)} · <span className="text-amber-400">Saldo: {formatCurrency(saldo)}</span></p>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-300 mb-1.5">Valor do pagamento (R$)</label>
+                <input type="number" step="0.01" min="0" inputMode="decimal" value={payForm.valor}
+                  onChange={(e) => setPayForm({ ...payForm, valor: e.target.value })}
+                  className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition" />
+                <p className="text-xs text-gray-500 mt-1">Deixe o valor do saldo para quitar, ou um valor menor para pagamento parcial.</p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Forma</label>
+                  <select value={payForm.forma} onChange={(e) => setPayForm({ ...payForm, forma: e.target.value })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition">
+                    {PAYMENT_METHODS.map((m) => (<option key={m} value={m}>{m}</option>))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Data</label>
+                  <input type="date" value={payForm.data} onChange={(e) => setPayForm({ ...payForm, data: e.target.value })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition" />
+                </div>
+              </div>
+              {Array.isArray(payRow.pagamentos) && payRow.pagamentos.length > 0 && (
+                <div className="text-xs text-gray-400 border-t border-gray-700 pt-3">
+                  <p className="font-medium mb-1">Pagamentos anteriores:</p>
+                  {payRow.pagamentos.map((p, i) => (
+                    <div key={p.id || i}>• {formatCurrency(p.valor)} · {p.forma} · {formatDate(p.data)}</div>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2 pt-2">
+                <button onClick={() => setPayRow(null)} className="flex-1 py-2.5 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm font-semibold">Cancelar</button>
+                <button onClick={confirmPay} className="flex-1 py-2.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-sm font-bold">Registrar pagamento</button>
+              </div>
+            </div>
+          );
+        })()}
+      </Modal>
 
       {/* Modal criar/editar */}
       <Modal isOpen={modalOpen} title={editing ? "Editar Transação" : "Nova Transação"} onClose={() => setModalOpen(false)} size="md">
@@ -6402,6 +6528,17 @@ function FinanceModule({ user, dateFilter, addToast }) {
               </select>
             </div>
           </div>
+
+          {/* Vencimento do saldo — só receitas, sempre opcional (pagamento parcial) */}
+          {form.tipo === "receita" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">Vencimento do saldo (opcional)</label>
+              <input name="vencimento" type="date" value={form.vencimento}
+                onChange={(e) => setForm({ ...form, vencimento: e.target.value })}
+                className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition" />
+              <p className="text-xs text-gray-500 mt-1">Se ficar saldo em aberto após esta data, o lançamento aparece como "Atrasado".</p>
+            </div>
+          )}
 
           {/* ─── Campos exclusivos de DESPESA: fornecedor, parcelamento, recorrência ─── */}
           {form.tipo === "despesa" && (
