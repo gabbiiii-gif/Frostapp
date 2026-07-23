@@ -27,6 +27,7 @@ Sempre lido primeiro em qualquer query. Mantenha sub-200 linhas.
 - [Master Tier](concepts/master-tier.md) — super-admin local-only para criar/bloquear/excluir empresas
 - [Evolution multi-tenant](concepts/evolution-multitenant.md) — instance→company_id, no-op gracioso, infra Evolution/Storage compartilhada
 - [Travamento por Aparelho](concepts/device-locking.md) — vínculo membro↔aparelho, aprovação pelo superadmin (Fase 1: prova soft + portão no login)
+- [Modo Demonstração](concepts/demo-mode.md) — demo interativa da landing (?demo=1), seed local isolado, captura de lead
 
 ## Fluxos
 
