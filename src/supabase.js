@@ -6,9 +6,10 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { buildDevicePayload } from './device-identity.js';
+import { isDemoMode } from './demo.js';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+export const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+export const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 // Cria o cliente Supabase apenas se as variáveis de ambiente estiverem disponíveis.
 // O cliente persiste sessão automaticamente (localStorage) — após signIn, todas as
@@ -364,6 +365,7 @@ export function passwordReasonToPtBr(reason) {
 // aguardar — falhas são silenciosas (caso edge function indisponível, a
 // criação da OS no app não pode travar).
 export async function notifyOsCreated(companyId, osData) {
+  if (isDemoMode()) return { ok: false, skipped: 'demo' }; // demo: não dispara email real
   if (!supabase || !companyId || !osData) return { ok: false, error: 'params' };
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -699,6 +701,7 @@ export async function ensureMemberLoaded() {
 // gate: sem hydrate real, NÃO semear catálogo (cache local vazio duplicaria o
 // catálogo remoto a cada boot sem sessão).
 export async function hydrateFromSupabase() {
+  if (isDemoMode()) return false; // demo: nunca lê do Supabase real
   if (!supabase) return false;
   const companyId = getCompanyId();
   if (!companyId) return false; // sem auth → nada a sincronizar
@@ -897,6 +900,7 @@ if (typeof window !== 'undefined') {
 
 export function syncToSupabase(key, value) {
   if (!supabase) return;
+  if (isDemoMode()) return; // demo: nunca escreve no Supabase real
   if (isSensitive(key)) return;
   // Role do usuário não pode gravar esta chave (RLS) → fica local-only, sem
   // tentar (evita erro 42501 e poison-pill na outbox).
@@ -924,6 +928,7 @@ export function syncToSupabase(key, value) {
 // ─── Delete unitário (chamado por DB.delete) ─────────────────────────────────
 export function deleteFromSupabase(key) {
   if (!supabase) return;
+  if (isDemoMode()) return; // demo: nunca deleta no Supabase real
   if (!canWriteKey(key)) return; // role sem permissão de gravar essa chave → no-op
   const companyId = getCompanyId();
   if (!companyId) return;
