@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<!--
+  ⚠️ MODELO pt-BR alinhado à LGPD (Lei 13.709/2018) — NÃO substitui parecer jurídico.
+  Antes de considerar final: validar com advogado e preencher os campos [entre colchetes]
+  (razão social, CNPJ, endereço, nome e e-mail do Encarregado/DPO). Revisar a lista de
+  sub-operadores (Supabase, Vercel, Resend, Evolution/WhatsApp) conforme o que estiver em uso.
+-->
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Política de Privacidade — FrostERP</title>
+<meta name="description" content="Política de Privacidade do FrostERP, em conformidade com a LGPD." />
+<link rel="canonical" href="https://frosterp.com.br/privacidade.html" />
+<meta name="robots" content="index, follow" />
+<link rel="icon" type="image/svg+xml" href="/favicon.svg?v=7" />
+<link rel="icon" type="image/png" href="/favicon-96x96.png?v=7" sizes="96x96" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=Geist:wght@300;400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#0A1628; --surface:#0F1E36; --blue:#3B82F6; --cyan2:#22D3EE;
+    --ink:#F8FAFC; --muted:#94A3B8; --line:rgba(255,255,255,.10);
+    --display:"Space Grotesk", system-ui, sans-serif; --body:"Geist", system-ui, sans-serif;
+    --maxw:820px;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0; background:var(--bg); color:var(--ink); font-family:var(--body); line-height:1.7;
+    -webkit-font-smoothing:antialiased;}
+  a{color:var(--cyan2); text-decoration:none;} a:hover{text-decoration:underline;}
+  .topbar{position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:space-between;
+    padding:16px clamp(20px,5vw,48px); background:rgba(10,22,40,.85); backdrop-filter:blur(10px);
+    border-bottom:1px solid var(--line);}
+  .brand{display:flex; align-items:center; gap:10px;} .brand img{height:44px; width:auto;}
+  .btn-back{font-family:var(--body); font-weight:600; font-size:14px; border:1px solid var(--line);
+    background:rgba(255,255,255,.03); color:var(--ink); padding:9px 16px; border-radius:10px;}
+  .btn-back:hover{background:rgba(255,255,255,.07); text-decoration:none;}
+  main{max-width:var(--maxw); margin:0 auto; padding:48px clamp(20px,5vw,32px) 80px;}
+  h1{font-family:var(--display); font-weight:700; font-size:clamp(30px,5vw,44px); letter-spacing:-.02em; margin:0 0 8px;}
+  .updated{color:var(--muted); font-size:14px; margin-bottom:8px;}
+  .note{background:rgba(59,130,246,.08); border:1px solid rgba(59,130,246,.25); border-radius:12px;
+    padding:14px 18px; font-size:14px; color:#cdd9ea; margin:24px 0 36px;}
+  h2{font-family:var(--display); font-weight:600; font-size:20px; margin:38px 0 12px; color:var(--ink);}
+  p,li{color:#dbe4f0; font-size:15.5px;} ul{padding-left:20px;} li{margin:6px 0;}
+  table{width:100%; border-collapse:collapse; margin:14px 0; font-size:14.5px;}
+  th,td{border:1px solid var(--line); padding:9px 12px; text-align:left; vertical-align:top;}
+  th{background:rgba(255,255,255,.04); font-family:var(--display); font-weight:600;}
+  .foot{margin-top:56px; padding-top:24px; border-top:1px solid var(--line); font-size:13px; color:var(--muted);
+    display:flex; gap:24px; flex-wrap:wrap;}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/"><img src="/logo.svg" alt="FrostERP" /></a>
+  <a class="btn-back" href="/">← Voltar ao site</a>
+</header>
+
+<main>
+  <h1>Política de Privacidade</h1>
+  <p class="updated">Última atualização: 28 de julho de 2026 · Versão 1.0</p>
+
+  <div class="note">
+    Esta Política explica como o FrostERP coleta, usa, compartilha e protege dados pessoais, em conformidade
+    com a Lei Geral de Proteção de Dados (Lei nº 13.709/2018 — LGPD).
+  </div>
+
+  <h2>1. Controlador e Encarregado (DPO)</h2>
+  <p>Controlador: <strong>[RAZÃO SOCIAL]</strong>, CNPJ <strong>[CNPJ]</strong>, <strong>[ENDEREÇO]</strong>.
+  Encarregado pelo Tratamento de Dados (DPO): <strong>[NOME DO ENCARREGADO]</strong> —
+  <a href="mailto:suportefrosterp@gmail.com">suportefrosterp@gmail.com</a>.</p>
+
+  <h2>2. Dados que tratamos</h2>
+  <ul>
+    <li><strong>Cadastro do usuário:</strong> nome, e-mail, telefone, senha (armazenada com hash), papel/permissões.</li>
+    <li><strong>Dados de uso:</strong> registros de acesso, logs de auditoria (quem fez o quê e quando), identificador do aparelho (para o travamento por aparelho).</li>
+    <li><strong>Dados inseridos por você (cliente empresarial):</strong> informações dos seus próprios clientes finais e da operação — nome, contato, endereço, ordens de serviço, fotos do serviço, assinaturas (podendo conter CPF), dados financeiros. Nesses dados, você é o Controlador e o FrostERP atua como Operador.</li>
+    <li><strong>Leads de demonstração:</strong> nome e contato informados no formulário de demo.</li>
+  </ul>
+
+  <h2>3. Finalidades e bases legais</h2>
+  <table>
+    <tr><th>Finalidade</th><th>Base legal (LGPD art. 7º)</th></tr>
+    <tr><td>Criar e operar a conta, prestar o serviço contratado</td><td>Execução de contrato</td></tr>
+    <tr><td>Segurança, prevenção a fraude e logs de auditoria</td><td>Legítimo interesse / obrigação legal</td></tr>
+    <tr><td>Envio de e-mails transacionais (convite, OTP, notificações de OS)</td><td>Execução de contrato</td></tr>
+    <tr><td>Contato comercial a partir de leads de demonstração</td><td>Consentimento / legítimo interesse</td></tr>
+    <tr><td>Cumprimento de obrigações legais e regulatórias</td><td>Obrigação legal</td></tr>
+  </table>
+
+  <h2>4. Compartilhamento e operadores</h2>
+  <p>Não vendemos dados pessoais. Compartilhamos apenas com prestadores que viabilizam o serviço, sob contrato:</p>
+  <ul>
+    <li><strong>Supabase</strong> — banco de dados, autenticação e armazenamento de arquivos.</li>
+    <li><strong>Vercel</strong> — hospedagem da aplicação e da landing.</li>
+    <li><strong>Resend</strong> — envio de e-mails transacionais.</li>
+    <li><strong>Evolution API / WhatsApp</strong> — envio de mensagens ao cliente final, quando o recurso está ativo.</li>
+  </ul>
+  <p>Também podemos compartilhar dados por exigência legal ou ordem de autoridade competente.</p>
+
+  <h2>5. Transferência internacional</h2>
+  <p>Alguns operadores podem processar dados em servidores fora do Brasil. Nesses casos, adotamos salvaguardas
+  compatíveis com a LGPD para proteger os dados transferidos.</p>
+
+  <h2>6. Segurança</h2>
+  <p>Adotamos medidas técnicas e organizacionais como criptografia em trânsito (HTTPS/HSTS), senhas com hash,
+  autenticação em duas etapas (2FA), controle de acesso por função, isolamento de dados por empresa (RLS no banco)
+  e logs de auditoria. Nenhum sistema é 100% imune; em caso de incidente relevante, seguiremos os procedimentos
+  previstos na LGPD.</p>
+
+  <h2>7. Retenção e exclusão</h2>
+  <p>Mantemos os dados enquanto a conta estiver ativa e pelo prazo necessário ao cumprimento de obrigações legais.
+  Após o encerramento, os dados podem ser excluídos ou anonimizados. Você pode solicitar a exclusão pelos canais
+  de contato (ver seção 9).</p>
+
+  <h2>8. Seus direitos (LGPD art. 18)</h2>
+  <p>Você pode solicitar: confirmação de tratamento; acesso aos dados; correção; anonimização, bloqueio ou
+  eliminação; portabilidade; informação sobre compartilhamento; e revogação de consentimento. Para exercer,
+  entre em contato com o Encarregado.</p>
+
+  <h2>9. Cookies e tecnologias</h2>
+  <p>O aplicativo utiliza armazenamento local (localStorage) essencial para o funcionamento (sessão, preferências,
+  dados offline). Atualmente <strong>não utilizamos cookies de rastreamento nem ferramentas de publicidade</strong>
+  (ex.: Google Analytics, Meta Pixel). Caso isso mude, atualizaremos esta Política e solicitaremos consentimento quando exigido.</p>
+
+  <h2>10. Alterações desta Política</h2>
+  <p>Podemos atualizar esta Política periodicamente. A versão vigente estará sempre nesta página, com a data de
+  atualização.</p>
+
+  <h2>11. Contato</h2>
+  <p>Dúvidas ou solicitações sobre privacidade: <a href="mailto:suportefrosterp@gmail.com">suportefrosterp@gmail.com</a>
+  · WhatsApp <a href="https://wa.me/5593984166832">(93) 98416-6832</a>.</p>
+
+  <div class="foot">
+    <a href="/">Início</a>
+    <a href="/termos.html">Termos de Uso</a>
+    <a href="mailto:suportefrosterp@gmail.com">suportefrosterp@gmail.com</a>
+  </div>
+</main>
+</body>
+</html>

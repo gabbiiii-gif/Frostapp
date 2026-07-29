@@ -272,6 +272,8 @@ const SCOPED_PREFIXES = [
   "erp:service:",
   "erp:audit:",
   "erp:autoBackup:",
+  // Log de consentimento LGPD (aceite de Termos + Privacidade no cadastro/convite)
+  "erp:consent:",
   // ─── Módulo Ponto Eletrônico ───
   // Registros de batidas (entrada/saída/intervalos), config de jornada por
   // funcionário e ocorrências (atestados, faltas justificadas, etc.).
@@ -309,6 +311,32 @@ const SCOPED_SINGLETONS = ["erp:config", "erp:calendarFeedToken", "erp:lastBacku
 function rewriteSingletonKey(key) {
   if (!__activeCompanyId) return key;
   return SCOPED_SINGLETONS.includes(key) ? key + ":" + __activeCompanyId : key;
+}
+
+// ─── Consentimento LGPD (Termos de Uso + Política de Privacidade) ─────────────
+// Versão vigente dos documentos legais. Ao aceitar, gravamos esta versão + data
+// para termos prova de QUEM aceitou O QUÊ e QUANDO (requisito LGPD). Atualize
+// esta string sempre que o texto dos documentos mudar de forma relevante.
+const LEGAL_DOC_VERSION = "2026-07-28";
+const LEGAL_TERMOS_URL = "https://frosterp.com.br/termos.html";
+const LEGAL_PRIVACIDADE_URL = "https://frosterp.com.br/privacidade.html";
+
+// Registra o aceite dos documentos legais no kv_store (via DB.set → sync existente).
+// À prova de falha: DB.set nunca lança, então isto jamais bloqueia o cadastro/ativação.
+// `via` distingue a origem do aceite (cadastro do super admin, ativação de convite).
+function recordConsent(via, extra = {}) {
+  try {
+    const id = genId();
+    DB.set("erp:consent:" + id, {
+      id,
+      versao: LEGAL_DOC_VERSION,
+      documentos: ["termos", "privacidade"],
+      aceitoEm: new Date().toISOString(),
+      via,
+      userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
+      ...extra,
+    });
+  } catch { /* nunca bloqueia o fluxo de cadastro */ }
 }
 
 // Migração one-shot dos singletons globais legados para a primeira empresa que logar.
@@ -2604,6 +2632,8 @@ function ResetPasswordScreen({ onDone, addToast, mode = "recovery" }) {
   const [confirm, setConfirm] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Aceite dos documentos legais — exigido só na ativação de convite (conta nova).
+  const [aceite, setAceite] = useState(false);
 
   const isInvite = mode === "invite";
 
@@ -2627,6 +2657,11 @@ function ResetPasswordScreen({ onDone, addToast, mode = "recovery" }) {
     const ps = validatePasswordStrength(pwd);
     if (!ps.ok) { setError(`Senha fraca: ${ps.reasons[0]}`); return; }
     if (pwd !== confirm) { setError("As senhas não conferem."); return; }
+    // LGPD: convidado precisa aceitar os documentos legais ao ativar a conta.
+    if (isInvite && !aceite) {
+      setError("Você precisa ler e aceitar os Termos de Uso e a Política de Privacidade.");
+      return;
+    }
     setBusy(true);
     const r = await updatePasswordWithRecoveryToken(pwd);
     setBusy(false);
@@ -2635,6 +2670,8 @@ function ResetPasswordScreen({ onDone, addToast, mode = "recovery" }) {
       return;
     }
     clearRecoveryUrl();
+    // Grava o consentimento do convidado (aceite dos documentos legais).
+    if (isInvite) recordConsent("aceite_convite");
     addToast?.(
       isInvite
         ? "Conta ativada! Faça login com sua nova senha."
@@ -2686,9 +2723,25 @@ function ResetPasswordScreen({ onDone, addToast, mode = "recovery" }) {
                 {error}
               </div>
             )}
+            {isInvite && (
+              <label className="flex items-start gap-2.5 text-sm text-gray-300 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={aceite}
+                  onChange={(e) => { setAceite(e.target.checked); setError(""); }}
+                  className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+                />
+                <span>
+                  Li e aceito os{" "}
+                  <a href={LEGAL_TERMOS_URL} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline hover:text-blue-300">Termos de Uso</a>{" "}
+                  e a{" "}
+                  <a href={LEGAL_PRIVACIDADE_URL} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline hover:text-blue-300">Política de Privacidade</a>.
+                </span>
+              </label>
+            )}
             <button
               onClick={handleSave}
-              disabled={busy || !validatePasswordStrength(pwd).ok || pwd !== confirm}
+              disabled={busy || !validatePasswordStrength(pwd).ok || pwd !== confirm || (isInvite && !aceite)}
               className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {busy
@@ -3810,6 +3863,8 @@ function FirstUserSetup({ onComplete, onSwitchToLogin }) {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Aceite obrigatório dos Termos de Uso + Política de Privacidade (LGPD).
+  const [aceite, setAceite] = useState(false);
 
   const handleSave = useCallback(async () => {
     setError("");
@@ -3832,6 +3887,11 @@ function FirstUserSetup({ onComplete, onSwitchToLogin }) {
       setError("As senhas não conferem.");
       return;
     }
+    // LGPD: aceite dos documentos legais é obrigatório para criar a conta.
+    if (!aceite) {
+      setError("Você precisa ler e aceitar os Termos de Uso e a Política de Privacidade.");
+      return;
+    }
 
     setSaving(true);
     try {
@@ -3848,13 +3908,17 @@ function FirstUserSetup({ onComplete, onSwitchToLogin }) {
         sessionTokenHash: null,
         customPermissions: null,
         isSuperAdmin: true,
+        // Prova do aceite legal anexada ao próprio usuário (versão + data).
+        consent: { versao: LEGAL_DOC_VERSION, aceitoEm: new Date().toISOString(), via: "cadastro_super_admin" },
       };
       DB.set("erp:user:" + newUser.id, newUser);
+      // Log de consentimento sincronizável (além do campo no usuário).
+      recordConsent("cadastro_super_admin", { email: normalizedEmail, nome: nome.trim() });
       onComplete(newUser);
     } finally {
       setSaving(false);
     }
-  }, [nome, email, password, confirmPassword, onComplete]);
+  }, [nome, email, password, confirmPassword, aceite, onComplete]);
 
   return (
     <div className="min-h-screen bg-gray-900 flex items-center justify-center p-4" style={{ position: "relative", overflow: "hidden" }}>
@@ -3924,10 +3988,26 @@ function FirstUserSetup({ onComplete, onSwitchToLogin }) {
               </div>
             )}
 
+            {/* Aceite obrigatório dos documentos legais (LGPD) */}
+            <label className="flex items-start gap-2.5 text-sm text-gray-300 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={aceite}
+                onChange={(e) => { setAceite(e.target.checked); setError(""); }}
+                className="mt-0.5 h-4 w-4 shrink-0 accent-blue-600"
+              />
+              <span>
+                Li e aceito os{" "}
+                <a href={LEGAL_TERMOS_URL} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline hover:text-blue-300">Termos de Uso</a>{" "}
+                e a{" "}
+                <a href={LEGAL_PRIVACIDADE_URL} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline hover:text-blue-300">Política de Privacidade</a>.
+              </span>
+            </label>
+
             <button
               onClick={handleSave}
-              disabled={saving}
-              className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50"
+              disabled={saving || !aceite}
+              className="w-full bg-blue-600 text-white py-2.5 rounded-lg font-medium hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {saving ? "Criando..." : "Criar Super Administrador"}
             </button>
