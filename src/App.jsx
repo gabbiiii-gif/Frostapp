@@ -3708,6 +3708,12 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
             <p className="text-gray-500 text-xs text-center">
               FrostERP &copy; {new Date().getFullYear()}
             </p>
+            {/* Acesso público aos documentos legais (LGPD) para usuários já cadastrados */}
+            <div className="flex items-center gap-3 text-xs text-gray-500">
+              <a href={LEGAL_TERMOS_URL} target="_blank" rel="noopener noreferrer" className="hover:text-blue-400 transition">Termos de Uso</a>
+              <span className="text-gray-700">·</span>
+              <a href={LEGAL_PRIVACIDADE_URL} target="_blank" rel="noopener noreferrer" className="hover:text-blue-400 transition">Política de Privacidade</a>
+            </div>
             {typeof onSwitchToMaster === "function" && (
               <button
                 type="button"
