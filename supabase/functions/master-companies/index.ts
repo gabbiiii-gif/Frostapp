@@ -38,6 +38,50 @@ function json(body: unknown, status = 200) {
   });
 }
 
+// ─── Limpeza de Storage na exclusão de empresa (LGPD — cascata p/ arquivos) ──
+// Os arquivos ficam sob "<companyId>/..." (foldername[1] = company_id) em cada
+// bucket. Ao excluir a empresa, é preciso remover também esses objetos — senão
+// fotos de OS, assinaturas, ofícios e mídias ficam órfãos no Storage.
+const COMPANY_BUCKETS = [
+  "os-fotos", "os-assinaturas", "escola-oficios", "escola-anexos",
+  "ai-media", "ponto-docs", "ponto-fotos",
+];
+
+// Lista recursiva de todos os arquivos sob um prefixo (pastas vêm com id null).
+// deno-lint-ignore no-explicit-any
+async function listAllFiles(admin: any, bucket: string, prefix: string): Promise<string[]> {
+  const out: string[] = [];
+  const { data, error } = await admin.storage.from(bucket).list(prefix, { limit: 1000 });
+  if (error || !data) return out;
+  for (const item of data) {
+    const full = prefix ? `${prefix}/${item.name}` : item.name;
+    if (item.id === null) {
+      // É pasta → recursão.
+      out.push(...await listAllFiles(admin, bucket, full));
+    } else {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+// Remove todos os arquivos da empresa em todos os buckets (em lotes de 100).
+// Best-effort: erro num bucket é logado mas não aborta a exclusão da empresa.
+// deno-lint-ignore no-explicit-any
+async function removeCompanyStorage(admin: any, companyId: string): Promise<void> {
+  for (const bucket of COMPANY_BUCKETS) {
+    try {
+      const paths = await listAllFiles(admin, bucket, companyId);
+      for (let i = 0; i < paths.length; i += 100) {
+        const batch = paths.slice(i, i + 100);
+        if (batch.length) await admin.storage.from(bucket).remove(batch);
+      }
+    } catch (e) {
+      console.error(`master-companies delete storage ${bucket}:`, (e as Error).message);
+    }
+  }
+}
+
 // Comparação constante-tempo pra não vazar timing no match do token hash.
 function timingSafeEqual(a: string, b: string): boolean {
   if (typeof a !== "string" || typeof b !== "string") return false;
@@ -293,7 +337,8 @@ Deno.serve(async (req: Request) => {
 
   // ─── DELETE ────────────────────────────────────────────────────────────────
   // Exclusão em cascata: kv_store (todas as chaves da empresa) + company_members
-  // + auth.users dos membros + companies.
+  // + auth.users dos membros + arquivos no Storage (fotos/assinaturas/ofícios/
+  // mídias) + companies.
   if (action === "delete") {
     const company = (body.company || {}) as Record<string, unknown>;
     const companyId = String(company.id || "").trim();
@@ -310,6 +355,10 @@ Deno.serve(async (req: Request) => {
     await admin.from("company_members").delete().eq("company_id", companyId);
     // kv_store por company_id (FK aponta pra companies — apagar antes da company).
     await admin.from("kv_store").delete().eq("company_id", companyId);
+    // LGPD: cascata para o Storage — remove os arquivos da empresa (fotos de OS,
+    // assinaturas, ofícios, mídia da IA, docs/fotos de ponto) para não deixar
+    // objetos órfãos. Best-effort (não aborta a exclusão se um bucket falhar).
+    await removeCompanyStorage(admin, companyId);
     const { error: compErr } = await admin.from("companies").delete().eq("id", companyId);
     if (compErr) {
       console.error("master-companies delete company:", compErr.message);
