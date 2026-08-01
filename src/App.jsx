@@ -274,6 +274,8 @@ const SCOPED_PREFIXES = [
   "erp:autoBackup:",
   // Log de consentimento LGPD (aceite de Termos + Privacidade no cadastro/convite)
   "erp:consent:",
+  // Solicitações de exclusão de conta/dados pelo titular (LGPD art. 18)
+  "erp:exclusao:",
   // ─── Módulo Ponto Eletrônico ───
   // Registros de batidas (entrada/saída/intervalos), config de jornada por
   // funcionário e ocorrências (atestados, faltas justificadas, etc.).
@@ -14193,6 +14195,136 @@ function CompanySecurityPanel({ companyId, addToast }) {
   );
 }
 
+// ─── Painel LGPD: exportar meus dados + solicitar exclusão da conta ──────────
+// Canal self-service para o titular exercer direitos da LGPD (art. 18): acesso/
+// portabilidade (baixar os próprios dados) e eliminação (solicitar exclusão da
+// conta). A exclusão é registrada como solicitação AUDITÁVEL em erp:exclusao:*
+// (não apaga nada sozinha) — admin/gerente vê as pendentes aqui e processa a
+// exclusão efetiva em Usuários (ou, se for a empresa toda, pelo painel Master).
+function PrivacyDataPanel({ user, addToast }) {
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+
+  // Solicitação pendente do próprio usuário (evita duplicar pedido).
+  const jaSolicitou = DB.list("erp:exclusao:").some(
+    (r) => r && r.userId === user.id && r.status === "pendente",
+  );
+  // Solicitações pendentes da empresa inteira — só admin/gerente enxerga.
+  const isGestor = user.role === "admin" || user.role === "gerente";
+  const pendentesEmpresa = isGestor
+    ? DB.list("erp:exclusao:").filter((r) => r && r.status === "pendente")
+    : [];
+
+  // LGPD (acesso/portabilidade): baixa os dados PESSOAIS do usuário. Dados
+  // operacionais da empresa (clientes, OS) pertencem à empresa (controladora),
+  // não ao usuário, então ficam fora deste export pessoal.
+  const baixarMeusDados = useCallback(() => {
+    try {
+      const dados = {
+        perfil: {
+          id: user.id, nome: user.nome, email: user.email, role: user.role,
+          avatar: user.avatar, createdAt: user.createdAt,
+          companyId: user.companyId || getActiveCompanyId(),
+          consent: user.consent || null,
+        },
+        consentimentos: DB.list("erp:consent:").filter((c) => c && c.email === user.email),
+        documentosLegais: { termos: LEGAL_TERMOS_URL, privacidade: LEGAL_PRIVACIDADE_URL, versaoVigente: LEGAL_DOC_VERSION },
+        exportadoEm: new Date().toISOString(),
+      };
+      const blob = new Blob([JSON.stringify(dados, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `meus-dados-frosterp-${toISODate(new Date())}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      addToast("Seus dados foram exportados.", "success");
+    } catch {
+      addToast("Não foi possível exportar os dados.", "error");
+    }
+  }, [user, addToast]);
+
+  const solicitarExclusao = useCallback(() => {
+    const id = genId();
+    DB.set("erp:exclusao:" + id, {
+      id, userId: user.id, email: user.email, nome: user.nome,
+      companyId: user.companyId || getActiveCompanyId(),
+      tipo: "exclusao_conta", status: "pendente",
+      solicitadoEm: new Date().toISOString(),
+    });
+    setConfirmDelete(false);
+    setRefresh((n) => n + 1);
+    addToast("Solicitação de exclusão registrada. Um administrador vai processá-la.", "success");
+  }, [user, addToast]);
+
+  const marcarProcessada = useCallback((r) => {
+    DB.set("erp:exclusao:" + r.id, { ...r, status: "processada", processadaEm: new Date().toISOString() });
+    setRefresh((n) => n + 1);
+    addToast("Solicitação marcada como processada.", "info");
+  }, [addToast]);
+
+  return (
+    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6" data-refresh={refresh}>
+      <h3 className="text-lg font-semibold text-white mb-1">Privacidade e Meus Dados (LGPD)</h3>
+      <p className="text-sm text-gray-400 mb-4">
+        Exerça seus direitos: baixe uma cópia dos seus dados ou solicite a exclusão da sua conta. Veja os{" "}
+        <a href={LEGAL_TERMOS_URL} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline hover:text-blue-300">Termos de Uso</a>{" "}
+        e a <a href={LEGAL_PRIVACIDADE_URL} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline hover:text-blue-300">Política de Privacidade</a>.
+      </p>
+
+      <div className="flex flex-wrap gap-3">
+        <button onClick={baixarMeusDados} className="px-4 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-100 transition">
+          ⬇ Baixar meus dados
+        </button>
+        {jaSolicitou ? (
+          <span className="px-4 py-2 text-sm rounded-lg bg-yellow-500/10 border border-yellow-500/30 text-yellow-300">
+            Exclusão solicitada — aguardando processamento
+          </span>
+        ) : (
+          <button onClick={() => setConfirmDelete(true)} className="px-4 py-2 text-sm rounded-lg bg-red-600/80 hover:bg-red-600 text-white transition">
+            Solicitar exclusão da minha conta
+          </button>
+        )}
+      </div>
+
+      {isGestor && pendentesEmpresa.length > 0 && (
+        <div className="mt-5 pt-4 border-t border-gray-700">
+          <p className="text-sm font-medium text-gray-300 mb-2">
+            Solicitações de exclusão pendentes ({pendentesEmpresa.length})
+          </p>
+          <ul className="space-y-2">
+            {pendentesEmpresa.map((r) => (
+              <li key={r.id} className="flex items-center justify-between gap-3 text-sm bg-gray-900/50 rounded-lg px-3 py-2">
+                <span className="text-gray-300 min-w-0 truncate">
+                  {r.nome} <span className="text-gray-500">({r.email})</span>
+                  <span className="text-gray-600"> · {formatDate(r.solicitadoEm)}</span>
+                </span>
+                <button onClick={() => marcarProcessada(r)} className="px-2.5 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-200 shrink-0">
+                  Marcar processada
+                </button>
+              </li>
+            ))}
+          </ul>
+          <p className="text-xs text-gray-500 mt-2">
+            Processe a exclusão efetiva em <strong>Usuários</strong> (excluir o usuário). Se for a empresa toda, use o painel Master.
+          </p>
+        </div>
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          message="Isto registra uma solicitação para excluir sua conta e seus dados pessoais. Um administrador vai processá-la. Deseja continuar?"
+          requireType="EXCLUIR"
+          onConfirm={solicitarExclusao}
+          onCancel={() => setConfirmDelete(false)}
+        />
+      )}
+    </div>
+  );
+}
+
 function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
   const [config, setConfig] = useState({
     razaoSocial: "", cnpj: "", telefone: "", email: "", endereco: "",
@@ -14730,6 +14862,9 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
 
       {/* Fase 2.6: login biométrico (APK only) — toggle por device */}
       <BiometricLoginPanel user={user} addToast={addToast} />
+
+      {/* LGPD: canal self-service do titular — baixar meus dados + solicitar exclusão */}
+      <PrivacyDataPanel user={user} addToast={addToast} />
 
       {/* Auditoria por empresa — admin pode revisar mutações de OS, clientes,
           funcionários, finanças e usuários (quem fez, o quê, quando) */}
