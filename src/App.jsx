@@ -6228,12 +6228,13 @@ function FinanceModule({ user, dateFilter, addToast }) {
 
   // Estado do modal de "Registrar pagamento" (parcial ou total).
   const [payRow, setPayRow] = useState(null);
-  const [payForm, setPayForm] = useState({ valor: "", forma: "PIX", data: "" });
+  // `parcelas`: nº de vezes no cartão de crédito (só usado quando forma = "Cartão de Crédito").
+  const [payForm, setPayForm] = useState({ valor: "", forma: "PIX", data: "", parcelas: 1 });
 
   // Abre o modal de pagamento com o saldo restante pré-preenchido.
   const openPay = useCallback((row) => {
     const { saldo } = computePaymentState(row);
-    setPayForm({ valor: String(saldo || row.valor || 0), forma: row.formaPagamento || "PIX", data: toISODate(new Date()) });
+    setPayForm({ valor: String(saldo || row.valor || 0), forma: row.formaPagamento || "PIX", data: toISODate(new Date()), parcelas: 1 });
     setPayRow(row);
   }, []);
 
@@ -6244,9 +6245,13 @@ function FinanceModule({ user, dateFilter, addToast }) {
     if (!payRow) return;
     const valor = parseFloat(String(payForm.valor).replace(",", "."));
     if (isNaN(valor) || valor <= 0) { addToast("Informe um valor de pagamento válido.", "error"); return; }
+    // Crédito: registra em quantas vezes (parcelas) o cliente pagou no cartão.
+    // Só anexa `parcelas` quando a forma é crédito — as demais não têm parcelamento.
+    const isCredito = payForm.forma === "Cartão de Crédito";
+    const parcelas = isCredito ? Math.max(1, Math.floor(Number(payForm.parcelas) || 1)) : 1;
     const pagamentos = [
       ...(Array.isArray(payRow.pagamentos) ? payRow.pagamentos : []),
-      { id: genId(), valor, data: (payForm.data || toISODate(new Date())) + "T00:00:00.000Z", forma: payForm.forma },
+      { id: genId(), valor, data: (payForm.data || toISODate(new Date())) + "T00:00:00.000Z", forma: payForm.forma, ...(isCredito ? { parcelas } : {}) },
     ];
     const { saldo } = computePaymentState({ ...payRow, pagamentos });
     const quitado = saldo <= 0.005;
@@ -6553,11 +6558,27 @@ function FinanceModule({ user, dateFilter, addToast }) {
                     className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition" />
                 </div>
               </div>
+              {/* Parcelas — só no Cartão de Crédito. Registra em quantas vezes o cliente pagou. */}
+              {payForm.forma === "Cartão de Crédito" && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-300 mb-1.5">Parcelas (nº de vezes no crédito)</label>
+                  <input type="number" min="1" max="24" step="1" inputMode="numeric" value={payForm.parcelas}
+                    onChange={(e) => setPayForm({ ...payForm, parcelas: e.target.value })}
+                    className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500 transition" />
+                  {(() => {
+                    const n = Math.max(1, Math.floor(Number(payForm.parcelas) || 1));
+                    const v = parseFloat(String(payForm.valor).replace(",", "."));
+                    return n > 1 && v > 0
+                      ? <p className="text-xs text-gray-500 mt-1">{n}x de {formatCurrency(v / n)} (total {formatCurrency(v)})</p>
+                      : <p className="text-xs text-gray-500 mt-1">1x (à vista no crédito)</p>;
+                  })()}
+                </div>
+              )}
               {Array.isArray(payRow.pagamentos) && payRow.pagamentos.length > 0 && (
                 <div className="text-xs text-gray-400 border-t border-gray-700 pt-3">
                   <p className="font-medium mb-1">Pagamentos anteriores:</p>
                   {payRow.pagamentos.map((p, i) => (
-                    <div key={p.id || i}>• {formatCurrency(p.valor)} · {p.forma} · {formatDate(p.data)}</div>
+                    <div key={p.id || i}>• {formatCurrency(p.valor)} · {p.forma}{p.parcelas > 1 ? ` (${p.parcelas}x)` : ""} · {formatDate(p.data)}</div>
                   ))}
                 </div>
               )}
