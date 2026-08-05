@@ -40,7 +40,7 @@
 ## Tarefas
 
 - Task 1 — Registry: infra + fontes `os`, `clientes`, `financeiro`
-- Task 2 — Registry: as 11 fontes restantes
+- Task 2 — Registry: as 10 fontes restantes (`funcionarios` foi antecipada para a Task 1)
 - Task 3 — `spec.js`: criação, normalização, validação, resumo
 - Task 4 — `engine.js`: período e filtros
 - Task 5 — `engine.js`: agrupamento, agregação, ordenação, limite, referência
@@ -315,14 +315,18 @@ git commit -m "feat(relatorios): registry de datasets com OS, clientes e finance
 
 ---
 
-### Task 2: Registry — as 11 fontes restantes
+### Task 2: Registry — as 10 fontes restantes
+
+> Ajuste durante a execução: `funcionarios` foi antecipada para a Task 1, porque `os.tecnicoId`
+> já a referencia e o teste de integridade referencial da Task 1 exige que o alvo exista. A
+> Task 2 acrescenta as 10 fontes restantes; o total continua 14.
 
 **Files:**
 - Modify: `src/lib/relatorios/datasets.js` (acrescentar entradas ao array `DATASETS`)
 - Test: `src/lib/relatorios/datasets.test.js` (acrescentar bloco)
 
 **Interfaces:**
-- Consumes: `DATASETS`, `getDataset` da Task 1.
+- Consumes: `DATASETS`, `getDataset` da Task 1 (que já traz `os`, `clientes`, `financeiro` e `funcionarios`).
 - Produces: `DATASETS` com 14 fontes: `os`, `clientes`, `agenda`, `financeiro`, `despesas_recorrentes`, `funcionarios`, `ponto`, `ocorrencias`, `vales`, `contracheques`, `produtos`, `estoque`, `fornecedores`, `servicos`.
 
 - [ ] **Step 1: Confirmar nomes de campo de cada entidade**
@@ -416,22 +420,6 @@ Insira estes objetos no array `DATASETS` de `src/lib/relatorios/datasets.js`, de
       { id: "mesInicio", label: "Mês de início", tipo: "texto" },
       { id: "ativo", label: "Ativo", tipo: "enum", opcoes: [true, false] },
       { id: "createdAt", label: "Data de criação", tipo: "data" },
-    ],
-  },
-  {
-    id: "funcionarios",
-    label: "Funcionários",
-    prefixo: "erp:employee:",
-    campoData: "createdAt",
-    sensivel: false,
-    campos: [
-      { id: "nome", label: "Nome", tipo: "texto" },
-      { id: "cargo", label: "Cargo", tipo: "texto" },
-      { id: "tipo", label: "Tipo", tipo: "texto" },
-      { id: "telefone", label: "Telefone", tipo: "texto" },
-      { id: "email", label: "E-mail", tipo: "texto" },
-      { id: "status", label: "Status", tipo: "enum", opcoes: ["ativo", "inativo"] },
-      { id: "createdAt", label: "Data de admissão no sistema", tipo: "data" },
     ],
   },
   {
