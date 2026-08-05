@@ -43,7 +43,7 @@ export function paraCSV({ colunas = [], linhas = [], totais = {} } = {}, { inclu
   }
   // BOM na frente: sem ele o Excel no Windows lê o arquivo como ANSI e todo
   // acento vira caractere estranho.
-  return "﻿" + out.join(EOL) + EOL;
+  return "\uFEFF" + out.join(EOL) + EOL;
 }
 
 function slug(texto) {

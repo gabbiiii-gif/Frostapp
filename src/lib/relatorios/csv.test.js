@@ -16,7 +16,7 @@ const resultado = {
 
 describe("csv.paraCSV", () => {
   const csv = paraCSV(resultado);
-  const linhas = csv.replace(/^﻿/, "").trim().split("\r\n");
+  const linhas = csv.replace(/^\uFEFF/, "").trim().split("\r\n");
 
   it("começa com BOM UTF-8 para o Excel não quebrar acento", () => {
     expect(csv.charCodeAt(0)).toBe(0xfeff);
@@ -49,7 +49,7 @@ describe("csv.paraCSV", () => {
 
   it("resultado vazio devolve só o cabeçalho, sem linha de total", () => {
     const vazio = paraCSV({ colunas: resultado.colunas, linhas: [], totais: {} });
-    expect(vazio.replace(/^﻿/, "").trim()).toBe("Técnico;Soma de Valor;Contagem");
+    expect(vazio.replace(/^\uFEFF/, "").trim()).toBe("Técnico;Soma de Valor;Contagem");
   });
 
   it("célula nula vira string vazia, não 'null'", () => {
@@ -58,7 +58,7 @@ describe("csv.paraCSV", () => {
       linhas: [{ a: null, b: undefined }],
       totais: {},
     });
-    expect(csvNulo.replace(/^﻿/, "").trim().split("\r\n")[1]).toBe(";");
+    expect(csvNulo.replace(/^\uFEFF/, "").trim().split("\r\n")[1]).toBe(";");
   });
 
   it("quebra de linha dentro da célula é escapada", () => {

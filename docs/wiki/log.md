@@ -172,3 +172,9 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - DEPLOY: whatsapp-webhook deployado pelo usuário via CLI (`supabase functions deploy whatsapp-webhook --no-verify-jwt`) → v18, 2026-07-13. verify_jwt=false confirmado via MCP; conteúdo live == código commitado (deploy do arquivo real, sem transcrição). Frontend (App/PosVenda) via Vercel. Feature 100% no ar.
 - Nota de operação: para o fluxo disparar, ligar o toggle "Proposta de reagendamento" em Pós-Venda → Configurações (só lembretes agendados DEPOIS carregam o metadata da proposta).
 - touched: src/App.jsx, src/modules/PosVendaModule.jsx, supabase/functions/whatsapp-webhook/index.ts, specs/2026-07-12-reagendamento-automatico-pos-venda-design.md, modules/pos-venda.md
+
+## [2026-08-05] ingest | Módulo Relatórios
+- source: docs/superpowers/specs/2026-08-04-modulo-relatorios-design.md, docs/superpowers/plans/2026-08-05-modulo-relatorios.md
+- new pages: modules/relatorios.md
+- touched: index.md
+- decisions: engine puro client-side (spec declarativo) em vez de SQL sobre kv_store; IA traduz a consulta e nao calcula; PDF binario entrou na v1 (html2pdf ja era dependencia); DataTable nao reusavel (import circular), modulo tem tabela propria
