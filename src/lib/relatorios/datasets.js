@@ -172,14 +172,15 @@ export const DATASETS = [
     id: "vales",
     label: "Vales",
     prefixo: "erp:vale:",
-    campoData: "criadoEm",
+    campoData: "data",
     sensivel: true,
     campos: [
       { id: "employeeId", label: "Funcionário", tipo: "referencia", ref: "funcionarios" },
       { id: "valor", label: "Valor", tipo: "moeda" },
-      { id: "criadoEm", label: "Data", tipo: "data" },
+      { id: "data", label: "Data do vale", tipo: "data" },
       { id: "motivo", label: "Motivo", tipo: "texto" },
       { id: "status", label: "Status", tipo: "texto" },
+      { id: "criadoEm", label: "Data de criação", tipo: "data" },
     ],
   },
   {
