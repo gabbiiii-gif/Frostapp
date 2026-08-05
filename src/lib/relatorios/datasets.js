@@ -187,7 +187,7 @@ export const DATASETS = [
     id: "contracheques",
     label: "Contracheques",
     prefixo: "erp:contracheque:",
-    campoData: "criadoEm",
+    campoData: "criadoEm", // Mantém criadoEm (sempre presente) não paidAt (nullable até fechar). paidAt disponível para filtros explícitos.
     sensivel: true,
     campos: [
       { id: "employeeId", label: "Funcionário", tipo: "referencia", ref: "funcionarios" },
@@ -195,7 +195,8 @@ export const DATASETS = [
       { id: "salarioBase", label: "Salário base", tipo: "moeda" },
       { id: "totalDescontos", label: "Descontos", tipo: "moeda" },
       { id: "liquido", label: "Líquido", tipo: "moeda" },
-      { id: "criadoEm", label: "Data", tipo: "data" },
+      { id: "criadoEm", label: "Data de criação", tipo: "data" },
+      { id: "paidAt", label: "Data de pagamento", tipo: "data" },
     ],
   },
   {
