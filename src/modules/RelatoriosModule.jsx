@@ -9,6 +9,9 @@ import {
   PREFIXO_RELATORIO,
 } from "../lib/relatorios/salvos.js";
 import { genId } from "../utils.js";
+import { paraCSV, nomeArquivoCSV, baixarCSV } from "../lib/relatorios/csv.js";
+import { relatorioHTML } from "../lib/relatorios/html.js";
+import { openHTMLDoc, gerarPDFDeHTML } from "../lib/doc.js";
 import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
@@ -200,6 +203,43 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
     setSalvos(listarSalvos(db));
     addToast("Cópia criada.", "success");
   }, [db, addToast]);
+
+  // ─── Exportações ───
+  // Nome usado nos arquivos: o do relatório salvo, ou o rótulo da fonte quando
+  // a consulta ainda não foi nomeada.
+  const nomeExibicao = nomeSalvar?.trim() || `Relatório de ${getDataset(spec.fonte)?.label || "dados"}`;
+
+  const montarHTML = useCallback(() => relatorioHTML({
+    nome: nomeSalvar?.trim() || `Relatório de ${getDataset(resultado?.spec?.fonte || spec.fonte)?.label || "dados"}`,
+    resumo: resultado?.resumo || resumoSpec(spec),
+    colunas: resultado?.colunas || [],
+    linhas: resultado?.linhas || [],
+    totais: resultado?.totais || {},
+    truncado: resultado?.truncado || false,
+    empresa,
+  }), [resultado, spec, nomeSalvar, empresa]);
+
+  const exportarCSV = useCallback(() => {
+    if (!resultado) return;
+    baixarCSV(nomeArquivoCSV(nomeExibicao), paraCSV(resultado));
+    addToast("CSV baixado.", "success");
+  }, [resultado, nomeExibicao, addToast]);
+
+  const abrirDocumento = useCallback(() => {
+    if (!resultado) return;
+    openHTMLDoc(montarHTML());
+  }, [resultado, montarHTML]);
+
+  const baixarPDF = useCallback(async () => {
+    if (!resultado) return;
+    try {
+      addToast("Gerando PDF...", "info");
+      await gerarPDFDeHTML(montarHTML(), nomeArquivoCSV(nomeExibicao).replace(/\.csv$/, ""));
+    } catch (e) {
+      console.error("[Relatorios] PDF:", e);
+      addToast("Falha ao gerar o PDF. Use 'Abrir documento' e imprima por lá.", "error");
+    }
+  }, [resultado, montarHTML, nomeExibicao, addToast]);
 
   // Relatório novo: limpa o vínculo com o salvo aberto para não sobrescrevê-lo.
   const novoRelatorio = useCallback(() => {
@@ -477,7 +517,12 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
       </div>
 
       {/* ─── Resultado ─── */}
-      {aba === "novo" && resultado && <ResultadoRelatorio resultado={resultado} />}
+      {aba === "novo" && resultado && (
+        <ResultadoRelatorio
+          resultado={resultado}
+          acoes={{ exportarCSV, abrirDocumento, baixarPDF }}
+        />
+      )}
 
       {/* ─── Diálogo: salvar relatório ─── */}
       {dialogoSalvar && (
@@ -525,7 +570,7 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
 // Tabela + KPIs + gráfico do resultado. Tabela própria (e não o DataTable do
 // App.jsx) porque aquele componente não é exportado e importá-lo daqui criaria
 // import circular — mesmo motivo pelo qual Ponto e Lembrete têm as suas.
-function ResultadoRelatorio({ resultado }) {
+function ResultadoRelatorio({ resultado, acoes }) {
   const { colunas, linhas, totais, truncado, spec, resumo } = resultado;
   const agrupamento = spec.agrupamento || [];
   const colunasMetrica = colunas.filter((c) => !agrupamento.includes(c.id));
@@ -543,6 +588,16 @@ function ResultadoRelatorio({ resultado }) {
 
   return (
     <div className="space-y-4">
+      {/* Ações só aparecem quando há resultado — não há o que exportar sem linhas */}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={acoes.exportarCSV}
+          className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600">Baixar CSV</button>
+        <button type="button" onClick={acoes.abrirDocumento}
+          className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600">Abrir documento</button>
+        <button type="button" onClick={acoes.baixarPDF}
+          className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600">Baixar PDF</button>
+      </div>
+
       {truncado && (
         <div className="bg-amber-500/10 border border-amber-500/40 text-amber-300 text-sm rounded-lg px-4 py-3">
           Resultado parcial: o limite de 50.000 registros foi atingido. Estreite o período para obter um número exato.
