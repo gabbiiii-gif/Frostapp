@@ -1317,6 +1317,23 @@ export async function adminEvolution(action) {
   }
 }
 
+// ─── Relatórios — envio por WhatsApp ────────────────────────────────────────
+// O envio passa pela edge function porque a CSP do app só libera connect-src
+// para *.supabase.co (fetch direto ao host do Evolution é bloqueado) e porque a
+// apikey da instância não pode chegar ao navegador.
+// payload: { companyId, telefone, nomeRelatorio, resumo, arquivoBase64, arquivoNome, mimetype }
+export async function enviarRelatorioWhatsApp(payload) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const { data, error } = await supabase.functions.invoke('relatorio-whatsapp', { body: payload });
+    if (error) return { ok: false, error: error.message };
+    if (!data?.ok) return { ok: false, error: data?.error || 'falha', detalhe: data?.detalhe, texto_enviado: data?.texto_enviado };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 // ─── Storage: upload/delete de fotos e assinaturas da OS ─────────────────────
 // HARDENING C0-2: buckets 'os-fotos' e 'os-assinaturas' passam a ser PRIVADOS.
 // Antes eram públicos: qualquer um com a URL lia foto/assinatura/CPF do cliente

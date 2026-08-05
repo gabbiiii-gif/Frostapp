@@ -9,7 +9,8 @@ import {
   PREFIXO_RELATORIO,
 } from "../lib/relatorios/salvos.js";
 import { genId } from "../utils.js";
-import { paraCSV, nomeArquivoCSV, baixarCSV } from "../lib/relatorios/csv.js";
+import { paraCSV, nomeArquivoCSV, baixarCSV, paraBase64 } from "../lib/relatorios/csv.js";
+import { enviarRelatorioWhatsApp } from "../supabase.js";
 import { relatorioHTML } from "../lib/relatorios/html.js";
 import { openHTMLDoc, gerarPDFDeHTML } from "../lib/doc.js";
 import {
@@ -70,6 +71,11 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
   const [nomeSalvar, setNomeSalvar] = useState("");
   const [dialogoSalvar, setDialogoSalvar] = useState(false);
   const [confirmarExcluir, setConfirmarExcluir] = useState(null);
+
+  // Envio por WhatsApp (resumo + CSV anexado).
+  const [dialogoWhats, setDialogoWhats] = useState(false);
+  const [telefoneWhats, setTelefoneWhats] = useState("");
+  const [enviandoWhats, setEnviandoWhats] = useState(false);
 
   const ds = getDataset(spec.fonte);
   const campos = useMemo(() => ds?.campos || [], [ds]);
@@ -240,6 +246,52 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
       addToast("Falha ao gerar o PDF. Use 'Abrir documento' e imprima por lá.", "error");
     }
   }, [resultado, montarHTML, nomeExibicao, addToast]);
+
+  // ─── Envio por WhatsApp ───
+  // Resumo em texto + CSV anexado. Limite defensivo: acima de ~5.000 linhas o
+  // Evolution costuma recusar o anexo, então cortamos e avisamos na mensagem.
+  const MAX_LINHAS_ANEXO = 5000;
+  const enviarWhatsApp = useCallback(async () => {
+    if (!resultado) return;
+    setEnviandoWhats(true);
+    try {
+      const cortado = resultado.linhas.length > MAX_LINHAS_ANEXO;
+      const paraExportar = cortado
+        ? { ...resultado, linhas: resultado.linhas.slice(0, MAX_LINHAS_ANEXO) }
+        : resultado;
+      const csv = paraCSV(paraExportar);
+      const resumoMsg = [
+        resultado.resumo,
+        ...resultado.colunas
+          .filter((c) => typeof resultado.totais[c.id] === "number")
+          .map((c) => `${c.label}: ${fmtNum(resultado.totais[c.id], c.tipo)}`),
+        cortado ? `(anexo limitado às primeiras ${MAX_LINHAS_ANEXO} linhas)` : "",
+      ].filter(Boolean).join("\n");
+
+      const r = await enviarRelatorioWhatsApp({
+        companyId,
+        telefone: telefoneWhats,
+        nomeRelatorio: nomeExibicao,
+        resumo: resumoMsg,
+        arquivoBase64: paraBase64(csv),
+        arquivoNome: nomeArquivoCSV(nomeExibicao),
+        mimetype: "text/csv",
+      });
+
+      if (r.ok) {
+        addToast("Relatório enviado no WhatsApp.", "success");
+        setDialogoWhats(false);
+      } else if (r.error === "evolution_nao_configurada") {
+        addToast("WhatsApp não configurado para esta empresa.", "error");
+      } else if (r.texto_enviado) {
+        addToast("O resumo foi enviado, mas o anexo falhou. Baixe o CSV e envie manualmente.", "error");
+      } else {
+        addToast(`Falha no envio: ${r.error}`, "error");
+      }
+    } finally {
+      setEnviandoWhats(false);
+    }
+  }, [resultado, companyId, telefoneWhats, nomeExibicao, addToast]);
 
   // Relatório novo: limpa o vínculo com o salvo aberto para não sobrescrevê-lo.
   const novoRelatorio = useCallback(() => {
@@ -520,7 +572,16 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
       {aba === "novo" && resultado && (
         <ResultadoRelatorio
           resultado={resultado}
-          acoes={{ exportarCSV, abrirDocumento, baixarPDF }}
+          acoes={{
+            exportarCSV,
+            abrirDocumento,
+            baixarPDF,
+            abrirWhats: () => {
+              // Telefone default: o da empresa, que costuma ser o do dono.
+              if (!telefoneWhats) setTelefoneWhats(empresa.telefone || "");
+              setDialogoWhats(true);
+            },
+          }}
         />
       )}
 
@@ -540,6 +601,29 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
                 className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600">Cancelar</button>
               <button type="button" onClick={confirmarSalvar} disabled={!nomeSalvar.trim()}
                 className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Diálogo: enviar no WhatsApp ─── */}
+      {dialogoWhats && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.6)" }}>
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 w-full max-w-sm">
+            <h3 className="text-white font-semibold mb-1">Enviar no WhatsApp</h3>
+            <p className="text-xs text-gray-500 mb-3">
+              O destinatário recebe o resumo com os totais em texto e o CSV como anexo.
+            </p>
+            <label className="block text-xs text-gray-400 mb-1" htmlFor="rel-tel">Telefone</label>
+            <input id="rel-tel" className={inputCls} value={telefoneWhats} autoFocus
+              onChange={(e) => setTelefoneWhats(e.target.value)} placeholder="(11) 99999-9999" />
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setDialogoWhats(false)}
+                className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600">Cancelar</button>
+              <button type="button" onClick={enviarWhatsApp} disabled={enviandoWhats || !telefoneWhats.trim()}
+                className="px-3 py-1.5 text-sm rounded-lg bg-green-700 text-white hover:bg-green-600 disabled:opacity-50">
+                {enviandoWhats ? "Enviando..." : "Enviar"}
+              </button>
             </div>
           </div>
         </div>
@@ -596,6 +680,8 @@ function ResultadoRelatorio({ resultado, acoes }) {
           className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600">Abrir documento</button>
         <button type="button" onClick={acoes.baixarPDF}
           className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600">Baixar PDF</button>
+        <button type="button" onClick={acoes.abrirWhats}
+          className="px-3 py-1.5 text-sm rounded-lg bg-green-700 text-white hover:bg-green-600">Enviar no WhatsApp</button>
       </div>
 
       {truncado && (
