@@ -1,11 +1,13 @@
 # Task 2 Report — Registro das 14 fontes de dados da v1
 
 ## Status
-**DONE** (com revisão crítica aplicada)
+**DONE** (com 2 rodadas de revisão crítica aplicadas)
 
 Commit SHAs: 
 - `3c25280` — feat(relatorios): registrar as 14 fontes de dados da v1
 - `96fdd3b` — fix(relatorios): vales deve ter data (business) + criadoEm (auditoria)
+- `3144ed6` — docs(relatorios): task-2-report — documentar revisão crítica e fix de vales
+- `0ae45f7` — fix(relatorios): contracheques deve incluir paidAt + documentar campoData invariante
 
 ## Sumário de Testes
 ✅ **14 testes passam** (238 total na suíte completa)
@@ -67,15 +69,16 @@ Commit SHAs:
 
 ### 6. contracheques
 - **Prefixo:** `erp:contracheque:`
-- **campoData:** `criadoEm` (único campo de data; mesRef é período/competência, não data)
+- **campoData:** `criadoEm` (sempre presente; paidAt disponível mas nullable)
 - **Sensível:** true
 - **Campos verificados:**
-  - employeeId, mesRef, salarioBase, totalDescontos, liquido, criadoEm
+  - employeeId, mesRef, salarioBase, totalDescontos, liquido, criadoEm, paidAt
   - **Correção:** Brief usava `competencia`; código real usa `mesRef` (`src/App.jsx:15196`)
-  - Verifica-se que contracheque NÃO tem campo `data` separado (diferente de vales):
+  - **Adição:** Campo `paidAt` (data de pagamento, nullable até fechar contracheque):
     - `mesRef`: período de competência (ex. "2026-08", texto, não data)
-    - `criadoEm`: timestamp técnico (data de criação do registro)
-    - Verificado: src/App.jsx:15193-15215 — nenhum campo `data` gravado
+    - `criadoEm`: data de criação (sempre presente, sempre preenchida)
+    - `paidAt`: data de pagamento (`src/App.jsx:15211`, `15230`) — nullable até `fecharContracheque`
+  - **Decisão campoData:** Mantém `criadoEm` (não paidAt) pois paidAt é nullable — apontar período filter para campo nullable silenciosamente excluiria todos contracheques abertos. Cf. comentário em linha 190 de datasets.js.
   - Confirmados em src/App.jsx:15193-15215
 
 ### 7. produtos
@@ -125,7 +128,7 @@ Commit SHAs:
 | responsavelId (agenda) | tecnicoId | CORRIGIDO | Código grava como tecnicoId; responsável é técnico (src/App.jsx:1701, 9968) |
 | observacao (ocorrencias) | descricao | CORRIGIDO | Código grava como descricao |
 | data (vales) | data + criadoEm | CORRIGIDO | Vales tem DOIS campos: data (business, obrigatória) e criadoEm (audit timestamp). campoData aponta para data |
-| data (contracheques) | criadoEm | CORRIGIDO | Contracheques só tem criadoEm; mesRef é período, não data |
+| data (contracheques) | criadoEm + paidAt | CORRIGIDO | Contracheques tem: mesRef (período), criadoEm (sempre), paidAt (nullable). campoData aponta criadoEm (invariante). |
 | descricao (vales) | motivo | CORRIGIDO | Código grava como motivo |
 | competencia (contracheques) | mesRef | CORRIGIDO | Código usa mesRef |
 | preco (servicos) | precoBase | CORRIGIDO | Código usa precoBase |
@@ -217,5 +220,38 @@ Verificação confirmou:
 4. Padrão: idêntico ao dataset `financeiro` (linhas 106-107), que separa `data` + `createdAt`
 
 **Verificação contracheques:** Confirmado que apenas tem `criadoEm` — nenhum campo `data` gravado em src/App.jsx:15193-15215. Deixado como está.
+
+Todos os testes continuam a passar (238/238).
+
+---
+
+## Fix Round 2 — Nullable Business Dates & paidAt
+
+**Achado crítico (identificado na revisão posterior):** Dataset `contracheques` foi registrado SEM o campo `paidAt` (data de pagamento). Isso causaria:
+- Data de pagamento não-reportável
+- Impossível filtrar/agrupar contracheques por data de pagamento
+- Perda de informação de negócio: quando foi pago (vs. quando foi criado)
+
+**Raiz do erro:** Análise incompleta. O contracheque tem TRÊS "datas" distintas:
+- `mesRef`: período de competência (texto "2026-08", não é data)
+- `criadoEm`: quando o contracheque foi criado (data de sistema, sempre presente)
+- `paidAt`: quando foi pago (data de negócio, nullable até `fecharContracheque`)
+
+Verificação confirmou:
+- Save handler (`src/App.jsx:15211`): `paidAt: data.paidAt || null`
+- Close handler (`src/App.jsx:15230`): `paidAt: new Date().toISOString()`
+
+**Decisão criteriosa sobre campoData:**
+- Adicionado `paidAt` aos campos ✓
+- **Mantém `campoData: "criadoEm"` (não switch para paidAt)** — razão: `paidAt` é nullable (null até fechar), então apontar period filter (campoData) para campo nullable silenciosamente **excluiria todos contracheques abertos** de **todo** relatório
+- `criadoEm` é sempre presente → recorte seguro para filtro de período
+- `paidAt` permanece disponível como campo explícito (usuário pode filtrar/agrupar por "Data de pagamento" manualmente)
+- Comentário PT-BR adicionado na linha 190 de datasets.js para evitar "correções" futuras
+
+**Revisão de outros datasets para campo nullable em campoData:**
+- `os.dataConclusao`: potencialmente nullable (OS em aberto não tem data de conclusão) — MAS campoData aponta `dataAbertura` (sempre), não dataConclusao ✓
+- `agenda.data`: sempre presente (agendamento sem data não faz sentido) ✓
+- Demais datasets: campoData aponta campos sempre presentes (createdAt, created_at são invariantes) ✓
+- Nenhuma alteração necessária.
 
 Todos os testes continuam a passar (238/238).
