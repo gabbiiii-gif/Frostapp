@@ -238,6 +238,9 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
     setEditandoId(registro.id);
     setNomeSalvar(registro.nome);
     setAba("novo");
+    // Volta ao Builder: abrir um salvo no modo Pergunta esconderia a consulta
+    // que o usuário acabou de mandar abrir.
+    setModo("builder");
     setResultado(null);
     setErros([]);
   }, []);
