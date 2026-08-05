@@ -83,3 +83,31 @@ describe("datasets — acessores", () => {
     expect(r[0].campos[0].label).toBeTruthy();
   });
 });
+
+describe("datasets — cobertura das 14 fontes da v1", () => {
+  const esperados = [
+    "os", "clientes", "agenda", "financeiro", "despesas_recorrentes",
+    "funcionarios", "ponto", "ocorrencias", "vales", "contracheques",
+    "produtos", "estoque", "fornecedores", "servicos",
+  ];
+
+  it("todas as fontes da v1 estão registradas", () => {
+    for (const id of esperados) {
+      expect(getDataset(id), `faltou dataset ${id}`).toBeTruthy();
+    }
+    expect(DATASETS.length).toBe(esperados.length);
+  });
+
+  it("ponto, ocorrencias, vales e contracheques são sensíveis", () => {
+    for (const id of ["ponto", "ocorrencias", "vales", "contracheques"]) {
+      expect(getDataset(id).sensivel, `${id} deveria ser sensível`).toBe(true);
+    }
+  });
+
+  it("fontes não sensíveis continuam visíveis sem privilégio", () => {
+    const visiveis = listarDatasets({ podeVerSensivel: false }).map((d) => d.id);
+    expect(visiveis).toContain("os");
+    expect(visiveis).not.toContain("contracheques");
+    expect(listarDatasets({ podeVerSensivel: true }).length).toBe(DATASETS.length);
+  });
+});
