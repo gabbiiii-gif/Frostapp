@@ -57,7 +57,7 @@ export const STATUS_OS_KEYS = [
 //            ponto; admin/gerente veem painel da equipe).
 export const ROLE_PERMISSIONS = {
   admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha", "pos-venda", "ponto", "lembrete"],
+  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha", "pos-venda", "ponto", "lembrete", "relatorios"],
   tecnico: ["dashboard", "os", "agenda", "ponto"],
   atendente: ["dashboard", "clientes", "os", "agenda", "ia", "pos-venda", "ponto"],
   // Funcionário que SÓ bate ponto (motorista, ajudante, administrativo que não

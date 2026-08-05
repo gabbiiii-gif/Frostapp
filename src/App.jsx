@@ -118,6 +118,9 @@ import LembreteModule from "./modules/LembreteModule.jsx";
 // Ponto Eletrônico: registro de jornada via biometria/facial/PIN + banco de
 // horas + ocorrências/justificativas.
 import PontoModule from "./modules/PontoModule.jsx";
+// Relatórios: motor genérico de análise sobre qualquer entidade do sistema.
+// A lógica pura (registry, spec, engine, CSV, HTML) mora em src/lib/relatorios/.
+import RelatoriosModule from "./modules/RelatoriosModule.jsx";
 // Catálogos de seed (serviços + produtos) são carregados sob demanda via dynamic
 // import dentro das funções de seed — evita inflar o bundle inicial com ~96KB
 // de JSON que só roda no primeiro boot do dispositivo.
@@ -276,6 +279,9 @@ const SCOPED_PREFIXES = [
   "erp:service:",
   "erp:audit:",
   "erp:autoBackup:",
+  // Relatórios salvos: guarda a CONFIGURAÇÃO (ReportSpec) da consulta por
+  // empresa, nunca o resultado — reabrir recalcula com os dados atuais.
+  "erp:relatorio:",
   // Log de consentimento LGPD (aceite de Termos + Privacidade no cadastro/convite)
   "erp:consent:",
   // Solicitações de exclusão de conta/dados pelo titular (LGPD art. 18)
@@ -440,6 +446,8 @@ const AUDITED_PREFIXES = [
   // Escola: transições de status (assumido, concluído) ficam no log
   // — útil para SLA e relatórios de auditoria do contrato Vanda.
   "erp:escola:",
+  // Relatórios salvos: criar/editar/excluir relatório da empresa fica no log.
+  "erp:relatorio:",
 ];
 function shouldAudit(key) {
   if (!key) return false;
@@ -458,6 +466,8 @@ function summarizeRecord(prefix, value) {
   if (prefix === "erp:ocorrencia:") return `${value.tipo || ""} ${value.data_ref || ""} → ${value.status || "pendente"}`.trim();
   // Escola: identifica a demanda pelo nome da escola + status atual.
   if (prefix === "erp:escola:") return `${value.escola_nome || "Demanda"} — ${value.status || ""} (${value.urgencia || ""})`.trim();
+  // Relatório salvo: nome + fonte de dados dão contexto suficiente no log.
+  if (prefix === "erp:relatorio:") return `${value.nome || "Relatório"} (${value.spec?.fonte || "—"})`;
   return value.id || "";
 }
 function recordAudit(action, key, value, prevValue) {
@@ -1397,6 +1407,7 @@ const ALL_MODULES = [
   // Novos módulos verticais
   { id: "ponto", label: "Ponto Eletrônico" },
   { id: "lembrete", label: "Lembrete" },
+  { id: "relatorios", label: "Relatórios" },
   { id: "config", label: "Configurações (admin)" },
 ];
 
@@ -1410,6 +1421,7 @@ const TOGGLEABLE_MODULES = [
   { id: "ia", label: "IA / Atendimento" },
   { id: "pos-venda", label: "Pós-Venda" },
   { id: "folha", label: "Folha de Pagamento" },
+  { id: "relatorios", label: "Relatórios" },
   { id: "ponto", label: "Ponto Eletrônico" },
   { id: "lembrete", label: "Lembrete" },
 ];
@@ -17730,6 +17742,8 @@ export default function App() {
       // Ponto: acessível por todos os roles internos (cada um vê o que lhe cabe
       // no próprio PontoModule).
       { id: "ponto", label: "Ponto Eletrônico", iconName: "ponto", module: "ponto" },
+      // Relatórios: admin/gerente por padrão; atendente só via customPermissions.
+      { id: "relatorios", label: "Relatórios", iconName: "relatorios", module: "relatorios" },
       { id: "config", label: "Configurações", iconName: "config", module: "config" },
     ];
 
@@ -18430,6 +18444,9 @@ export default function App() {
             )}
             {activeModule === "ponto" && (
               <PontoModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} db={DB} />
+            )}
+            {activeModule === "relatorios" && (
+              <RelatoriosModule user={user} db={DB} addToast={addToast} companyId={getActiveCompanyId()} />
             )}
             {activeModule === "config" && (
               <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} theme={theme} setTheme={setTheme} />
