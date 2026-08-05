@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from "react";
 import {
-  listarDatasets, getDataset, getCampo, AGREGACOES, OPERADORES,
+  listarDatasets, getDataset, getCampo, registryCompacto, AGREGACOES, OPERADORES,
 } from "../lib/relatorios/datasets.js";
 import { specVazio, validarSpec, resumoSpec, colunaMetrica } from "../lib/relatorios/spec.js";
 import { executarRelatorio } from "../lib/relatorios/engine.js";
@@ -10,7 +10,7 @@ import {
 } from "../lib/relatorios/salvos.js";
 import { genId } from "../utils.js";
 import { paraCSV, nomeArquivoCSV, baixarCSV, paraBase64 } from "../lib/relatorios/csv.js";
-import { enviarRelatorioWhatsApp } from "../supabase.js";
+import { enviarRelatorioWhatsApp, traduzirPerguntaRelatorio } from "../supabase.js";
 import { relatorioHTML } from "../lib/relatorios/html.js";
 import { openHTMLDoc, gerarPDFDeHTML } from "../lib/doc.js";
 import {
@@ -71,6 +71,11 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
   const [nomeSalvar, setNomeSalvar] = useState("");
   const [dialogoSalvar, setDialogoSalvar] = useState(false);
   const [confirmarExcluir, setConfirmarExcluir] = useState(null);
+
+  // Modo de montagem: builder estruturado ou pergunta em português.
+  const [modo, setModo] = useState("builder");       // "builder" | "pergunta"
+  const [pergunta, setPergunta] = useState("");
+  const [traduzindo, setTraduzindo] = useState(false);
 
   // Envio por WhatsApp (resumo + CSV anexado).
   const [dialogoWhats, setDialogoWhats] = useState(false);
@@ -160,6 +165,47 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
   }, [spec, db, addToast]);
 
   const podeGerar = Boolean(spec.periodo?.de && spec.periodo?.ate && spec.metricas.length > 0);
+
+  // ─── Modo Pergunta ───
+  // A IA só monta a consulta. O spec devolvido é validado contra o registry
+  // ANTES de virar cálculo — spec inválido nunca chega ao engine — e aparece
+  // preenchido no builder para o usuário conferir antes de gerar.
+  const traduzirPergunta = useCallback(async () => {
+    if (!pergunta.trim()) return;
+    setTraduzindo(true);
+    setErros([]);
+    try {
+      const hoje = new Date();
+      const iso = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}-${String(hoje.getDate()).padStart(2, "0")}`;
+      const r = await traduzirPerguntaRelatorio({
+        pergunta,
+        registry: registryCompacto({ podeVerSensivel }),
+        hoje: iso,
+      });
+      if (!r.ok) {
+        addToast(
+          r.error === "ia_nao_configurada"
+            ? "A tradução por IA não está configurada nesta instalação."
+            : `Não consegui interpretar a pergunta (${r.error}).`,
+          "error",
+        );
+        return;
+      }
+      const v = validarSpec(r.spec);
+      if (!v.ok) {
+        // Não descarta tudo: leva o usuário ao builder com os erros à vista.
+        setErros(["A IA montou uma consulta inválida:", ...v.erros]);
+        setModo("builder");
+        return;
+      }
+      setSpec(v.spec);
+      setResultado(null);
+      setModo("builder");
+      addToast("Consulta montada. Confira e clique em Gerar.", "success");
+    } finally {
+      setTraduzindo(false);
+    }
+  }, [pergunta, podeVerSensivel, addToast]);
 
   // ─── Biblioteca de salvos ───
   // Salva a CONFIGURAÇÃO atual. Se veio de um salvo aberto, atualiza no lugar.
@@ -364,8 +410,40 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
         </div>
       )}
 
+      {/* ─── Alternador Builder | Pergunta ─── */}
+      {aba === "novo" && (
+        <div className="flex gap-1 bg-gray-800 border border-gray-700 rounded-lg p-1 w-fit">
+          {[["builder", "Builder"], ["pergunta", "Pergunta"]].map(([id, label]) => (
+            <button key={id} type="button" onClick={() => setModo(id)}
+              className={`px-3 py-1.5 text-sm rounded-md transition ${
+                modo === id ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* ─── Modo Pergunta ─── */}
+      {aba === "novo" && modo === "pergunta" && (
+        <div className={cardCls}>
+          <label className={labelCls} htmlFor="rel-pergunta">Pergunte em português</label>
+          <textarea id="rel-pergunta" rows={2} className={inputCls} value={pergunta} maxLength={500}
+            onChange={(e) => setPergunta(e.target.value)}
+            placeholder="Ex.: faturamento por técnico em março, só OS finalizadas" />
+          <div className="flex flex-wrap items-center gap-2 mt-3">
+            <button type="button" onClick={traduzirPergunta} disabled={traduzindo || !pergunta.trim()}
+              className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm hover:bg-blue-700 disabled:opacity-50">
+              {traduzindo ? "Interpretando..." : "Montar consulta"}
+            </button>
+            <span className="text-xs text-gray-500">
+              A consulta montada abre no Builder para você conferir antes de gerar.
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* ─── Builder ─── */}
-      <div className={cardCls} hidden={aba !== "novo"}>
+      <div className={cardCls} hidden={aba !== "novo" || modo !== "builder"}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className={labelCls} htmlFor="rel-fonte">Fonte de dados</label>

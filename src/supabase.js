@@ -1334,6 +1334,24 @@ export async function enviarRelatorioWhatsApp(payload) {
   }
 }
 
+// ─── Relatórios — pergunta em linguagem natural → ReportSpec ────────────────
+// Envia SÓ metadados do registry (ids, labels, tipos). Nenhum dado de cliente
+// sai do dispositivo, e a IA não calcula nada: devolve a consulta, que o cliente
+// valida contra o registry antes de executar.
+export async function traduzirPerguntaRelatorio({ pergunta, registry, hoje }) {
+  if (!supabase) return { ok: false, error: 'Supabase não configurado.' };
+  try {
+    const { data, error } = await supabase.functions.invoke('relatorio-nl', {
+      body: { pergunta, registry, hoje },
+    });
+    if (error) return { ok: false, error: error.message };
+    if (!data?.ok) return { ok: false, error: data?.error || 'falha', detalhe: data?.detalhe };
+    return { ok: true, spec: data.spec };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
 // ─── Storage: upload/delete de fotos e assinaturas da OS ─────────────────────
 // HARDENING C0-2: buckets 'os-fotos' e 'os-assinaturas' passam a ser PRIVADOS.
 // Antes eram públicos: qualquer um com a URL lia foto/assinatura/CPF do cliente
