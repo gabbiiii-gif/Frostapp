@@ -4,7 +4,7 @@
 // agrupados ou agregados. O engine e a UI leem só daqui — adicionar fonte nova
 // é acrescentar um objeto nesta lista, sem tocar em engine nem em componente.
 
-import { STATUS_MAP } from "../../constants.js";
+import { STATUS_OS_KEYS } from "../../constants.js";
 
 export const TIPOS_CAMPO = ["texto", "numero", "data", "moeda", "enum", "referencia"];
 
@@ -31,15 +31,6 @@ export const OPERADORES = [
   { id: "em", label: "está na lista", tipos: ["texto", "enum", "referencia"] },
 ];
 
-// Derivar opcoes de status a partir de STATUS_MAP — garante consistência e evita
-// duplicação. Novo status adicionado a STATUS_MAP aparece automaticamente aqui,
-// sem precisar atualizar este arquivo.
-const OS_STATUS_KEYS = [
-  "aguardando", "em_deslocamento", "em_execucao", "em_servico",
-  "aguardando_finalizacao", "finalizado", "nao_autorizada", "cancelado",
-];
-const STATUS_OS = OS_STATUS_KEYS.filter((key) => key in STATUS_MAP);
-
 export const DATASETS = [
   {
     id: "os",
@@ -49,7 +40,7 @@ export const DATASETS = [
     sensivel: false,
     campos: [
       { id: "numero", label: "Número", tipo: "numero" },
-      { id: "status", label: "Status", tipo: "enum", opcoes: STATUS_OS },
+      { id: "status", label: "Status", tipo: "enum", opcoes: STATUS_OS_KEYS },
       { id: "tipo", label: "Tipo de serviço", tipo: "texto" },
       { id: "clienteId", label: "Cliente", tipo: "referencia", ref: "clientes" },
       { id: "clienteNome", label: "Cliente (nome gravado)", tipo: "texto" },

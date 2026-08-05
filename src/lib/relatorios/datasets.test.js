@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { STATUS_MAP } from "../../constants.js";
+import { STATUS_OS_KEYS, STATUS_MAP } from "../../constants.js";
 import {
   DATASETS, getDataset, getCampo, listarDatasets, registryCompacto, TIPOS_CAMPO,
 } from "./datasets.js";
@@ -45,13 +45,17 @@ describe("datasets — integridade do registry", () => {
     expect(new Set(ids).size).toBe(ids.length);
   });
 
-  it("opcoes de status do dataset OS derivam de STATUS_MAP", () => {
-    const osDataset = getDataset("os");
+  it("opcoes de status do dataset OS são exatamente STATUS_OS_KEYS", () => {
     const statusCampo = getCampo("os", "status");
     expect(statusCampo).toBeTruthy();
     expect(statusCampo.tipo).toBe("enum");
-    // Todas as opcoes devem estar em STATUS_MAP
-    for (const status of statusCampo.opcoes) {
+    // Registry deve usar lista canônica sem cópia local que possa divergir
+    expect(statusCampo.opcoes).toEqual(STATUS_OS_KEYS);
+  });
+
+  it("todos os status em STATUS_OS_KEYS existem em STATUS_MAP", () => {
+    // Detecta typos de status que renderiam badges sem estilo
+    for (const status of STATUS_OS_KEYS) {
       expect(status in STATUS_MAP, `status '${status}' não existe em STATUS_MAP`).toBe(true);
     }
   });
