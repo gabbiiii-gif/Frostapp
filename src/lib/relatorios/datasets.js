@@ -4,6 +4,8 @@
 // agrupados ou agregados. O engine e a UI leem só daqui — adicionar fonte nova
 // é acrescentar um objeto nesta lista, sem tocar em engine nem em componente.
 
+import { STATUS_MAP } from "../../constants.js";
+
 export const TIPOS_CAMPO = ["texto", "numero", "data", "moeda", "enum", "referencia"];
 
 // Agregações suportadas pelo engine. `contagem` é a única que dispensa campo.
@@ -29,9 +31,14 @@ export const OPERADORES = [
   { id: "em", label: "está na lista", tipos: ["texto", "enum", "referencia"] },
 ];
 
-const STATUS_OS = [
-  "aguardando", "agendado", "em_servico", "aguardando_finalizacao", "finalizado", "cancelado",
+// Derivar opcoes de status a partir de STATUS_MAP — garante consistência e evita
+// duplicação. Novo status adicionado a STATUS_MAP aparece automaticamente aqui,
+// sem precisar atualizar este arquivo.
+const OS_STATUS_KEYS = [
+  "aguardando", "em_deslocamento", "em_execucao", "em_servico",
+  "aguardando_finalizacao", "finalizado", "nao_autorizada", "cancelado",
 ];
+const STATUS_OS = OS_STATUS_KEYS.filter((key) => key in STATUS_MAP);
 
 export const DATASETS = [
   {
@@ -46,7 +53,7 @@ export const DATASETS = [
       { id: "tipo", label: "Tipo de serviço", tipo: "texto" },
       { id: "clienteId", label: "Cliente", tipo: "referencia", ref: "clientes" },
       { id: "clienteNome", label: "Cliente (nome gravado)", tipo: "texto" },
-      { id: "tecnicoId", label: "Técnico", tipo: "referencia", ref: "employees" },
+      { id: "tecnicoId", label: "Técnico", tipo: "referencia", ref: "funcionarios" },
       { id: "tecnicoNome", label: "Técnico (nome gravado)", tipo: "texto" },
       { id: "valor", label: "Valor", tipo: "moeda" },
       { id: "equipamentoTipo", label: "Equipamento", tipo: "texto" },
@@ -75,21 +82,19 @@ export const DATASETS = [
     ],
   },
   {
-    id: "employees",
+    id: "funcionarios",
     label: "Funcionários",
     prefixo: "erp:employee:",
     campoData: "createdAt",
     sensivel: false,
     campos: [
       { id: "nome", label: "Nome", tipo: "texto" },
-      { id: "tipo", label: "Tipo", tipo: "enum", opcoes: ["tecnico", "administrativo", "gerente", "outro"] },
       { id: "cargo", label: "Cargo", tipo: "texto" },
+      { id: "tipo", label: "Tipo", tipo: "texto" },
       { id: "telefone", label: "Telefone", tipo: "texto" },
       { id: "email", label: "E-mail", tipo: "texto" },
-      { id: "salario", label: "Salário", tipo: "moeda" },
-      { id: "dataAdmissao", label: "Data de admissão", tipo: "data" },
       { id: "status", label: "Status", tipo: "enum", opcoes: ["ativo", "inativo"] },
-      { id: "createdAt", label: "Data de cadastro", tipo: "data" },
+      { id: "createdAt", label: "Data de admissão no sistema", tipo: "data" },
     ],
   },
   {

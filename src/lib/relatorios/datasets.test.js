@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { STATUS_MAP } from "../../constants.js";
 import {
   DATASETS, getDataset, getCampo, listarDatasets, registryCompacto, TIPOS_CAMPO,
 } from "./datasets.js";
@@ -42,6 +43,17 @@ describe("datasets — integridade do registry", () => {
   it("não há id de dataset duplicado", () => {
     const ids = DATASETS.map((d) => d.id);
     expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it("opcoes de status do dataset OS derivam de STATUS_MAP", () => {
+    const osDataset = getDataset("os");
+    const statusCampo = getCampo("os", "status");
+    expect(statusCampo).toBeTruthy();
+    expect(statusCampo.tipo).toBe("enum");
+    // Todas as opcoes devem estar em STATUS_MAP
+    for (const status of statusCampo.opcoes) {
+      expect(status in STATUS_MAP, `status '${status}' não existe em STATUS_MAP`).toBe(true);
+    }
   });
 });
 
