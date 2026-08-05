@@ -23,6 +23,10 @@ import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, c
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
 // Geração de PDF client-side dos documentos de OS/orçamento para envio via WhatsApp
 import html2pdf from "html2pdf.js";
+// Abertura de documento imprimível + geração de PDF client-side. Moram em
+// src/lib/doc.js porque src/modules/ (Relatórios) também precisa deles e não
+// pode importar o App.jsx de volta.
+import { openHTMLDoc } from "./lib/doc.js";
 // QR Code para enrollment do 2FA TOTP (escaneado por Google Authenticator/Authy/1Password)
 import QRCode from "qrcode";
 
@@ -6928,52 +6932,9 @@ function RecorrentesPanel({ onClose, addToast, onChanged, canDelete }) {
 // Abre documento HTML em nova aba do navegador.
 // Usamos Blob URL para que <script>, onclick e window.print() funcionem
 // (browsers podem desabilitar scripts em documentos abertos via about:blank).
-function openHTMLDoc(html) {
-  // Abre a janela vazia e escreve o HTML direto. Evita window.open(blobURL):
-  // ali o w.document inicial é o about:blank (readyState "complete"), e ligar
-  // os botões nesse momento erra o documento real que ainda vai carregar.
-  // Com document.write o DOM fica pronto de forma síncrona após o close().
-  const w = window.open("", "_blank");
-  if (!w) {
-    alert("Permita popups para gerar documentos.");
-    return;
-  }
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
-
-  // Nome do arquivo PDF derivado do <title> do documento.
-  const titulo = (html.match(/<title>([^<]*)<\/title>/i)?.[1] || "documento").trim();
-  const filename = titulo.replace(/[^a-zA-Z0-9-_]+/g, "-") || "documento";
-
-  // Liga os botões da barra de ações pelo contexto do app (a CSP impede
-  // scripts dentro do próprio documento). Após document.close() os elementos
-  // já existem, então não há corrida com o carregamento.
-  try {
-    const doc = w.document;
-    const btnPrint = doc.getElementById("btn-print");
-    const btnClose = doc.getElementById("btn-close");
-    const btnPdf = doc.getElementById("btn-pdf");
-    if (btnPrint) btnPrint.addEventListener("click", () => w.print());
-    if (btnClose) btnClose.addEventListener("click", () => w.close());
-    if (btnPdf) btnPdf.addEventListener("click", async () => {
-      const orig = btnPdf.textContent;
-      btnPdf.disabled = true;
-      btnPdf.textContent = "Gerando...";
-      try {
-        await gerarPDFDeHTML(html, filename);
-      } catch (e) {
-        console.error("[openHTMLDoc] PDF:", e);
-        alert("Falha ao gerar o PDF. Use Imprimir como alternativa.");
-      } finally {
-        btnPdf.disabled = false;
-        btnPdf.textContent = orig;
-      }
-    });
-  } catch (e) {
-    console.error("[openHTMLDoc] não foi possível ligar a barra de ações:", e);
-  }
-}
+// openHTMLDoc e gerarPDFDeHTML foram extraídos para src/lib/doc.js — ver o
+// import no topo deste arquivo. Ficaram lá porque src/modules/ também precisa
+// deles e não pode importar o App.jsx (import circular).
 
 // Formatação compacta de moeda (BRL) com tabular-nums implícito
 function _fmtBRL(n) {
@@ -7264,29 +7225,6 @@ function _actionBar() {
       <button id="btn-close" type="button" class="secondary" aria-label="Fechar aba">Fechar</button>
     </div>
   `;
-}
-
-// Gera e baixa um PDF a partir do HTML completo de um documento. Roda no
-// contexto do app (html2pdf empacotado = permitido pela CSP 'self'). Renderiza
-// o conteúdo num container fora da tela porque o html2canvas precisa medir o
-// elemento. Reaproveita a mesma abordagem de enviarDocWhatsApp.
-async function gerarPDFDeHTML(html, filename) {
-  const container = document.createElement("div");
-  container.innerHTML = html;
-  container.style.cssText = "position:fixed;left:-9999px;top:0;width:794px";
-  document.body.appendChild(container);
-  try {
-    const alvo = container.querySelector("main.page") || container;
-    await html2pdf().set({
-      margin: 0,
-      filename: (filename || "documento") + ".pdf",
-      image: { type: "jpeg", quality: 0.98 },
-      html2canvas: { scale: 2, useCORS: true },
-      jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
-    }).from(alvo).save();
-  } finally {
-    document.body.removeChild(container);
-  }
 }
 
 // ─── Bloco PIX (dados de recebimento) ────────────────────────────────────────
