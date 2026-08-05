@@ -5,6 +5,11 @@ import {
 import { specVazio, validarSpec, resumoSpec, colunaMetrica } from "../lib/relatorios/spec.js";
 import { executarRelatorio } from "../lib/relatorios/engine.js";
 import {
+  listarSalvos, salvarRelatorio, excluirRelatorio, duplicarRegistro, montarRegistroSalvo,
+  PREFIXO_RELATORIO,
+} from "../lib/relatorios/salvos.js";
+import { genId } from "../utils.js";
+import {
   BarChart, Bar, LineChart, Line, AreaChart, Area, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
 } from "recharts";
@@ -54,6 +59,14 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
   const [resultado, setResultado] = useState(null);
   const [erros, setErros] = useState([]);
   const [gerando, setGerando] = useState(false);
+
+  // Biblioteca de relatórios salvos da empresa.
+  const [aba, setAba] = useState("novo");            // "novo" | "salvos"
+  const [salvos, setSalvos] = useState(() => listarSalvos(db));
+  const [editandoId, setEditandoId] = useState(null); // id do salvo aberto, se houver
+  const [nomeSalvar, setNomeSalvar] = useState("");
+  const [dialogoSalvar, setDialogoSalvar] = useState(false);
+  const [confirmarExcluir, setConfirmarExcluir] = useState(null);
 
   const ds = getDataset(spec.fonte);
   const campos = useMemo(() => ds?.campos || [], [ds]);
@@ -139,17 +152,128 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
 
   const podeGerar = Boolean(spec.periodo?.de && spec.periodo?.ate && spec.metricas.length > 0);
 
+  // ─── Biblioteca de salvos ───
+  // Salva a CONFIGURAÇÃO atual. Se veio de um salvo aberto, atualiza no lugar.
+  const confirmarSalvar = useCallback(() => {
+    const v = validarSpec(spec);
+    if (!v.ok) {
+      setErros(v.erros);
+      setDialogoSalvar(false);
+      return;
+    }
+    const anterior = editandoId ? db.get(PREFIXO_RELATORIO + editandoId) : null;
+    const registro = montarRegistroSalvo({
+      id: editandoId || genId(),
+      nome: nomeSalvar,
+      descricao: resumoSpec(v.spec),
+      spec: v.spec,
+      usuarioNome: user?.nome || user?.email || "",
+      agora: new Date().toISOString(),
+      criadoEm: anterior?.criadoEm,
+    });
+    salvarRelatorio(db, registro);
+    setSalvos(listarSalvos(db));
+    setEditandoId(registro.id);
+    setDialogoSalvar(false);
+    addToast("Relatório salvo.", "success");
+  }, [spec, editandoId, nomeSalvar, db, user, addToast]);
+
+  const abrirSalvo = useCallback((registro) => {
+    setSpec(registro.spec);
+    setEditandoId(registro.id);
+    setNomeSalvar(registro.nome);
+    setAba("novo");
+    setResultado(null);
+    setErros([]);
+  }, []);
+
+  const removerSalvo = useCallback((registro) => {
+    excluirRelatorio(db, registro.id);
+    setSalvos(listarSalvos(db));
+    if (editandoId === registro.id) setEditandoId(null);
+    setConfirmarExcluir(null);
+    addToast("Relatório excluído.", "success");
+  }, [db, editandoId, addToast]);
+
+  const duplicarSalvo = useCallback((registro) => {
+    salvarRelatorio(db, duplicarRegistro(registro, { novoId: genId(), agora: new Date().toISOString() }));
+    setSalvos(listarSalvos(db));
+    addToast("Cópia criada.", "success");
+  }, [db, addToast]);
+
+  // Relatório novo: limpa o vínculo com o salvo aberto para não sobrescrevê-lo.
+  const novoRelatorio = useCallback(() => {
+    setSpec(specVazio("os"));
+    setEditandoId(null);
+    setNomeSalvar("");
+    setResultado(null);
+    setErros([]);
+    setAba("novo");
+  }, []);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h2 className="text-xl font-bold text-white">Relatórios</h2>
-          <p className="text-sm text-gray-400">Monte a análise que quiser sobre qualquer dado do sistema.</p>
+          <p className="text-sm text-gray-400">
+            {editandoId
+              ? `Editando: ${nomeSalvar}`
+              : "Monte a análise que quiser sobre qualquer dado do sistema."}
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          {editandoId && (
+            <button type="button" onClick={novoRelatorio}
+              className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600">
+              Novo
+            </button>
+          )}
+          <div className="flex gap-1 bg-gray-800 border border-gray-700 rounded-lg p-1">
+            {[["novo", "Montar"], ["salvos", `Salvos (${salvos.length})`]].map(([id, label]) => (
+              <button key={id} type="button" onClick={() => setAba(id)}
+                className={`px-3 py-1.5 text-sm rounded-md transition ${
+                  aba === id ? "bg-blue-600 text-white" : "text-gray-400 hover:text-white"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
+      {/* ─── Biblioteca de relatórios salvos ─── */}
+      {aba === "salvos" && (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+          {salvos.length === 0 && (
+            <p className="text-sm text-gray-500 col-span-full">
+              Nenhum relatório salvo ainda. Monte um na aba Montar e clique em Salvar.
+            </p>
+          )}
+          {salvos.map((r) => (
+            <div key={r.id} className="bg-gray-800 border border-gray-700 rounded-xl p-4 flex flex-col gap-2">
+              <div>
+                <h3 className="text-white font-semibold text-sm">{r.nome}</h3>
+                <p className="text-xs text-gray-500 mt-1">{r.descricao}</p>
+              </div>
+              <p className="text-[11px] text-gray-600">
+                {r.criadoPor ? `por ${r.criadoPor} · ` : ""}
+                atualizado em {new Date(r.atualizadoEm).toLocaleDateString("pt-BR")}
+              </p>
+              <div className="flex flex-wrap gap-2 mt-auto pt-2">
+                <button type="button" onClick={() => abrirSalvo(r)}
+                  className="px-2.5 py-1 text-xs rounded-lg bg-blue-600 text-white hover:bg-blue-700">Abrir</button>
+                <button type="button" onClick={() => duplicarSalvo(r)}
+                  className="px-2.5 py-1 text-xs rounded-lg bg-gray-700 text-gray-200 hover:bg-gray-600">Duplicar</button>
+                <button type="button" onClick={() => setConfirmarExcluir(r)}
+                  className="px-2.5 py-1 text-xs rounded-lg bg-gray-700 text-red-400 hover:bg-gray-600">Excluir</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* ─── Builder ─── */}
-      <div className={cardCls}>
+      <div className={cardCls} hidden={aba !== "novo"}>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
           <div>
             <label className={labelCls} htmlFor="rel-fonte">Fonte de dados</label>
@@ -338,6 +462,10 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
             className="px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
             {gerando ? "Gerando..." : "Gerar relatório"}
           </button>
+          <button type="button" onClick={() => setDialogoSalvar(true)} disabled={!podeGerar}
+            className="px-4 py-2 rounded-lg bg-gray-700 text-gray-200 text-sm hover:bg-gray-600 disabled:opacity-50">
+            {editandoId ? "Salvar alterações" : "Salvar relatório"}
+          </button>
           <span className="text-xs text-gray-500">{resumoSpec(spec)}</span>
         </div>
 
@@ -349,7 +477,47 @@ export default function RelatoriosModule({ user, db, addToast, companyId, empres
       </div>
 
       {/* ─── Resultado ─── */}
-      {resultado && <ResultadoRelatorio resultado={resultado} />}
+      {aba === "novo" && resultado && <ResultadoRelatorio resultado={resultado} />}
+
+      {/* ─── Diálogo: salvar relatório ─── */}
+      {dialogoSalvar && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.6)" }}>
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 w-full max-w-sm">
+            <h3 className="text-white font-semibold mb-3">
+              {editandoId ? "Salvar alterações" : "Salvar relatório"}
+            </h3>
+            <label className="block text-xs text-gray-400 mb-1" htmlFor="rel-nome">Nome</label>
+            <input id="rel-nome" className={inputCls} value={nomeSalvar} autoFocus
+              onChange={(e) => setNomeSalvar(e.target.value)} placeholder="Ex.: Faturamento por técnico" />
+            <p className="text-xs text-gray-500 mt-2">{resumoSpec(spec)}</p>
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setDialogoSalvar(false)}
+                className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600">Cancelar</button>
+              <button type="button" onClick={confirmarSalvar} disabled={!nomeSalvar.trim()}
+                className="px-3 py-1.5 text-sm rounded-lg bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50">Salvar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Diálogo: confirmar exclusão ─── */}
+      {confirmarExcluir && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.6)" }}>
+          <div className="bg-gray-800 border border-gray-700 rounded-xl p-5 w-full max-w-sm">
+            <h3 className="text-white font-semibold mb-2">Excluir relatório</h3>
+            <p className="text-sm text-gray-400">
+              Excluir <strong className="text-gray-200">{confirmarExcluir.nome}</strong>? A configuração é apagada;
+              os dados do sistema não são afetados.
+            </p>
+            <div className="flex justify-end gap-2 mt-4">
+              <button type="button" onClick={() => setConfirmarExcluir(null)}
+                className="px-3 py-1.5 text-sm rounded-lg bg-gray-700 text-gray-300 hover:bg-gray-600">Cancelar</button>
+              <button type="button" onClick={() => removerSalvo(confirmarExcluir)}
+                className="px-3 py-1.5 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700">Excluir</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
