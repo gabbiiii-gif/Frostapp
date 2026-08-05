@@ -774,7 +774,10 @@ export function validarSpec(specEntrada) {
   if (!p || !p.de || !p.ate) {
     erros.push("Período é obrigatório (data inicial e final).");
   } else {
-    const campoP = getCampo(ds.id, p.campo) || getCampo(ds.id, ds.campoData);
+    // Fallback só quando o campo é ausente. Campo DESCONHECIDO é erro duro,
+    // igual a qualquer outro campo inválido — senão um campo alucinado pela IA
+    // passaria batido, apontando o período para outra data em silêncio.
+    const campoP = p.campo ? getCampo(ds.id, p.campo) : getCampo(ds.id, ds.campoData);
     if (!campoP || campoP.tipo !== "data") {
       erros.push(`Campo de data inválido no período: "${p.campo}".`);
     } else {
