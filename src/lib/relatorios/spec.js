@@ -77,7 +77,9 @@ export function validarSpec(specEntrada) {
   if (!p || !p.de || !p.ate) {
     erros.push("Período é obrigatório (data inicial e final).");
   } else {
-    const campoP = getCampo(ds.id, p.campo) || getCampo(ds.id, ds.campoData);
+    // Só cai back para o campo padrão se p.campo estiver ausente. Se for um string
+    // desconhecido, é um erro (igual aos outros campos).
+    const campoP = p.campo ? getCampo(ds.id, p.campo) : getCampo(ds.id, ds.campoData);
     if (!campoP || campoP.tipo !== "data") {
       erros.push(`Campo de data inválido no período: "${p.campo}".`);
     } else {

@@ -79,9 +79,22 @@ describe("spec.validarSpec", () => {
     expect(r.erros.join(" ")).toContain("métrica");
   });
 
-  it("normaliza limite ausente para 500 e corta acima de 5000", () => {
-    expect(validarSpec({ ...specOk, limite: undefined }).spec.limite).toBe(500);
-    expect(validarSpec({ ...specOk, limite: 999999 }).spec.limite).toBe(5000);
+  it("rejeita campo de período desconhecido", () => {
+    const r = validarSpec({ ...specOk, periodo: { campo: "campo_fake", de: "2026-03-01", ate: "2026-03-31" } });
+    expect(r.ok).toBe(false);
+    expect(r.erros.join(" ")).toContain("campo_fake");
+  });
+
+  it("cai back para campoData quando período.campo é ausente", () => {
+    const r = validarSpec({ ...specOk, periodo: { campo: undefined, de: "2026-03-01", ate: "2026-03-31" } });
+    expect(r.ok).toBe(true);
+    expect(r.spec.periodo.campo).toBe("dataAbertura");
+  });
+
+  it("rejeita período com datas invertidas", () => {
+    const r = validarSpec({ ...specOk, periodo: { campo: "dataAbertura", de: "2026-03-31", ate: "2026-03-01" } });
+    expect(r.ok).toBe(false);
+    expect(r.erros.join(" ")).toContain("data inicial");
   });
 
   it("descarta gráfico cujo eixo não está no agrupamento", () => {
@@ -90,10 +103,21 @@ describe("spec.validarSpec", () => {
     expect(r.spec.grafico).toBeNull();
   });
 
+  it("descarta gráfico cujas séries não estão no resultado", () => {
+    const r = validarSpec({ ...specOk, grafico: { tipo: "barra", eixoX: "tecnicoId", series: ["coluna_fantasma"] } });
+    expect(r.ok).toBe(true);
+    expect(r.spec.grafico).toBeNull();
+  });
+
   it("descarta ordenação por coluna que o resultado não terá", () => {
     const r = validarSpec({ ...specOk, ordenacao: { campo: "nao_existe", direcao: "asc" } });
     expect(r.ok).toBe(true);
     expect(r.spec.ordenacao).toBeNull();
+  });
+
+  it("normaliza limite ausente para 500 e corta acima de 5000", () => {
+    expect(validarSpec({ ...specOk, limite: undefined }).spec.limite).toBe(500);
+    expect(validarSpec({ ...specOk, limite: 999999 }).spec.limite).toBe(5000);
   });
 });
 
