@@ -39,6 +39,10 @@ function vazio(v) {
 // Converte para algo comparável de acordo com o tipo declarado no registry.
 export function valorComparavel(v, tipo) {
   if (tipo === "numero" || tipo === "moeda") {
+    // Number(null) e Number("") valem 0 — sem esta guarda um campo vazio
+    // viraria zero de verdade e matcharia filtros de comparação. A app
+    // escreve `null` para inputs numéricos limpos, então é um caso real.
+    if (v === null || v === undefined || v === "") return null;
     const n = Number(v);
     return isFinite(n) ? n : null;
   }
@@ -58,6 +62,8 @@ function comparaFiltro(valorItem, filtro, tipo) {
     return lista.includes(a);
   }
   if (op === "entre") {
+    // Se valor não for array de 2 elementos, retorna [null, null] que match ninguém.
+    // Isso é seguro: um range incompleto/inválido é melhor que um range aberto.
     const [ini, fim] = Array.isArray(valor) ? valor : [null, null];
     const vi = valorComparavel(ini, tipo);
     const vf = valorComparavel(fim, tipo);
