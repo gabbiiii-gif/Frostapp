@@ -96,6 +96,40 @@ describe("permissoes.hasPermission — registro legado sem snapshot", () => {
   });
 });
 
+describe("permissoes — caso real do backfill de 2026-08-06", () => {
+  // Registro da Isadora depois do backfill: gerente com permissão customizada,
+  // snapshot igual à lista concedida. Os módulos que nasceram depois (lembrete,
+  // relatorios) precisam cair no papel — era exatamente o que sumia da sidebar.
+  const isadoraPosBackfill = {
+    role: "gerente",
+    customPermissions: [
+      "agenda", "cadastro", "config", "dashboard", "financeiro",
+      "folha", "ia", "ponto", "pos-venda", "processos",
+    ],
+    permissionsKnownModules: [
+      "agenda", "cadastro", "config", "dashboard", "financeiro",
+      "folha", "ia", "ponto", "pos-venda", "processos",
+    ],
+  };
+
+  it("volta a enxergar Relatórios e Lembrete", () => {
+    expect(hasPermission(isadoraPosBackfill, "relatorios")).toBe(true);
+    expect(hasPermission(isadoraPosBackfill, "lembrete")).toBe(true);
+  });
+
+  it("mantém o que já tinha", () => {
+    for (const m of isadoraPosBackfill.customPermissions) {
+      expect(hasPermission(isadoraPosBackfill, m), m).toBe(true);
+    }
+  });
+
+  it("um técnico com o mesmo formato não herda módulo gerencial", () => {
+    const tecnico = { ...isadoraPosBackfill, role: "tecnico" };
+    expect(hasPermission(tecnico, "relatorios")).toBe(false);
+    expect(hasPermission(tecnico, "financeiro")).toBe(true); // estava na lista dele
+  });
+});
+
 describe("permissoes.montarPermissoesSalvas", () => {
   it("sem custom, zera os dois campos", () => {
     expect(montarPermissoesSalvas({ usarCustom: false, selecionados: ["x"], modulosAtuais: MODULOS_HOJE }))
