@@ -30,20 +30,6 @@
 --   contra a produção atual é no-op — nenhuma tabela existente é alterada.
 -- ============================================================================
 
--- ─── Schema private + helper usado em DEFAULTs de pos_venda_* ────────────────
--- A definição canônica destes helpers está no baseline de RLS
--- (20260728120000), com `create or replace`. Aqui criamos a versão mínima
--- necessária porque as tabelas abaixo têm DEFAULT private.user_company_id() e
--- o default precisa existir no momento do CREATE TABLE.
-create schema if not exists private;
-grant usage on schema private to anon, authenticated, service_role;
-
-create or replace function private.user_company_id()
-  returns text language sql stable security definer set search_path to 'public'
-as $$
-  select company_id from public.company_members where user_id = auth.uid() limit 1
-$$;
-
 -- ─── Empresas (tenant raiz) ─────────────────────────────────────────────────
 create table if not exists public.companies (
   id text not null,
@@ -92,6 +78,23 @@ create table if not exists public.company_members (
 alter table public.company_members enable row level security;
 create index if not exists idx_company_members_company on public.company_members using btree (company_id);
 create index if not exists idx_company_members_legacy on public.company_members using btree (legacy_user_id);
+
+-- ─── Schema private + helper usado em DEFAULTs de pos_venda_* ────────────────
+-- Precisa vir DEPOIS de company_members: funções `language sql` têm o corpo
+-- validado na criação (check_function_bodies), então criar o helper antes da
+-- tabela quebraria num banco vazio — exatamente o bug que esta migração fecha.
+-- A definição canônica destes helpers está no baseline de RLS
+-- (20260728120000), com `create or replace`; aqui vai a mínima necessária,
+-- porque as tabelas pos_venda_* têm DEFAULT private.user_company_id() e o
+-- default precisa existir no momento do CREATE TABLE.
+create schema if not exists private;
+grant usage on schema private to anon, authenticated, service_role;
+
+create or replace function private.user_company_id()
+  returns text language sql stable security definer set search_path to 'public'
+as $$
+  select company_id from public.company_members where user_id = auth.uid() limit 1
+$$;
 
 -- ─── kv_store — todo o dado do ERP (espelho do window.storage do app) ───────
 create table if not exists public.kv_store (
