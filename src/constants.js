@@ -33,13 +33,31 @@ export const STATUS_MAP = {
   nao_autorizada: { label: "Não autorizada", color: "bg-rose-700" },
 };
 
+// Status específicos do fluxo de Ordens de Serviço (OS). STATUS_MAP é um mapa
+// global compartilhado por múltiplos módulos (OS, Agenda, Cadastros, Financeiro).
+// Esta lista é a fonte única de verdade para quais status pertencem ao OS.
+// Qualquer novo status de OS deve ser adicionado aqui e em STATUS_MAP.
+export const STATUS_OS_KEYS = [
+  "aguardando",
+  "agendado",
+  "confirmado",
+  "em_deslocamento",
+  "em_execucao",
+  "em_servico",
+  "aguardando_finalizacao",
+  "finalizado",
+  "concluido",
+  "cancelado",
+  "nao_autorizada",
+];
+
 // Matriz de permissões por role — inclui módulo financeiro
 // Módulos novos:
 //   ponto  — Ponto Eletrônico (todos os usuários internos batem o próprio
 //            ponto; admin/gerente veem painel da equipe).
 export const ROLE_PERMISSIONS = {
   admin: ["all"],
-  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha", "pos-venda", "ponto", "lembrete"],
+  gerente: ["dashboard", "clientes", "funcionarios", "financeiro", "os", "agenda", "config", "ia", "folha", "pos-venda", "ponto", "lembrete", "relatorios"],
   tecnico: ["dashboard", "os", "agenda", "ponto"],
   atendente: ["dashboard", "clientes", "os", "agenda", "ia", "pos-venda", "ponto"],
   // Funcionário que SÓ bate ponto (motorista, ajudante, administrativo que não

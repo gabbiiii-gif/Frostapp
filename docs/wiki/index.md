@@ -15,6 +15,7 @@ Sempre lido primeiro em qualquer query. Mantenha sub-200 linhas.
 - [App do Técnico](modules/tecnico-mobile.md) — shell dedicado para `role=tecnico`; fluxo chegada→descrição+fotos→finalizar
 - [Pós-Venda](modules/pos-venda.md) — mensagens automáticas pós-OS via WhatsApp; dispatcher cron + Edge Function
 - [IA / Atendimento](modules/ia-atendimento.md) — agente WhatsApp, chat Realtime, aba Propostas de OS (aprovação humana)
+- [Relatórios](modules/relatorios.md) — motor genérico de análise: builder + pergunta em pt-BR, export CSV/PDF/WhatsApp
 
 ## Conceitos
 

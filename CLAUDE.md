@@ -96,6 +96,9 @@ Line numbers are approximate and drift on every edit. When in doubt, grep for th
 4. `financeiro` → `FinanceModule`
 5. `cadastro` → `CadastroModule`
 6. `config` → `SettingsModule` (admin only)
+7. `relatorios` → `RelatoriosModule` (`src/modules/RelatoriosModule.jsx`) — motor genérico de análise. Lógica pura em `src/lib/relatorios/` (registry de fontes, `ReportSpec` + validação, engine de agregação, CSV, HTML imprimível, relatórios salvos em `erp:relatorio:`), toda coberta por Vitest. Duas Edge Functions: `relatorio-nl` (pergunta pt-BR → `ReportSpec`) e `relatorio-whatsapp` (resumo + CSV via Evolution). Ver `docs/wiki/modules/relatorios.md`.
+
+> A lista acima está desatualizada em relação ao `navItems` real, que hoje inclui também `ia`, `pos-venda`, `folha`, `ponto` e `lembrete`. `navItems` e o bloco do `ModuleSwitcher` continuam sendo a fonte da verdade.
 
 Modules referenced in earlier versions of this file but **no longer in the codebase**: `InventoryModule` (merged into `CadastroModule`), `InvoiceModule` (replaced by HTML doc generators around line 4385–4910), `PDVModule`, `WebdeskModule`, `BankingModule`, `MessageCenter`. Don't reintroduce them by name without checking whether the use case is already covered elsewhere.
 
@@ -350,6 +353,8 @@ Pasta `supabase/functions/`. Deploy com `supabase functions deploy <nome>`.
 | `frost-handoff`          | false | Frost Fase 4 — tool: marca ai_conversations.status=handoff + notifica    |
 | `frost-update-birthday`  | false | Frost Fase 4 — tool: atualiza data_nascimento de cliente em kv_store (⚠️ prefixo kv_store provavelmente quebrado — ver wiki ia-atendimento) |
 | `frost-notify-approval`  | true  | Avisa o cliente por WhatsApp quando o atendente aprova a proposta de OS  |
+| `relatorio-nl`           | true  | Módulo Relatórios — traduz pergunta pt-BR em `ReportSpec` via Claude (só metadados; não calcula) |
+| `relatorio-whatsapp`     | true  | Módulo Relatórios — envia resumo + CSV do relatório pela instância Evolution da empresa |
 
 ### admin-create-user — provisionamento de usuário
 
