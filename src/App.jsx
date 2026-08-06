@@ -121,6 +121,8 @@ import PontoModule from "./modules/PontoModule.jsx";
 // Relatórios: motor genérico de análise sobre qualquer entidade do sistema.
 // A lógica pura (registry, spec, engine, CSV, HTML) mora em src/lib/relatorios/.
 import RelatoriosModule from "./modules/RelatoriosModule.jsx";
+// Permissões de módulo por usuário — regra pura, testada em permissoes.test.js.
+import { hasPermission, montarPermissoesSalvas, modulosNovosDesdeOSave } from "./lib/permissoes.js";
 // Catálogos de seed (serviços + produtos) são carregados sob demanda via dynamic
 // import dentro das funções de seed — evita inflar o bundle inicial com ~96KB
 // de JSON que só roda no primeiro boot do dispositivo.
@@ -137,7 +139,6 @@ import {
   isVideoUrl,
   COLORS,
   STATUS_MAP,
-  ROLE_PERMISSIONS,
   CATEGORIES_RECEITA,
   CATEGORIES_DESPESA,
   PAYMENT_METHODS,
@@ -1428,14 +1429,10 @@ const TOGGLEABLE_MODULES = [
 
 // hasPermission respeita customPermissions quando o array está definido (mesmo vazio,
 // permitindo que o admin restrinja totalmente um usuário). Caso contrário, cai no role.
-function hasPermission(user, module) {
-  if (!user || !user.role) return false;
-  if (Array.isArray(user.customPermissions)) {
-    return user.customPermissions.includes("all") || user.customPermissions.includes(module);
-  }
-  const perms = ROLE_PERMISSIONS[user.role] || [];
-  return perms.includes("all") || perms.includes(module);
-}
+// hasPermission mora em src/lib/permissoes.js (com teste). Ver o import no topo.
+// Ids dos módulos que existem HOJE — gravados junto das permissões customizadas
+// para distinguir "o admin desmarcou" de "o módulo nasceu depois do save".
+const ALL_MODULE_IDS = ALL_MODULES.map((m) => m.id);
 
 // "YYYY-MM-DD" no fuso LOCAL (getFullYear/Month/Date), não UTC. Evita que à
 // noite no Brasil (UTC-3) a data avance um dia (06/06 22h não pode virar 07/06).
@@ -12748,13 +12745,22 @@ function UserManagement({ currentUser, addToast }) {
     };
 
     if (editing) {
+      // Grava a seleção junto do snapshot dos módulos que existem hoje. Sem o
+      // snapshot, todo módulo criado depois deste save nasceria invisível para
+      // este usuário — era assim que "Relatórios" e "Lembrete" sumiam.
+      const permissoes = montarPermissoesSalvas({
+        usarCustom: form.useCustomPermissions,
+        selecionados: form.customPermissions,
+        modulosAtuais: ALL_MODULE_IDS,
+      });
       const updated = {
         ...editing,
         nome,
         email: emailNorm,
         role: form.role,
         status: form.status,
-        customPermissions: form.useCustomPermissions ? form.customPermissions : null,
+        customPermissions: permissoes.customPermissions,
+        permissionsKnownModules: permissoes.permissionsKnownModules,
         comissaoPercentual: comissaoNum,
         cargo: (form.role === "tecnico" || form.role === "ponto") ? form.cargo : (editing.cargo || null),
         updatedAt: new Date().toISOString(),
@@ -12770,7 +12776,7 @@ function UserManagement({ currentUser, addToast }) {
             nome,
             role: form.role,
             company_id: companyId,
-            custom_permissions: form.useCustomPermissions ? form.customPermissions : null,
+            custom_permissions: permissoes.customPermissions,
             comissao_percentual: comissaoNum,
             avatar: updated.avatar || nome.slice(0, 2).toUpperCase(),
           });
@@ -12788,6 +12794,29 @@ function UserManagement({ currentUser, addToast }) {
         updated.password = await hashPassword(form.password);
         // Invalida sessões antigas ao trocar senha
         updated.sessionTokenHash = null;
+      }
+      // Papel/permissões/status vão para company_members em TODA edição.
+      // Antes só subiam dentro do if (form.password) — e mesmo ali o modo
+      // update_password ignorava custom_permissions, então o member ficava
+      // congelado no valor da criação. Isso reaparece em device novo ou em
+      // convidado, cujo login lê o member quando não há registro local.
+      if (companyId) {
+        const r = await adminCreateUser({
+          mode: "update_member",
+          legacy_user_id: updated.id,
+          email: emailNorm,
+          nome,
+          role: form.role,
+          company_id: companyId,
+          custom_permissions: permissoes.customPermissions,
+          comissao_percentual: comissaoNum,
+          avatar: updated.avatar || nome.slice(0, 2).toUpperCase(),
+          status: form.status,
+        });
+        if (!r.ok) {
+          addToast(`Falha ao salvar permissões no servidor: ${r.error}`, "error");
+          return;
+        }
       }
       DB.set("erp:user:" + updated.id, updated);
       syncLinkedEmployee(updated.id);
@@ -13168,7 +13197,19 @@ function UserManagement({ currentUser, addToast }) {
             <p className="text-xs text-gray-400 mb-3">
               Quando ativado, o acesso é definido pelos módulos marcados abaixo, ignorando o papel.
               Se desativado, o usuário usa as permissões padrão do papel selecionado.
+              Módulos criados depois desta edição seguem o papel até você revisar aqui.
             </p>
+            {/* Aviso quando o usuário foi salvo antes de módulos novos existirem:
+                até o admin revisar, esses módulos seguem a regra do papel. */}
+            {editing && modulosNovosDesdeOSave(editing, ALL_MODULE_IDS).length > 0 && (
+              <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 mb-3">
+                Criados depois da última edição deste usuário:{" "}
+                {modulosNovosDesdeOSave(editing, ALL_MODULE_IDS)
+                  .map((id) => ALL_MODULES.find((m) => m.id === id)?.label || id)
+                  .join(", ")}
+                . Enquanto não forem marcados aqui, valem as permissões do papel.
+              </p>
+            )}
             <div className={`grid grid-cols-2 md:grid-cols-3 gap-2 ${form.useCustomPermissions ? "" : "opacity-40 pointer-events-none"}`}>
               {ALL_MODULES.map((m) => (
                 <label key={m.id} className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer hover:text-white">

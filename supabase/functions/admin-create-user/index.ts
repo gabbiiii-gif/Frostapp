@@ -18,10 +18,10 @@
 //
 // Payload (POST JSON):
 //   {
-//     mode: "create" | "update_password" | "invite",
+//     mode: "create" | "update_password" | "invite" | "update_member",
 //     legacy_user_id: string,        // id do erp:user no kv_store
 //     email: string,
-//     password: string,              // ignorado em mode=invite
+//     password: string,              // ignorado em mode=invite e update_member
 //     nome: string,
 //     role: "admin" | "gerente" | "tecnico" | "atendente",
 //     company_id: string,            // empresa alvo
@@ -103,7 +103,9 @@ Deno.serve(async (req: Request) => {
   // Critérios alinhados com validatePasswordStrength do client (src/utils.js):
   // 12+ chars, maiúscula, minúscula, número, símbolo, sem espaço. Antes só
   // checava length>=8, permitindo admin bypassar validação da UI.
-  if (mode !== "invite") {
+  // update_member só mexe em company_members (papel/permissões/status), sem
+  // tocar em credencial — por isso não exige senha, igual ao invite.
+  if (mode !== "invite" && mode !== "update_member") {
     if (!password) return json({ ok: false, error: "missing_fields" }, 400);
     const reasons: string[] = [];
     if (password.length < 12) reasons.push("min_12_chars");
@@ -137,6 +139,53 @@ Deno.serve(async (req: Request) => {
   }
   if (!callerMember.is_super_admin && !["admin", "gerente"].includes(callerMember.role)) {
     return json({ ok: false, error: "forbidden_role" }, 403);
+  }
+
+  // ─── update_member: papel, permissões, status e comissão ───────────────────
+  // Sem esta rota, editar permissões de um usuário existente só gravava no
+  // kv_store local: company_members ficava congelado no valor da criação, e
+  // reaparecia em device novo (o login lê o member quando não há registro local).
+  if (mode === "update_member") {
+    const patch: Record<string, unknown> = {
+      role,
+      custom_permissions: customPermissions,
+      comissao_percentual: comissaoPercentual,
+    };
+    if (nome) patch.nome = nome;
+    if (avatar) patch.avatar = avatar;
+    if (body.status) patch.status = String(body.status);
+
+    // Localiza a linha por legacy_user_id (id do registro local) dentro da
+    // empresa; cai no email→auth.users se o vínculo legado não existir.
+    let query = admin.from("company_members").update(patch).eq("company_id", companyId);
+    if (legacyUserId) {
+      query = query.eq("legacy_user_id", legacyUserId);
+    } else {
+      const PER_PAGE = 200;
+      let target: { id: string; email: string | null } | undefined;
+      for (let page = 1; page <= 50 && !target; page++) {
+        const { data: lista, error: lookupErr } = await admin.auth.admin
+          .listUsers({ page, perPage: PER_PAGE });
+        if (lookupErr) {
+          console.error("admin-create-user update_member listUsers:", lookupErr.message);
+          return json({ ok: false, error: "internal" }, 500);
+        }
+        const users = lista?.users || [];
+        target = users.find((u) => (u.email || "").toLowerCase() === email);
+        if (users.length < PER_PAGE) break;
+      }
+      if (!target) return json({ ok: false, error: "auth_user_not_found" }, 404);
+      query = query.eq("user_id", target.id);
+    }
+
+    const { data: atualizados, error: updErr } = await query.select("user_id");
+    if (updErr) {
+      console.error("admin-create-user update_member:", updErr.message);
+      return json({ ok: false, error: updErr.message }, 400);
+    }
+    // Nenhuma linha afetada = usuário só existe localmente (nunca provisionado).
+    // Não é erro: o registro local já foi salvo pelo cliente.
+    return json({ ok: true, updated: (atualizados || []).length });
   }
 
   if (mode === "update_password") {
