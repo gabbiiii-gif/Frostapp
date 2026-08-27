@@ -13,7 +13,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run preview` — Preview production build locally
 - `npm run test` — Run Vitest test suite (one-shot)
 - `npm run test:watch` — Vitest in watch mode
-- No linter is configured.
+- `npm run lint` — ESLint em `src/` e `api/`
+- `npm run sb:login` — autentica o Supabase CLI (interativo, abre o browser). Necessário uma vez por máquina antes de qualquer deploy de Edge Function.
+- `npm run deploy:webhook` — deploy da `whatsapp-webhook` (project ref já embutido, `--no-verify-jwt`)
+- `npm run deploy:fn -- <nome>` — deploy de qualquer outra Edge Function
+
+> O CLI do Supabase é devDependency do projeto (`supabase`), então não precisa de instalação global — `npm ci` já traz.
 
 ## Tech Stack
 
