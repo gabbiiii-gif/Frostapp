@@ -171,6 +171,73 @@ export function validateOSProposal(input) {
   return { valid: missing.length === 0, missing, payload };
 }
 
+// ─── Equipe de técnicos da OS ────────────────────────────────────────────────
+// Uma OS pode ter mais de um técnico. O modelo guarda a equipe em `os.tecnicos`
+// ([{id, nome}]) e mantém `tecnicoId`/`tecnicoNome` apontando para o PRIMEIRO
+// (o responsável) — assim as 83 OS já existentes, o feed iCal, o email de OS
+// criada e os documentos impressos continuam funcionando sem migração.
+//
+// Sempre leia a equipe por aqui, nunca direto do campo: OS antiga não tem
+// `tecnicos`, e este helper devolve a equipe de um jeito só para os dois casos.
+export function osTecnicos(os) {
+  const o = os || {};
+  const lista = Array.isArray(o.tecnicos) ? o.tecnicos : [];
+  const limpos = lista
+    .filter((t) => t && (t.id || t.nome))
+    .map((t) => ({ id: String(t.id || ""), nome: String(t.nome || "").trim() }));
+  if (limpos.length) return dedupTecnicos(limpos);
+  // OS legada: um técnico só, nos campos antigos.
+  if (o.tecnicoId || (o.tecnicoNome && o.tecnicoNome !== "—")) {
+    return [{ id: String(o.tecnicoId || ""), nome: String(o.tecnicoNome || "").trim() }];
+  }
+  return [];
+}
+
+// Remove repetidos preferindo o id; sem id, cai no nome.
+function dedupTecnicos(lista) {
+  const vistos = new Set();
+  const out = [];
+  for (const t of lista) {
+    const chave = t.id || `nome:${t.nome.toLowerCase()}`;
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    out.push(t);
+  }
+  return out;
+}
+
+// "Ana Paula, Beto" — para tabela, documento e busca. "—" quando não há equipe.
+export function osTecnicoNomes(os) {
+  const nomes = osTecnicos(os).map((t) => t.nome).filter(Boolean);
+  return nomes.length ? nomes.join(", ") : "—";
+}
+
+// Este técnico está na OS? Casa por id e, como rede de segurança, por nome —
+// o app do técnico compara o login com a OS, e base antiga tem OS gravada só
+// com o nome.
+export function osTemTecnico(os, tecnicoId, tecnicoNome) {
+  const id = String(tecnicoId || "");
+  const nome = String(tecnicoNome || "").trim().toLowerCase();
+  return osTecnicos(os).some(
+    (t) => (id && t.id === id) || (nome && t.nome.toLowerCase() === nome),
+  );
+}
+
+// Campos de gravação da OS a partir de uma equipe. Mantém os campos antigos
+// sincronizados com o responsável (o primeiro da lista).
+export function camposTecnicos(equipe) {
+  const lista = dedupTecnicos(
+    (Array.isArray(equipe) ? equipe : [])
+      .filter((t) => t && (t.id || t.nome))
+      .map((t) => ({ id: String(t.id || ""), nome: String(t.nome || "").trim() })),
+  );
+  return {
+    tecnicos: lista,
+    tecnicoId: lista[0]?.id || "",
+    tecnicoNome: lista[0]?.nome || "—",
+  };
+}
+
 // Casa um termo de busca contra um campo de documento/telefone comparando só os
 // dígitos ("(11) 98765-4321" casa com "98765").
 //

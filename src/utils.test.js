@@ -25,6 +25,10 @@ import {
   vencimentoNoMes,
   mesesAMaterializar,
   matchDigitos,
+  osTecnicos,
+  osTecnicoNomes,
+  osTemTecnico,
+  camposTecnicos,
 } from './utils.js';
 
 describe('genId', () => {
@@ -526,5 +530,63 @@ describe("matchDigitos", () => {
     expect(matchDigitos(null, "123")).toBe(false);
     expect(matchDigitos(undefined, "123")).toBe(false);
     expect(matchDigitos("123", null)).toBe(false);
+  });
+});
+
+describe("equipe de técnicos da OS", () => {
+  it("OS legada (só tecnicoId/tecnicoNome) vira equipe de um", () => {
+    const os = { tecnicoId: "t1", tecnicoNome: "Ana" };
+    expect(osTecnicos(os)).toEqual([{ id: "t1", nome: "Ana" }]);
+  });
+
+  it("OS sem técnico devolve equipe vazia", () => {
+    expect(osTecnicos({})).toEqual([]);
+    expect(osTecnicos({ tecnicoId: "", tecnicoNome: "—" })).toEqual([]);
+    expect(osTecnicos(null)).toEqual([]);
+  });
+
+  it("OS nova usa o array tecnicos", () => {
+    const os = { tecnicos: [{ id: "t1", nome: "Ana" }, { id: "t2", nome: "Beto" }] };
+    expect(osTecnicos(os)).toHaveLength(2);
+  });
+
+  it("o array novo tem precedência sobre os campos antigos", () => {
+    const os = { tecnicoId: "t1", tecnicoNome: "Ana", tecnicos: [{ id: "t2", nome: "Beto" }] };
+    expect(osTecnicos(os)).toEqual([{ id: "t2", nome: "Beto" }]);
+  });
+
+  it("remove técnico repetido", () => {
+    const os = { tecnicos: [{ id: "t1", nome: "Ana" }, { id: "t1", nome: "Ana" }] };
+    expect(osTecnicos(os)).toHaveLength(1);
+  });
+
+  it("nomes juntos para tabela e documento", () => {
+    expect(osTecnicoNomes({ tecnicos: [{ id: "1", nome: "Ana" }, { id: "2", nome: "Beto" }] })).toBe("Ana, Beto");
+    expect(osTecnicoNomes({})).toBe("—");
+  });
+
+  it("osTemTecnico acha qualquer um da equipe, não só o responsável", () => {
+    const os = { tecnicos: [{ id: "t1", nome: "Ana" }, { id: "t2", nome: "Beto" }] };
+    expect(osTemTecnico(os, "t1")).toBe(true);
+    expect(osTemTecnico(os, "t2")).toBe(true); // o segundo também vê a OS no app
+    expect(osTemTecnico(os, "t9")).toBe(false);
+  });
+
+  it("osTemTecnico casa por nome quando a OS antiga não tem id", () => {
+    expect(osTemTecnico({ tecnicoNome: "Ana" }, "", "ana")).toBe(true);
+  });
+
+  it("camposTecnicos mantém os campos antigos apontando pro responsável", () => {
+    const r = camposTecnicos([{ id: "t1", nome: "Ana" }, { id: "t2", nome: "Beto" }]);
+    expect(r.tecnicoId).toBe("t1");
+    expect(r.tecnicoNome).toBe("Ana");
+    expect(r.tecnicos).toHaveLength(2);
+  });
+
+  it("camposTecnicos com equipe vazia limpa os campos", () => {
+    const r = camposTecnicos([]);
+    expect(r.tecnicoId).toBe("");
+    expect(r.tecnicoNome).toBe("—");
+    expect(r.tecnicos).toEqual([]);
   });
 });

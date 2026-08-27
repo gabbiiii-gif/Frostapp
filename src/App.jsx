@@ -19,7 +19,7 @@ import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
 import SignaturePad from "./SignaturePad.jsx";
-import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength, passwordChecklist, splitParcelas, addMonthsKeepDay, monthKey, vencimentoNoMes, mesesAMaterializar, matchDigitos } from "./utils.js";
+import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength, passwordChecklist, splitParcelas, addMonthsKeepDay, monthKey, vencimentoNoMes, mesesAMaterializar, matchDigitos, osTecnicos, osTecnicoNomes, osTemTecnico, camposTecnicos } from "./utils.js";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
 // Geração de PDF client-side dos documentos de OS/orçamento para envio via WhatsApp
@@ -2330,6 +2330,83 @@ function SearchInput({ value, onChange, placeholder = "Buscar..." }) {
  * `searchText` é opcional — quando presente, é incluído no match (útil
  * para procurar cliente por CPF/telefone, p.ex.).
  */
+// Seletor de EQUIPE de técnicos (OS e Agenda). Uma OS/agendamento pode ter mais
+// de um técnico; o primeiro da lista é o responsável e é ele que alimenta os
+// campos antigos `tecnicoId`/`tecnicoNome` (ver camposTecnicos em utils.js).
+//
+// `value` é [{id, nome}]. Mostra a equipe como chips removíveis e um Combobox
+// que só oferece quem ainda não está na lista.
+function TecnicosPicker({ value, onChange, tecnicos, placeholder = "Adicionar técnico..." }) {
+  const equipe = Array.isArray(value) ? value : [];
+  const jaEscolhidos = new Set(equipe.map((t) => t.id).filter(Boolean));
+  const disponiveis = (tecnicos || []).filter((t) => !jaEscolhidos.has(t.id));
+
+  const adicionar = (id) => {
+    if (!id) return;
+    const t = (tecnicos || []).find((x) => x.id === id);
+    if (!t) return;
+    onChange([...equipe, { id: t.id, nome: t.nome }]);
+  };
+  const remover = (id) => onChange(equipe.filter((t) => t.id !== id));
+  // O responsável é o primeiro: promover é mover pro topo, sem reordenar o resto.
+  const promover = (id) => {
+    const alvo = equipe.find((t) => t.id === id);
+    if (!alvo) return;
+    onChange([alvo, ...equipe.filter((t) => t.id !== id)]);
+  };
+
+  return (
+    <div className="space-y-2">
+      {equipe.length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {equipe.map((t, i) => (
+            <span
+              key={t.id || t.nome}
+              className={`inline-flex items-center gap-1.5 pl-2.5 pr-1.5 py-1 rounded-full text-xs border ${
+                i === 0
+                  ? "bg-cyan-500/15 border-cyan-500/40 text-cyan-200"
+                  : "bg-gray-700 border-gray-600 text-gray-200"
+              }`}
+            >
+              {i === 0 && <span title="Responsável pela OS">★</span>}
+              {t.nome || "Técnico"}
+              {i !== 0 && (
+                <button
+                  type="button"
+                  onClick={() => promover(t.id)}
+                  title="Tornar responsável"
+                  className="text-gray-400 hover:text-cyan-300"
+                >
+                  ★
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => remover(t.id)}
+                title="Remover da equipe"
+                className="w-4 h-4 rounded-full hover:bg-white/15 text-gray-400 hover:text-white leading-none"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <Combobox
+        value=""
+        onChange={adicionar}
+        options={disponiveis.map((t) => ({
+          value: t.id,
+          label: t.nome,
+          searchText: `${t.email || ""} ${t.telefone || ""}`,
+        }))}
+        placeholder={equipe.length ? placeholder : "Buscar técnico..."}
+        showEmpty={false}
+      />
+    </div>
+  );
+}
+
 function Combobox({
   value,
   onChange,
@@ -8242,7 +8319,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
     servicos: [{ ...emptyServico }],
     pecas: [],
     // Equipamento agora vive dentro de cada serviço (não mais no nível da OS).
-    tecnicoId: "", dataAgendada: toISODate(new Date()), horaAgendada: "08:00", observacoes: "",
+    tecnicos: [], dataAgendada: toISODate(new Date()), horaAgendada: "08:00", observacoes: "",
     // Desconto sobre o total da OS — descontoTipo: "valor" (R$) ou "percentual" (%).
     descontoTipo: "valor", descontoValor: "",
   };
@@ -8313,11 +8390,11 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
 
     // Technician can only see their own
     if (user.role === "tecnico") {
-      list = list.filter((os) => os.tecnicoId === user.id || os.tecnicoNome === user.nome);
+      list = list.filter((os) => osTemTecnico(os, user.id, user.nome));
     }
 
     if (filterStatus !== "all") list = list.filter((os) => os.status === filterStatus);
-    if (filterTecnico !== "all") list = list.filter((os) => os.tecnicoId === filterTecnico);
+    if (filterTecnico !== "all") list = list.filter((os) => osTemTecnico(os, filterTecnico));
     if (filterCliente !== "all") list = list.filter((os) => os.clienteId === filterCliente);
     if (search.trim()) {
       const s = search.toLowerCase();
@@ -8326,7 +8403,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
           (os.numero || "").toLowerCase().includes(s) ||
           (os.clienteNome || "").toLowerCase().includes(s) ||
           (os.tipo || "").toLowerCase().includes(s) ||
-          (os.tecnicoNome || "").toLowerCase().includes(s)
+          osTecnicoNomes(os).toLowerCase().includes(s)
       );
     }
     return list.sort((a, b) => new Date(b.dataAbertura) - new Date(a.dataAbertura));
@@ -8395,7 +8472,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
       endereco: row.endereco || "",
       servicos,
       pecas,
-      tecnicoId: row.tecnicoId || "",
+      tecnicos: osTecnicos(row),
       dataAgendada: row.dataAgendada ? row.dataAgendada.split("T")[0] : toISODate(new Date()),
       horaAgendada: row.horaAgendada || "08:00",
       observacoes: row.observacoes || "",
@@ -8478,7 +8555,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
     }
 
     const cliente = (allClients || []).find((c) => c.id === form.clienteId);
-    const tecnico = tecnicos.find((t) => t.id === form.tecnicoId);
+    // Equipe da OS: os campos antigos (tecnicoId/tecnicoNome) seguem apontando
+    // pro responsável, então iCal, email de OS criada e documentos impressos
+    // continuam funcionando sem migração.
+    const equipe = camposTecnicos(form.tecnicos);
     // Subtotal da OS = soma dos serviços (valor × qtd) + soma das peças (qtd × valorUnit).
     // O total final (campo `valor`) já vem com o desconto abatido.
     const totalServicos = servicosLimpos.reduce((acc, s) => acc + s.valor * (s.quantidade || 1), 0);
@@ -8521,8 +8601,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
         equipamentoModelo: formEquipModelo,
         equipamentoCapacidade: equipCapacidade,
         equipamentoBTUs: equipBTUs,
-        tecnicoId: form.tecnicoId,
-        tecnicoNome: tecnico?.nome || "—",
+        ...equipe,
         dataAgendada: form.dataAgendada + "T00:00:00.000Z",
         horaAgendada: form.horaAgendada || "",
         observacoes: form.observacoes,
@@ -8558,8 +8637,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
         equipamentoModelo: formEquipModelo,
         equipamentoCapacidade: equipCapacidade,
         equipamentoBTUs: equipBTUs,
-        tecnicoId: form.tecnicoId,
-        tecnicoNome: tecnico?.nome || "—",
+        ...equipe,
         status: "aguardando",
         dataAbertura: new Date().toISOString(),
         dataAgendada: form.dataAgendada + "T00:00:00.000Z",
@@ -8769,7 +8847,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
         return row.tipo || "—";
       },
     },
-    { key: "tecnicoNome", label: "Técnico" },
+    { key: "tecnicoNome", label: "Técnicos", render: (row) => osTecnicoNomes(row) },
     {
       key: "status", label: "Status",
       render: (v) => (
@@ -9498,17 +9576,14 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Técnico</label>
-              <Combobox
-                value={form.tecnicoId}
-                onChange={(v) => setForm({ ...form, tecnicoId: v })}
-                options={tecnicos.map((t) => ({
-                  value: t.id,
-                  label: t.nome,
-                  searchText: `${t.email || ""} ${t.telefone || ""}`,
-                }))}
-                placeholder="Buscar técnico..."
-                emptyLabel="— Sem técnico —"
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                Técnicos
+                <span className="ml-1 font-normal text-gray-500">(★ = responsável)</span>
+              </label>
+              <TecnicosPicker
+                value={form.tecnicos}
+                onChange={(v) => setForm({ ...form, tecnicos: v })}
+                tecnicos={tecnicos}
               />
             </div>
             <div>
@@ -9713,7 +9788,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
             <div className="grid grid-cols-2 gap-3 text-sm">
               <div className="bg-gray-800 rounded-lg p-3">
                 <div className="text-xs text-gray-400">Técnico</div>
-                <div className="font-semibold">{reviewing.tecnicoNome}</div>
+                <div className="font-semibold">{osTecnicoNomes(reviewing)}</div>
               </div>
               <div className="bg-gray-800 rounded-lg p-3">
                 <div className="text-xs text-gray-400">Equipamento</div>
@@ -9940,7 +10015,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
     horaInicio: "08:00",
     horaFim: "10:00",
     clienteId: "",
-    tecnicoId: "",
+    tecnicos: [],
     tipo: "Manutenção",
     endereco: "",
     observacoes: "",
@@ -10059,7 +10134,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
       horaInicio: startTime,
       horaFim: endTime,
       clienteId: appt.clienteId || "",
-      tecnicoId: appt.tecnicoId || "",
+      tecnicos: osTecnicos(appt),
       tipo: appt.tipo || "Manutenção",
       endereco: appt.endereco || "",
       observacoes: appt.observacoes || "",
@@ -10068,7 +10143,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
   }, []);
 
   const handleSave = useCallback(() => {
-    if (!form.data || !form.horaInicio || !form.horaFim || !form.clienteId || !form.tecnicoId) {
+    if (!form.data || !form.horaInicio || !form.horaFim || !form.clienteId || !(form.tecnicos || []).length) {
       addToast("Preencha todos os campos obrigatórios.", "error");
       return;
     }
@@ -10082,10 +10157,12 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
       return;
     }
 
-    // Detecção de conflito considera agendamentos E OS do mesmo técnico
+    // Conflito considera agendamentos E OS de QUALQUER técnico da equipe: se um
+    // dos escalados já está ocupado no horário, o agendamento não fecha.
+    const idsEquipe = (form.tecnicos || []).map((t) => t.id).filter(Boolean);
     const conflicts = allItems.filter((a) => {
       if (editing && a.id === editing.id) return false;
-      if (a.tecnicoId !== form.tecnicoId) return false;
+      if (!idsEquipe.some((id) => osTemTecnico(a, id))) return false;
       if (a.status === "cancelado") return false;
       const aStart = new Date(a.data);
       const aEnd = new Date(a.dataFim);
@@ -10094,15 +10171,25 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
 
     if (conflicts.length > 0) {
       const hasOS = conflicts.some((c) => c.origem === "os");
-      addToast(hasOS
-        ? "Conflito de horário! Técnico já possui uma OS nesse período."
-        : "Conflito de horário! Técnico já possui agendamento nesse período.",
-        "error");
+      // Com equipe, dizer QUEM está ocupado evita o vaivém de tirar um a um.
+      const ocupados = [...new Set(
+        (form.tecnicos || [])
+          .filter((t) => conflicts.some((c) => osTemTecnico(c, t.id)))
+          .map((t) => t.nome)
+          .filter(Boolean),
+      )].join(", ");
+      addToast(
+        `Conflito de horário! ${ocupados || "Técnico"} já ${hasOS ? "tem uma OS" : "tem agendamento"} nesse período.`,
+        "error",
+      );
       return;
     }
 
     const cliente = (allClients || []).find((c) => c.id === form.clienteId);
-    const tecnico = tecnicos.find((t) => t.id === form.tecnicoId);
+    // Equipe da OS: os campos antigos (tecnicoId/tecnicoNome) seguem apontando
+    // pro responsável, então iCal, email de OS criada e documentos impressos
+    // continuam funcionando sem migração.
+    const equipe = camposTecnicos(form.tecnicos);
 
     if (editing) {
       const updated = {
@@ -10112,8 +10199,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
         dataFim: `${form.data}T${form.horaFim}:00`,
         clienteId: form.clienteId,
         clienteNome: cliente?.nome || "—",
-        tecnicoId: form.tecnicoId,
-        tecnicoNome: tecnico?.nome || "—",
+        ...equipe,
         tipo: form.tipo,
         endereco: form.endereco,
         observacoes: form.observacoes,
@@ -10129,8 +10215,7 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
         dataFim: `${form.data}T${form.horaFim}:00`,
         clienteId: form.clienteId,
         clienteNome: cliente?.nome || "—",
-        tecnicoId: form.tecnicoId,
-        tecnicoNome: tecnico?.nome || "—",
+        ...equipe,
         tipo: form.tipo,
         endereco: form.endereco || (cliente?.endereco ? `${cliente.endereco.rua}, ${cliente.endereco.bairro}` : ""),
         status: "agendado",
@@ -10493,17 +10578,14 @@ function ScheduleModule({ user, dateFilter, addToast, clients, employees, onNavi
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-300 mb-1.5">Técnico *</label>
-              <Combobox
-                value={form.tecnicoId}
-                onChange={(v) => setForm({ ...form, tecnicoId: v })}
-                options={tecnicos.map((t) => ({
-                  value: t.id,
-                  label: t.nome,
-                  searchText: `${t.email || ""} ${t.telefone || ""}`,
-                }))}
-                placeholder="Buscar técnico..."
-                emptyLabel="— Nenhum técnico —"
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                Técnicos *
+                <span className="ml-1 font-normal text-gray-500">(★ = responsável)</span>
+              </label>
+              <TecnicosPicker
+                value={form.tecnicos}
+                onChange={(v) => setForm({ ...form, tecnicos: v })}
+                tecnicos={tecnicos}
               />
             </div>
           </div>
@@ -15187,17 +15269,28 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
       return Number.isFinite(t) && t >= inicio && t < fim;
     });
 
-    // Agrupa por tecnicoId
+    // Agrupa por técnico. Com equipe, a OS entra na conta de CADA um dos
+    // escalados — os dois trabalharam nela.
+    //
+    // O valor, porém, é RATEADO em partes iguais: creditar o total cheio a cada
+    // técnico faria a soma da tela ficar maior que o faturamento real. Rateando,
+    // a soma das colunas continua batendo com o caixa.
     const agrupado = {};
     filtradas.forEach((os) => {
-      const tid = os.tecnicoId || "sem_tecnico";
+      const equipe = osTecnicos(os);
+      const membros = equipe.length ? equipe : [{ id: "", nome: "" }];
+      const valorOS = Number(os.valorTotal || os.valor || 0);
+      const valorPorTecnico = valorOS / membros.length;
+      membros.forEach((membro) => {
+      const tid = membro.id || "sem_tecnico";
       if (!agrupado[tid]) {
         agrupado[tid] = {
           tecnicoId: tid,
-          nome: os.tecnicoNome || "Sem técnico",
+          nome: membro.nome || "Sem técnico",
           total: 0,
           tempoTotalMs: 0,
           comTempo: 0, // quantas OS têm chegada+saída (base da média de tempo)
+          comEquipe: 0, // quantas foram feitas em dupla/equipe (valor rateado)
           valorTotal: 0,
           ordens: [],
         };
@@ -15212,8 +15305,9 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
         grupo.tempoTotalMs += new Date(os.tecnico.saida) - new Date(os.tecnico.chegada);
         grupo.comTempo += 1;
       }
-      // Soma valor cobrado (campo valorTotal ou valor da OS)
-      grupo.valorTotal += Number(os.valorTotal || os.valor || 0);
+      grupo.valorTotal += valorPorTecnico;
+      if (membros.length > 1) grupo.comEquipe += 1;
+      });
     });
 
     return Object.values(agrupado).sort((a, b) => b.total - a.total);
@@ -15227,7 +15321,9 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
     return h > 0 ? `${h}h ${m}min` : `${m}min`;
   };
 
-  const totalGeral = stats.reduce((sum, s) => sum + s.total, 0);
+  // OS DISTINTAS: somar `total` de cada técnico contaria duas vezes a OS feita
+  // em dupla. O valor pode somar direto, porque já vem rateado.
+  const totalGeral = new Set(stats.flatMap((s) => s.ordens.map((o) => o.id))).size;
   const valorGeral = stats.reduce((sum, s) => sum + s.valorTotal, 0);
 
   return (
@@ -15269,6 +15365,9 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
                       {formatDuracao(s.comTempo > 0 ? s.tempoTotalMs / s.comTempo : 0)}
                       {s.comTempo === 0 && (
                         <span className="text-gray-600"> (sem registro de chegada/saída)</span>
+                      )}
+                      {s.comEquipe > 0 && (
+                        <span className="text-gray-600"> • {s.comEquipe} em equipe (valor rateado)</span>
                       )}
                     </div>
                   </div>
@@ -16637,7 +16736,7 @@ function TecnicoMobileApp({ user, onLogout, addToast, theme, setTheme }) {
   useEffect(() => {
     const all = DB.list("erp:os:");
     const minhas = all.filter(
-      (os) => os.tecnicoId === user.id || os.tecnicoNome === user.nome
+      (os) => osTemTecnico(os, user.id, user.nome)
     );
     setOrders(minhas);
   }, [user.id, user.nome, reload]);
@@ -17639,7 +17738,7 @@ export default function App() {
       const dataAg = os.dataAgendada || os.dataPrevista;
       if (!dataAg) return;
       // Só notifica se o técnico for o assigned (ou se for admin/gerente)
-      const isMyOS = isAdmin || (isTecnico && os.tecnicoId === user.id);
+      const isMyOS = isAdmin || (isTecnico && osTemTecnico(os, user.id, user.nome));
       if (!isMyOS) return;
       if (dataAg === tomorrowStr) {
         alerts.push({
@@ -17898,7 +17997,7 @@ export default function App() {
     if (!user || user.role !== "tecnico") return;
     if (!isNative()) return;
     const minhasOS = (data.services || []).filter((os) =>
-      os.tecnicoId === user.id &&
+      osTemTecnico(os, user.id, user.nome) &&
       (os.status === "agendada" || os.status === "pendente" || os.status === "aguardando") &&
       (os.dataAgendada || os.dataPrevista)
     );
