@@ -24,6 +24,7 @@ import {
   monthKey,
   vencimentoNoMes,
   mesesAMaterializar,
+  matchDigitos,
 } from './utils.js';
 
 describe('genId', () => {
@@ -495,5 +496,35 @@ describe("mesesAMaterializar", () => {
 
   it("mês atual anterior ao início retorna vazio", () => {
     expect(mesesAMaterializar("2026-07", "2026-05", [])).toEqual([]);
+  });
+});
+
+describe("matchDigitos", () => {
+  it("casa telefone mascarado pelos dígitos", () => {
+    expect(matchDigitos("(11) 98765-4321", "98765")).toBe(true);
+    expect(matchDigitos("(11) 98765-4321", "(11) 9876")).toBe(true);
+  });
+
+  it("casa CPF com e sem pontuação", () => {
+    expect(matchDigitos("123.456.789-00", "12345678900")).toBe(true);
+    expect(matchDigitos("123.456.789-00", "456")).toBe(true);
+  });
+
+  it("não casa quando os dígitos não batem", () => {
+    expect(matchDigitos("(11) 98765-4321", "55555")).toBe(false);
+  });
+
+  it("termo SEM dígito nenhum não casa — era o bug que quebrava a busca inteira", () => {
+    // "".includes("") é true em JS: sem a guarda, buscar "maria" casava com
+    // todo registro pelo campo de CPF/telefone e a lista não filtrava nada.
+    expect(matchDigitos("123.456.789-00", "maria")).toBe(false);
+    expect(matchDigitos("123.456.789-00", "")).toBe(false);
+    expect(matchDigitos("", "")).toBe(false);
+  });
+
+  it("tolera campo nulo/indefinido", () => {
+    expect(matchDigitos(null, "123")).toBe(false);
+    expect(matchDigitos(undefined, "123")).toBe(false);
+    expect(matchDigitos("123", null)).toBe(false);
   });
 });

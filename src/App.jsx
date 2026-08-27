@@ -19,7 +19,7 @@ import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
 import SignaturePad from "./SignaturePad.jsx";
-import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength, passwordChecklist, splitParcelas, addMonthsKeepDay, monthKey, vencimentoNoMes, mesesAMaterializar } from "./utils.js";
+import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength, passwordChecklist, splitParcelas, addMonthsKeepDay, monthKey, vencimentoNoMes, mesesAMaterializar, matchDigitos } from "./utils.js";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
 // Geração de PDF client-side dos documentos de OS/orçamento para envio via WhatsApp
@@ -10644,31 +10644,33 @@ function CadastroModule({ user, addToast, reloadData }) {
   const [movForm, setMovForm] = useState({ tipo: "entrada", quantidade: "", motivo: "", data: toISODate(new Date()) });
 
   // ─── Filtered lists ───
+  // `[...lista].sort()` e não `lista.sort()`: sort ordena NO LUGAR e estava
+  // mutando o array de estado a cada busca.
+  const porNome = (a, b) => (a.nome || "").localeCompare(b.nome || "");
+
   const filteredClients = useMemo(() => {
-    if (!search.trim()) return clients.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+    const ordenados = [...clients].sort(porNome);
+    if (!search.trim()) return ordenados;
     const s = search.toLowerCase();
-    return clients
-      .filter(
-        (c) =>
-          (c.nome || "").toLowerCase().includes(s) ||
-          (c.cpf || "").replace(/\D/g, "").includes(s.replace(/\D/g, "")) ||
-          (c.cnpj || "").replace(/\D/g, "").includes(s.replace(/\D/g, "")) ||
-          (c.telefone || "").replace(/\D/g, "").includes(s.replace(/\D/g, ""))
-      )
-      .sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+    return ordenados.filter(
+      (c) =>
+        (c.nome || "").toLowerCase().includes(s) ||
+        matchDigitos(c.cpf, s) ||
+        matchDigitos(c.cnpj, s) ||
+        matchDigitos(c.telefone, s)
+    );
   }, [clients, search]);
 
   const filteredEmployees = useMemo(() => {
-    if (!search.trim()) return employees.sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+    const ordenados = [...employees].sort(porNome);
+    if (!search.trim()) return ordenados;
     const s = search.toLowerCase();
-    return employees
-      .filter(
-        (e) =>
-          (e.nome || "").toLowerCase().includes(s) ||
-          (e.cpf || "").replace(/\D/g, "").includes(s.replace(/\D/g, "")) ||
-          (e.cargo || "").toLowerCase().includes(s)
-      )
-      .sort((a, b) => (a.nome || "").localeCompare(b.nome || ""));
+    return ordenados.filter(
+      (e) =>
+        (e.nome || "").toLowerCase().includes(s) ||
+        matchDigitos(e.cpf, s) ||
+        (e.cargo || "").toLowerCase().includes(s)
+    );
   }, [employees, search]);
 
   const filteredSuppliers = useMemo(() => {
@@ -10678,11 +10680,11 @@ function CadastroModule({ user, addToast, reloadData }) {
     return sorted.filter(
       (f) =>
         (f.nome || "").toLowerCase().includes(s) ||
-        (f.cnpj || "").replace(/\D/g, "").includes(s.replace(/\D/g, "")) ||
-        (f.cpf || "").replace(/\D/g, "").includes(s.replace(/\D/g, "")) ||
+        matchDigitos(f.cnpj, s) ||
+        matchDigitos(f.cpf, s) ||
         (f.contato || "").toLowerCase().includes(s) ||
         (f.categoria || "").toLowerCase().includes(s) ||
-        (f.telefone || "").replace(/\D/g, "").includes(s.replace(/\D/g, ""))
+        matchDigitos(f.telefone, s)
     );
   }, [suppliers, search]);
 

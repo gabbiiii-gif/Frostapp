@@ -171,6 +171,19 @@ export function validateOSProposal(input) {
   return { valid: missing.length === 0, missing, payload };
 }
 
+// Casa um termo de busca contra um campo de documento/telefone comparando só os
+// dígitos ("(11) 98765-4321" casa com "98765").
+//
+// Devolve false quando o termo não tem NENHUM dígito. Sem essa guarda a busca
+// inteira deixava de filtrar: `"".includes("")` é true em JS, então uma busca
+// textual como "maria" zerava os dois lados da comparação de documento e casava
+// com todo registro da lista.
+export function matchDigitos(campo, termo) {
+  const alvo = String(termo ?? "").replace(/\D/g, "");
+  if (!alvo) return false;
+  return String(campo ?? "").replace(/\D/g, "").includes(alvo);
+}
+
 // Monta o texto-resumo de uma OS/orçamento para envio via WhatsApp.
 // `tipo`: "orcamento" ou "os". Helper puro — testado em utils.test.js.
 export function buildOSWhatsAppResumo(os, tipo) {
