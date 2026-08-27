@@ -11,6 +11,7 @@
 
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { podeAutoReligar } from "./auto-resume.ts";
+import { janelaDebounceMs, souAUltimaMensagem } from "./debounce.ts";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 // Auto-religamento: se a IA foi pausada para um humano mas ninguém do time
@@ -25,6 +26,13 @@ const AUTO_RESUME_MS =
 const MODEL = "claude-sonnet-4-6";
 const MAX_TOOL_ITERS = 5;
 const HISTORY_LIMIT = 20;
+// Debounce: cada mensagem do cliente dispara uma execução própria desta
+// function. Quando o cliente escreve em rajada ("oi" / "meu ar não gela" /
+// "pode vir hoje?"), esperar alguns segundos e deixar só a execução da ÚLTIMA
+// mensagem seguir evita chamar o Claude 3x, responder fora de ordem e mandar 3
+// avisos iguais de fora-de-horário. Configurável via DEBOUNCE_SECONDS (0
+// desliga e volta ao comportamento de responder na hora).
+const DEBOUNCE_MS = janelaDebounceMs(Deno.env.get("DEBOUNCE_SECONDS"));
 
 // ─── Tools expostas ao agente ────────────────────────────────────────────────
 const TOOLS = [
@@ -178,13 +186,18 @@ async function handleMessage(j: Job) {
   const convRow: Record<string, unknown> = {
     company_id: cfg.company_id,
     customer_phone: j.phone,
+    // Bump explícito da última mensagem. `last_message_at` tem DEFAULT now(),
+    // mas default só vale no INSERT — no UPDATE do upsert a coluna ficava
+    // congelada na criação da conversa. Efeito: o Inbox do app (ordenado por
+    // last_message_at desc) nunca reordenava e conversa ativa afundava na lista.
+    last_message_at: new Date().toISOString(),
   };
   // Só usa pushName pra nomear o cliente em mensagens DELE (não nas do operador).
   if (j.pushName && !j.fromMe) convRow.customer_name = j.pushName;
   const { data: conv, error: convErr } = await supabase
     .from("ai_conversations")
     .upsert(convRow, { onConflict: "company_id,customer_phone" })
-    .select("id, status")
+    .select("id, status, unread_count")
     .single();
   if (convErr || !conv) { console.error("[whatsapp-webhook] upsert conversa:", convErr); return; }
 
@@ -222,6 +235,7 @@ async function handleMessage(j: Job) {
       await supabase.from("ai_messages").insert({
         conversation_id: conv.id, company_id: cfg.company_id, role: "customer", content: "[áudio não reconhecido]",
       });
+      await bumpUnread(supabase, conv.id, conv.unread_count);
       await supabase.from("ai_messages").insert({
         conversation_id: conv.id, company_id: cfg.company_id, role: "agent", content: fb,
       });
@@ -268,13 +282,17 @@ async function handleMessage(j: Job) {
   }
 
   // ── Grava mensagem do cliente ────────────────────────────────────────────
-  await supabase.from("ai_messages").insert({
+  // O id volta no insert: é ele que o debounce compara depois da espera pra
+  // saber se esta execução ainda é a dona da resposta (ver souAUltimaMensagem).
+  const { data: msgCliente } = await supabase.from("ai_messages").insert({
     conversation_id: conv.id,
     company_id: cfg.company_id,
     role: "customer",
     content: j.hasAudio ? `🎤 ${effectiveText}` : (effectiveText || "[imagem enviada pelo cliente]"),
     media_url: mediaUrl,
-  });
+  }).select("id").single();
+  const minhaMsgId: string | null = (msgCliente as { id?: string } | null)?.id ?? null;
+  await bumpUnread(supabase, conv.id, conv.unread_count);
 
   // ── Gate 1: conversa não-'active' (humano assumiu) ───────────────────────
   // A IA fica muda em conversas pausadas. Mas se o time não respondeu há
@@ -287,6 +305,29 @@ async function handleMessage(j: Job) {
       .update({ status: "active", ai_handoff_reason: null })
       .eq("id", conv.id);
     // segue o fluxo normal abaixo: a IA responde com a conversa já reativada.
+  }
+
+  // ── Debounce: espera a rajada do cliente terminar ────────────────────────
+  // Fica DEPOIS do Gate 1 (conversa pausada sai na hora, sem gastar espera) e
+  // ANTES do Gate 2, pra que 3 mensagens seguidas fora do horário gerem UM
+  // aviso, não três. Passada a janela, releio a última mensagem do cliente: se
+  // não for mais a minha, chegou mensagem nova e a execução DELA é que
+  // responde — esta morre aqui. O histórico montado logo abaixo já inclui
+  // todas as mensagens da rajada, então nada se perde.
+  if (DEBOUNCE_MS > 0) {
+    await new Promise((r) => setTimeout(r, DEBOUNCE_MS));
+    const { data: ultima } = await supabase
+      .from("ai_messages")
+      .select("id")
+      .eq("conversation_id", conv.id)
+      .eq("role", "customer")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!souAUltimaMensagem(minhaMsgId, (ultima as { id?: string } | null)?.id)) {
+      console.log("[whatsapp-webhook] debounce: mensagem superada, execução encerrada");
+      return;
+    }
   }
 
   // ── Gate 2: fora do horário comercial ────────────────────────────────────
@@ -308,14 +349,34 @@ async function handleMessage(j: Job) {
     .limit(HISTORY_LIMIT);
   const ordered = (hist || []).reverse();
 
+  // ── Imagens ainda não respondidas ────────────────────────────────────────
+  // Antes só a foto da mensagem ATUAL era mandada ao modelo. Com o debounce
+  // isso quebraria o caso mais comum de foto: o cliente manda a imagem e
+  // escreve logo em seguida — a execução da imagem morre no debounce e a que
+  // sobrevive (a do texto) só teria "[imagem enviada pelo cliente]" escrito.
+  // Então anexo as fotos de toda a rajada: as mensagens do cliente posteriores
+  // à última resposta do agente. Teto de MAX_IMAGENS pra não explodir o custo.
+  const MAX_IMAGENS = 3;
+  const idxUltimoAgente = ordered.map((m) => m.role).lastIndexOf("agent");
+  const imagensPorIdx = new Map<number, string>();
+  for (let i = ordered.length - 1; i > idxUltimoAgente && imagensPorIdx.size < MAX_IMAGENS; i--) {
+    const m = ordered[i];
+    if (m.role !== "customer" || !m.media_url) continue;
+    // A imagem da mensagem atual já está em memória; as anteriores vêm do bucket.
+    const b64 = (i === ordered.length - 1 && imageBase64)
+      ? imageBase64
+      : await baixarImagemBase64(supabase, String(m.media_url));
+    if (b64) imagensPorIdx.set(i, b64);
+  }
+
   const messages: any[] = ordered.map((m, idx) => {
-    const isLast = idx === ordered.length - 1;
     const role = m.role === "customer" ? "user" : "assistant";
-    if (isLast && imageBase64 && role === "user") {
+    const b64 = imagensPorIdx.get(idx);
+    if (b64 && role === "user") {
       return {
         role,
         content: [
-          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: imageBase64 } },
+          { type: "image", source: { type: "base64", media_type: "image/jpeg", data: b64 } },
           { type: "text", text: m.content || "Analise a imagem enviada." },
         ],
       };
@@ -328,7 +389,14 @@ async function handleMessage(j: Job) {
   // aniversário (dava desconto fora do mês). Agora tem a referência explícita.
   const systemPrompt = `${cfg.system_prompt}\n\n== CONTEXTO ATUAL ==\n${contextoData()}`;
   let resposta = "";
-  let handoff = false;
+  // Efeitos colaterais das tools que NÃO podem atrasar a resposta ao cliente
+  // (email pra admin/gerente). Rodam depois que a mensagem já saiu. Não são
+  // fire-and-forget soltos: promessa órfã dentro de um background task corre
+  // risco de ser cortada quando o waitUntil resolve.
+  const tarefasPosResposta: Array<() => Promise<void>> = [];
+  // Só pra decidir a mensagem de fallback abaixo — o status da conversa quem
+  // grava é a própria tool, na hora.
+  let houveHandoff = false;
   try {
     for (let iter = 0; iter < MAX_TOOL_ITERS; iter++) {
       const ai = await chamarClaude(systemPrompt, messages);
@@ -341,8 +409,10 @@ async function handleMessage(j: Job) {
       messages.push({ role: "assistant", content: ai.content });
       const results: any[] = [];
       for (const tu of toolUses) {
-        const out = await executarTool(supabase, cfg, conv.id, j.phone, tu.name, tu.input, mediaUrl);
-        if (tu.name === "handoff_to_human") handoff = true;
+        const out = await executarTool(
+          supabase, cfg, conv.id, j.phone, tu.name, tu.input, mediaUrl, tarefasPosResposta,
+        );
+        if (tu.name === "handoff_to_human") houveHandoff = true;
         results.push({ type: "tool_result", tool_use_id: tu.id, content: out });
       }
       messages.push({ role: "user", content: results });
@@ -352,17 +422,63 @@ async function handleMessage(j: Job) {
     return; // msg do cliente já gravada; admin responde manual
   }
 
-  if (!resposta) return;
-
   // ── Grava resposta + envia ───────────────────────────────────────────────
-  await supabase.from("ai_messages").insert({
-    conversation_id: conv.id, company_id: cfg.company_id, role: "agent", content: resposta,
-  });
-  await enviarTexto(evoBase, j.instance, apikey, j.phone, resposta);
-
-  if (handoff) {
-    await supabase.from("ai_conversations").update({ status: "pending_human" }).eq("id", conv.id);
+  // Sem texto (o modelo só chamou tool e parou, ou estourou MAX_TOOL_ITERS) não
+  // há o que mandar, mas as tarefas pendentes abaixo ainda precisam rodar — por
+  // isso o `return` que existia aqui saiu. Era ele que engolia o efeito do
+  // handoff quando o modelo transferia o atendimento sem escrever nada junto.
+  // No handoff a IA fica muda a partir daqui, então o silêncio não seria
+  // corrigido pela próxima mensagem: manda um aviso curto pro cliente saber que
+  // um humano assume.
+  if (!resposta && houveHandoff) {
+    resposta = "Vou transferir seu atendimento para um de nossos atendentes. Em breve alguém fala com você por aqui. 🙏";
   }
+  if (resposta) {
+    await supabase.from("ai_messages").insert({
+      conversation_id: conv.id, company_id: cfg.company_id, role: "agent", content: resposta,
+    });
+    await enviarTexto(evoBase, j.instance, apikey, j.phone, resposta);
+  }
+
+  // ── Notificações das tools (email pra admin/gerente) ─────────────────────
+  for (const tarefa of tarefasPosResposta) {
+    await tarefa().catch((e) => console.error("[whatsapp-webhook] tarefa pós-resposta:", e));
+  }
+}
+
+// Baixa uma imagem do bucket ai-media e devolve base64 pro modelo.
+// media_url é a URL pública legada, mas o bucket virou privado (migração
+// 20260712000000_ai_media_private) — daí o download por path com service_role
+// em vez de um fetch na URL, que hoje voltaria 400.
+async function baixarImagemBase64(supabase: SupabaseClient, mediaUrl: string): Promise<string | null> {
+  try {
+    const marcador = "/ai-media/";
+    const i = mediaUrl.indexOf(marcador);
+    if (i < 0) return null;
+    const path = decodeURIComponent(mediaUrl.slice(i + marcador.length).split("?")[0]);
+    const { data, error } = await supabase.storage.from("ai-media").download(path);
+    if (error || !data) { console.error("[whatsapp-webhook] download imagem:", error?.message); return null; }
+    const buf = new Uint8Array(await data.arrayBuffer());
+    // btoa em blocos: String.fromCharCode(...buf) estoura a pilha em fotos grandes.
+    let bin = "";
+    const BLOCO = 0x8000;
+    for (let k = 0; k < buf.length; k += BLOCO) bin += String.fromCharCode(...buf.subarray(k, k + BLOCO));
+    return btoa(bin);
+  } catch (e) {
+    console.error("[whatsapp-webhook] baixarImagemBase64:", e);
+    return null;
+  }
+}
+
+// Incrementa o contador de não lidas da conversa. O app zera ao abrir o chat
+// (loadMessages). Sem isso o badge do Inbox nunca subia com mensagem nova.
+async function bumpUnread(supabase: SupabaseClient, convId: string, atual: unknown) {
+  const n = typeof atual === "number" ? atual : 0;
+  const { error } = await supabase
+    .from("ai_conversations")
+    .update({ unread_count: n + 1 })
+    .eq("id", convId);
+  if (error) console.error("[whatsapp-webhook] unread_count:", error.message);
 }
 
 // Timestamp (ms) da última mensagem SAINDO do número (role=agent) — seja da
@@ -620,17 +736,23 @@ function ackPosVenda(intencao: string, tipo: string): string {
   }
 }
 
-// Notifica admin/gerente ativos por email quando uma resposta precisa de humano.
-// Reusa a edge function send-email (Resend). Roda em contexto service_role.
-async function notifyPosVendaHumano(
-  supabase: SupabaseClient, companyId: string, alvo: any, respostaCliente: string,
-  cls: { intencao: string; nps_score: number | null; resumo: string },
-): Promise<void> {
-  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
-  const SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
-  const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
-  const INTERNAL_SECRET = Deno.env.get("INTERNAL_FUNCTION_SECRET") || "";
+// ─── Notificações por email (admin/gerente) ─────────────────────────────────
 
+// Escapa HTML antes de interpolar em email. O conteúdo vem do WhatsApp do
+// cliente (input não confiável): sem isso um "<img src=x onerror=...>" no nome
+// ou no problema vira markup dentro da caixa de entrada do gestor.
+function escapeHtml(v: unknown): string {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Emails dos admin/gerente ATIVOS da empresa. auth.users só é legível com
+// service_role — daí a resolução um a um por getUserById.
+async function emailsGestores(supabase: SupabaseClient, companyId: string): Promise<string[]> {
   const { data: gestores } = await supabase
     .from("company_members")
     .select("user_id")
@@ -638,13 +760,108 @@ async function notifyPosVendaHumano(
     .in("role", ["admin", "gerente"])
     .eq("status", "ativo");
   const ids = [...new Set((gestores || []).map((m: { user_id: string }) => m.user_id))];
-  if (!ids.length) return;
-
   const emails: string[] = [];
   for (const uid of ids) {
     const { data, error } = await supabase.auth.admin.getUserById(uid);
     if (!error && data?.user?.email) emails.push(data.user.email);
   }
+  return emails;
+}
+
+// Nome da empresa pro assunto/corpo do email (fallback: FrostERP).
+async function nomeEmpresa(supabase: SupabaseClient, companyId: string): Promise<string> {
+  const { data } = await supabase.from("companies").select("nome").eq("id", companyId).maybeSingle();
+  return String((data as { nome?: string } | null)?.nome || "FrostERP");
+}
+
+// Dispara o email pela edge function send-email (Resend centralizado).
+async function enviarEmailInterno(
+  to: string[], subject: string, html: string, text: string,
+): Promise<void> {
+  if (!to.length) return;
+  const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+  const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
+  const INTERNAL_SECRET = Deno.env.get("INTERNAL_FUNCTION_SECRET") || "";
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  // ANON_KEY no Authorization: o gateway rejeita (401) o token service_role na
+  // chamada entre Edge Functions. Auth real é o x-internal-secret abaixo.
+  if (ANON_KEY) { headers.apikey = ANON_KEY; headers.Authorization = `Bearer ${ANON_KEY}`; }
+  if (INTERNAL_SECRET) headers["x-internal-secret"] = INTERNAL_SECRET;
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ to, subject, html, text }),
+  });
+  if (!r.ok) console.error("[whatsapp-webhook] send-email:", r.status, (await r.text()).slice(0, 200));
+}
+
+// Email de "nova proposta de OS aguardando aprovação". Chamado pela tool
+// propose_os DEPOIS que a resposta já foi pro cliente (não atrasa a conversa).
+async function notificarPropostaOS(
+  supabase: SupabaseClient, companyId: string, payload: Record<string, unknown>,
+): Promise<void> {
+  const emails = await emailsGestores(supabase, companyId);
+  if (!emails.length) return;
+  const empresa = escapeHtml(await nomeEmpresa(supabase, companyId));
+  const cliente = String(payload.customer_name || "cliente");
+  const equipamento = [payload.equipment_type, payload.equipment_brand, payload.equipment_model]
+    .map((x) => String(x || "").trim()).filter(Boolean).join(" ") || "—";
+  const desconto = String(payload.discount_note || "").trim();
+  const html = `
+    <div style="font-family:-apple-system,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111;">
+      <h2 style="color:#d97706;margin-bottom:8px;">Nova proposta de OS aguardando aprovação</h2>
+      <p style="color:#374151;">O agente de WhatsApp registrou uma solicitação em <strong>${empresa}</strong>. Ela só vira OS depois que você aprovar.</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px;">
+        <tr><td style="padding:6px 0;color:#6b7280;">Cliente</td><td><strong>${escapeHtml(cliente)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Telefone</td><td>${escapeHtml(payload.phone || "—")}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Endereço</td><td>${escapeHtml(payload.address || "—")}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Equipamento</td><td>${escapeHtml(equipamento)}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Problema</td><td>${escapeHtml(payload.problem || "—")}</td></tr>
+        ${desconto ? `<tr><td style="padding:6px 0;color:#6b7280;">Desconto</td><td>${escapeHtml(desconto)}</td></tr>` : ""}
+      </table>
+      <p style="color:#6b7280;font-size:13px;">Abra o FrostERP → IA / Atendimento → Propostas de OS pra aprovar ou rejeitar.</p>
+    </div>`;
+  const text = `Nova proposta de OS em ${await nomeEmpresa(supabase, companyId)}. Cliente: ${cliente}. Aprovar no FrostERP → IA / Atendimento → Propostas de OS.`;
+  await enviarEmailInterno(emails, `[Frost] Nova proposta de OS — ${cliente}`, html, text);
+}
+
+// Email de "cliente pedindo humano". Chamado pela tool handoff_to_human.
+async function notificarHandoff(
+  supabase: SupabaseClient, companyId: string, conversationId: string,
+  phone: string, motivo: string,
+): Promise<void> {
+  const emails = await emailsGestores(supabase, companyId);
+  if (!emails.length) return;
+  const { data: conv } = await supabase
+    .from("ai_conversations")
+    .select("customer_name, customer_phone")
+    .eq("id", conversationId)
+    .maybeSingle();
+  const c = conv as { customer_name?: string; customer_phone?: string } | null;
+  const nome = c?.customer_name || "Cliente";
+  const tel = c?.customer_phone || phone || "—";
+  const html = `
+    <div style="font-family:-apple-system,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111;">
+      <h2 style="color:#dc2626;margin-bottom:8px;">Cliente pedindo atendimento humano</h2>
+      <p style="color:#374151;">A IA pausou esta conversa e não responde mais até alguém assumir.</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0;font-size:14px;">
+        <tr><td style="padding:6px 0;color:#6b7280;">Cliente</td><td><strong>${escapeHtml(nome)}</strong></td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Telefone</td><td>${escapeHtml(tel)}</td></tr>
+        <tr><td style="padding:6px 0;color:#6b7280;">Motivo</td><td>${escapeHtml(motivo)}</td></tr>
+      </table>
+      <p style="color:#6b7280;font-size:13px;">Responda direto no WhatsApp ou pelo FrostERP → IA / Atendimento. Pra devolver o atendimento à IA, mande <strong>${escapeHtml(REENABLE_COMMAND)}</strong> no chat ou use o botão "Reativar IA".</p>
+    </div>`;
+  const text = `Cliente pedindo humano: ${nome} (${tel}). Motivo: ${motivo}. Responda no WhatsApp ou no FrostERP.`;
+  await enviarEmailInterno(emails, `[Frost] Cliente pedindo humano — ${nome}`, html, text);
+}
+
+// Notifica admin/gerente ativos por email quando uma resposta precisa de humano.
+// Reusa a edge function send-email (Resend). Roda em contexto service_role.
+async function notifyPosVendaHumano(
+  supabase: SupabaseClient, companyId: string, alvo: any, respostaCliente: string,
+  cls: { intencao: string; nps_score: number | null; resumo: string },
+): Promise<void> {
+  const emails = await emailsGestores(supabase, companyId);
   if (!emails.length) return;
 
   const cliente = alvo.cliente_nome || "Cliente";
@@ -658,29 +875,17 @@ async function notifyPosVendaHumano(
   const html = `
     <div style="font-family:-apple-system,'Segoe UI',sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#111;">
       <h2 style="color:#b91c1c;margin-bottom:8px;">Resposta de pós-venda aguardando atendimento</h2>
-      <p style="color:#374151;"><strong>${cliente}</strong>${alvo.os_numero ? ` · OS ${alvo.os_numero}` : ""}</p>
-      <p style="color:#6b7280;">Intenção detectada: <strong>${label}</strong>${npsLine}</p>
+      <p style="color:#374151;"><strong>${escapeHtml(cliente)}</strong>${alvo.os_numero ? ` · OS ${escapeHtml(alvo.os_numero)}` : ""}</p>
+      <p style="color:#6b7280;">Intenção detectada: <strong>${escapeHtml(label)}</strong>${npsLine}</p>
       <p style="color:#6b7280;margin-bottom:4px;">Enviamos:</p>
-      <blockquote style="margin:0 0 12px;color:#374151;">${alvo.conteudo || ""}</blockquote>
+      <blockquote style="margin:0 0 12px;color:#374151;">${escapeHtml(alvo.conteudo || "")}</blockquote>
       <p style="color:#111;margin-bottom:4px;">Cliente respondeu:</p>
-      <blockquote style="margin:0;border-left:3px solid #06b6d4;padding-left:8px;color:#111;">${respostaCliente}</blockquote>
+      <blockquote style="margin:0;border-left:3px solid #06b6d4;padding-left:8px;color:#111;">${escapeHtml(respostaCliente)}</blockquote>
       <p style="color:#6b7280;font-size:13px;margin-top:16px;">Abra o FrostERP → Pós-Venda → Inbox pra responder.</p>
     </div>`;
   const text = `Pós-venda: ${cliente} respondeu (${label}${npsLine}): "${respostaCliente}"`;
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  // send-email é verify_jwt=false; passa apikey/Authorization quando disponíveis
-  // (gateway Supabase) e o segredo interno se configurado. ANON_KEY no
-  // Authorization: o gateway rejeita (401) o token service_role na chamada
-  // entre Edge Functions. Auth real é o x-internal-secret abaixo.
-  if (ANON_KEY) { headers.apikey = ANON_KEY; headers.Authorization = `Bearer ${ANON_KEY}`; }
-  if (INTERNAL_SECRET) headers["x-internal-secret"] = INTERNAL_SECRET;
-
-  await fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ to: emails, subject, html, text }),
-  });
+  await enviarEmailInterno(emails, subject, html, text);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -780,12 +985,24 @@ async function chamarClaude(systemPrompt: string, messages: any[]): Promise<any>
   return await r.json();
 }
 
+// Campos que a proposta precisa ter pra o atendente conseguir aprová-la no app.
+// Espelha `required` de validateOSProposal (src/utils.js) — se divergir, a
+// proposta entra na fila mas trava na aprovação com "Proposta incompleta".
+const PROPOSTA_OBRIGATORIOS: Record<string, string> = {
+  customer_name: "nome do cliente",
+  address: "endereço",
+  equipment_type: "tipo de equipamento",
+  problem: "descrição do problema",
+  phone: "telefone",
+};
+
 async function executarTool(
   supabase: SupabaseClient, cfg: any, conversationId: string, phone: string,
   name: string, input: any, mediaUrl: string | null,
+  tarefasPosResposta: Array<() => Promise<void>> = [],
 ): Promise<string> {
   if (name === "propose_os") {
-    const payload = {
+    const payload: Record<string, unknown> = {
       customer_name: String(input.customer_name || "").trim(),
       address: String(input.address || "").trim(),
       equipment_type: String(input.equipment_type || "").trim(),
@@ -797,10 +1014,70 @@ async function executarTool(
       // Observação de desconto sinalizada pela IA (vira nota na OS pro técnico).
       discount_note: String(input.discount_note || "").trim(),
     };
-    const { error } = await supabase.from("ai_os_proposals").insert({
-      company_id: cfg.company_id, conversation_id: conversationId, payload,
-    });
-    if (error) return "Erro ao registrar a proposta. Tente novamente.";
+
+    // Valida ANTES de gravar. Sem isso a IA conseguia registrar proposta sem
+    // endereço/telefone: ela caía na fila do atendente e só falhava na hora de
+    // aprovar. Devolvendo o que falta, o modelo volta e pergunta ao cliente.
+    const faltando = Object.entries(PROPOSTA_OBRIGATORIOS)
+      .filter(([k]) => !String(payload[k] || "").trim())
+      .map(([, rotulo]) => rotulo);
+    if (faltando.length) {
+      return `Não registrei: faltam dados obrigatórios (${faltando.join(", ")}). Pergunte ao cliente e chame a ferramenta de novo.`;
+    }
+
+    // Idempotência: o modelo costuma chamar propose_os de novo depois que o
+    // cliente corrige um dado ("na verdade é no bloco B"). Sem isso a fila do
+    // atendente enche de propostas duplicadas da mesma conversa — atualiza a
+    // pendente em vez de empilhar.
+    const { data: pendente } = await supabase
+      .from("ai_os_proposals")
+      .select("id, payload")
+      .eq("conversation_id", conversationId)
+      .eq("status", "pending_approval")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (pendente) {
+      // Preserva fotos anexadas em mensagens anteriores da mesma conversa: a
+      // execução atual só conhece a mídia da mensagem que a disparou.
+      const anteriores = Array.isArray((pendente as any).payload?.media_urls)
+        ? (pendente as any).payload.media_urls as string[]
+        : [];
+      const atuais = payload.media_urls as string[];
+      payload.media_urls = [...new Set([...anteriores, ...atuais])];
+      const { error: updErr } = await supabase
+        .from("ai_os_proposals")
+        .update({ payload })
+        .eq("id", (pendente as { id: string }).id);
+      if (updErr) {
+        console.error("[whatsapp-webhook] propose_os update:", updErr.message);
+        return "Erro ao atualizar a proposta. Tente novamente.";
+      }
+      return "Proposta atualizada com os novos dados. Um atendente vai analisar.";
+    }
+
+    const { data: ins, error } = await supabase
+      .from("ai_os_proposals")
+      .insert({
+        company_id: cfg.company_id,
+        conversation_id: conversationId,
+        payload,
+        // Explícito e não só pelo DEFAULT da coluna: o painel de aprovação
+        // filtra por status e uma proposta com status errado fica invisível.
+        status: "pending_approval",
+      })
+      .select("id")
+      .single();
+    if (error || !ins) {
+      console.error("[whatsapp-webhook] propose_os insert:", error?.message);
+      return "Erro ao registrar a proposta. Tente novamente.";
+    }
+
+    // Avisa admin/gerente por email. O push do app (listener Realtime em
+    // IAAtendimentoModule) só chega em quem está com o FrostERP aberto na aba
+    // de IA — o email é o canal que não depende de ninguém estar olhando.
+    tarefasPosResposta.push(() => notificarPropostaOS(supabase, cfg.company_id, payload));
     return "Proposta registrada com sucesso. Um atendente vai analisar.";
   }
 
@@ -835,10 +1112,21 @@ async function executarTool(
   }
 
   if (name === "handoff_to_human") {
-    await supabase.from("ai_conversations")
-      .update({ ai_handoff_reason: String(input.reason || "").slice(0, 500) })
+    const motivo = String(input.reason || "").trim().slice(0, 500) || "Cliente pediu atendimento humano";
+    // Pausa a IA NA HORA (status='pending_human'), junto com o motivo. Antes só
+    // o motivo era gravado aqui e o status ficava pra um `if (handoff)` no fim
+    // do handleMessage, depois de um `return` que disparava quando o modelo
+    // chamava a tool sem escrever texto: a conversa ficava com o aviso na tela
+    // mas status='active', e a IA seguia respondendo por cima do atendente.
+    const { error } = await supabase.from("ai_conversations")
+      .update({ status: "pending_human", ai_handoff_reason: motivo })
       .eq("id", conversationId);
-    return "Atendimento encaminhado para um atendente humano.";
+    if (error) {
+      console.error("[whatsapp-webhook] handoff:", error.message);
+      return "Não consegui registrar a transferência. Peça ao cliente que aguarde e não prometa retorno imediato.";
+    }
+    tarefasPosResposta.push(() => notificarHandoff(supabase, cfg.company_id, conversationId, phone, motivo));
+    return "Atendimento transferido para um atendente humano. A IA não responde mais nesta conversa até um humano devolvê-la.";
   }
 
   return "Ferramenta desconhecida.";

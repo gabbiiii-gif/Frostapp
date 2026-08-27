@@ -178,3 +178,17 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - new pages: modules/relatorios.md
 - touched: index.md
 - decisions: engine puro client-side (spec declarativo) em vez de SQL sobre kv_store; IA traduz a consulta e nao calcula; PDF binario entrou na v1 (html2pdf ja era dependencia); DataTable nao reusavel (import circular), modulo tem tabela propria
+
+## [2026-08-27] feat | Frost Fase 4 no caminho vivo: propose_os, handoff_to_human e debounce
+- gatilho: usuário pediu "terminar propose_os e handoff_to_human, e adicionar o debounce" + análise de erros
+- contexto: a Fase 4 estava especificada pro n8n (CLAUDE.md) mas o agente vive na Edge `whatsapp-webhook` desde 2026-06-01. As 4 edge functions `frost-*` são órfãs (nada as chama) — implementado no caminho vivo, não nelas.
+- propose_os: valida campos obrigatórios antes de gravar (espelha validateOSProposal, rótulos pt-BR pro modelo); idempotente por conversa (atualiza pendente + merge de media_urls em vez de duplicar); status='pending_approval' explícito; email pra admin/gerente via send-email.
+- handoff_to_human: status='pending_human' + ai_handoff_reason gravados DENTRO da tool. BUG corrigido: o status era setado depois de `if (!resposta) return` — modelo que chamava a tool sem texto deixava a conversa 'active' com aviso na tela e a IA seguia respondendo por cima do atendente. Email pra admin/gerente.
+- debounce: novo `debounce.ts` puro (janelaDebounceMs, souAUltimaMensagem) + 10 testes Vitest. Janela DEBOUNCE_SECONDS (padrão 12s, 0 desliga, teto 120s), posicionado entre Gate 1 e Gate 2; compara id de ai_messages (não timestamp).
+- fotos da rajada: histórico anexa imagens de mensagens do cliente posteriores à última resposta do agente (teto 3), baixando do bucket privado ai-media com service_role (baixarImagemBase64). Sem isso o debounce regrediria o caso foto+texto.
+- tarefasPosResposta: efeitos colaterais das tools (emails) rodam depois do envio ao cliente — não atrasam a conversa, não viram promessa órfã sob waitUntil.
+- fixes de arrasto: last_message_at bumpado no upsert (default só vale no INSERT → Inbox nunca reordenava); unread_count incrementado (bumpUnread); notifyPosVendaHumano passou a escapar HTML do texto do cliente.
+- verificação: esbuild OK; vitest 367/367 (22 arquivos, +10 novos); vite build OK.
+- touched: supabase/functions/whatsapp-webhook/index.ts, supabase/functions/whatsapp-webhook/debounce.ts (novo), debounce.test.ts (novo), modules/ia-atendimento.md, CLAUDE.md
+- PENDENTE OPERADOR: `supabase functions deploy whatsapp-webhook --no-verify-jwt`; (opcional) `supabase secrets set DEBOUNCE_SECONDS=12`. Sem deploy nada disso está no ar.
+- PENDENTE (a decidir): as 4 edge functions frost-* órfãs — apagar ou corrigir. Bugs: frost-handoff grava status='handoff' que viola o CHECK de ai_conversations (500 sempre); frost-propose-os grava payload pt-BR que o painel de aprovação não lê; frost-conversation faz INSERT em conversa 'closed' violando o UNIQUE (company_id, customer_phone).

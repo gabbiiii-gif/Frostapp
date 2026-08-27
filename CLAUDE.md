@@ -145,6 +145,12 @@ The app UI is entirely in **Brazilian Portuguese** (pt-BR). All labels, categori
 
 ## Frost WhatsApp Fase 4 — Tools reais + conversation_id real + debounce
 
+> ⚠️ **Histórico.** Esta seção descreve a Fase 4 como foi especificada para o orquestrador **n8n**.
+> Desde 2026-06-01 o agente roda na Edge Function **`whatsapp-webhook`** (ver
+> `docs/wiki/modules/ia-atendimento.md`) e as 4 edge functions `frost-*` abaixo estão **órfãs** —
+> nada no código as chama, e três delas têm bugs conhecidos (listados na página do wiki). A Fase 4
+> foi concluída em 2026-08-27 **no caminho vivo**; ver [Fase 4 — implementação real](#frost-whatsapp-fase-4--implementação-real-whatsapp-webhook).
+
 Refactor do agente Frost (workflow n8n `0JT2DBuWZwQBaJfl`). Antes da Fase 4 o Frost só conversava — `propose_os`/`handoff_to_human` viviam só no system prompt sem implementação real, conversation_id ia como UUID zerado, e o Wait fixo de 2min travava 1 execução por mensagem mesmo com 3 msgs em sequência.
 
 **Mudanças:**
@@ -175,6 +181,30 @@ Todas as 4 aceitam header opcional `x-internal-secret` (se `INTERNAL_FUNCTION_SE
 - Credencial `Anthropic` (API key) — pelo Claude Sonnet.
 - Substituir URL placeholder `https://SEU-EVOLUTION-URL/message/sendText/SUA-INSTANCIA` no nó "Envia resposta WhatsApp".
 - Toggle Active no workflow.
+
+## Frost WhatsApp Fase 4 — implementação real (`whatsapp-webhook`)
+
+O que de fato está no código, em `supabase/functions/whatsapp-webhook/`. Substitui os nós n8n da
+seção anterior. Detalhes e histórico em `docs/wiki/modules/ia-atendimento.md`.
+
+- **`propose_os`** — valida os campos obrigatórios antes de gravar (espelha `validateOSProposal` em
+  `src/utils.js`; devolve ao modelo os rótulos em pt-BR do que falta), é idempotente por conversa
+  (atualiza a proposta `pending_approval` existente com merge de `media_urls` em vez de duplicar na
+  fila do atendente), grava `status='pending_approval'` explícito e notifica admin/gerente por email
+  via `send-email`.
+- **`handoff_to_human`** — grava `status='pending_human'` + `ai_handoff_reason` **dentro da própria
+  tool** e notifica admin/gerente por email. Não adie esse `status` para depois do envio da
+  resposta: o modelo pode chamar a tool sem escrever texto junto, e a conversa fica `active` com a
+  IA respondendo por cima do atendente.
+- **Debounce** — `debounce.ts` (lógica pura + testes Vitest). Cada mensagem do cliente dispara uma
+  execução; passada a janela, só a execução da **última** mensagem da rajada responde (comparação
+  por id de `ai_messages`, não por timestamp). Env **`DEBOUNCE_SECONDS`** — padrão `12`, `0`
+  desliga, teto `120`. Fica entre o Gate 1 (conversa pausada) e o Gate 2 (fora do horário).
+- **Fotos da rajada** — o histórico anexa ao modelo as imagens das mensagens do cliente posteriores
+  à última resposta do agente (teto 3), baixadas do bucket privado `ai-media` com service_role.
+- **`tarefasPosResposta`** — efeitos colaterais das tools (emails) rodam depois que a resposta já
+  foi para o cliente. Não use fire-and-forget solto dentro do `EdgeRuntime.waitUntil`: promessa
+  órfã pode ser cortada quando o background task resolve.
 
 ## Notificação por email quando OS criada (Fase 2.7)
 
@@ -342,16 +372,16 @@ Pasta `supabase/functions/`. Deploy com `supabase functions deploy <nome>`.
 | `migrate-login`     | false      | Migra user legacy → auth.users (deployed externamente, fora do repo)     |
 | `admin-create-user` | true       | Cria/atualiza/convida user da empresa (auth.users + company_members)     |
 | `pos-venda-dispatch`| —          | Cron pós-venda                                                           |
-| `whatsapp-webhook`  | —          | Webhook WhatsApp → IA                                                    |
+| `whatsapp-webhook`  | false      | Webhook Evolution → agente IA (auth por `?token=`). Caminho vivo do agente: tools, debounce, pós-venda, handoff |
 | `send-email`        | false      | Helper Resend (chamado server-to-server por outras edge functions)       |
 | `first-login-otp-send`   | true  | Fase 2.4 — gera OTP 6 dígitos e dispara email                            |
 | `first-login-otp-verify` | true  | Fase 2.4 — valida código + promove `first_login_otp_done`                |
 | `admin-remove-user-mfa`  | true  | Fase 2.5 — admin/gerente apaga factors MFA de outro user (reset 2FA)     |
 | `notify-os-created`      | true  | Fase 2.7 — email pra admin/gerente + técnico ao criar nova OS            |
-| `frost-conversation`     | false | Frost Fase 4 — get-or-create ai_conversations (chamado pelo n8n)         |
-| `frost-propose-os`       | false | Frost Fase 4 — tool: salva proposta em ai_os_proposals + notifica admin  |
-| `frost-handoff`          | false | Frost Fase 4 — tool: marca ai_conversations.status=handoff + notifica    |
-| `frost-update-birthday`  | false | Frost Fase 4 — tool: atualiza data_nascimento de cliente em kv_store (⚠️ prefixo kv_store provavelmente quebrado — ver wiki ia-atendimento) |
+| `frost-conversation`     | false | ⚠️ **ÓRFÃ** (era do n8n) — get-or-create ai_conversations. Bug: INSERT em conversa `closed` viola o UNIQUE `(company_id, customer_phone)` |
+| `frost-propose-os`       | false | ⚠️ **ÓRFÃ** (era do n8n) — grava payload em pt-BR que o painel de aprovação (formato inglês) não consegue aprovar |
+| `frost-handoff`          | false | ⚠️ **ÓRFÃ** (era do n8n) — grava `status='handoff'`, valor que viola o CHECK de `ai_conversations` → 500 sempre |
+| `frost-update-birthday`  | false | ⚠️ **ÓRFÃ** (era do n8n) — prefixo kv_store quebrado (ver wiki ia-atendimento) |
 | `frost-notify-approval`  | true  | Avisa o cliente por WhatsApp quando o atendente aprova a proposta de OS  |
 | `relatorio-nl`           | true  | Módulo Relatórios — traduz pergunta pt-BR em `ReportSpec` via Claude (só metadados; não calcula) |
 | `relatorio-whatsapp`     | true  | Módulo Relatórios — envia resumo + CSV do relatório pela instância Evolution da empresa |
