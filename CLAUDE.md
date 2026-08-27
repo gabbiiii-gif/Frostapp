@@ -19,6 +19,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run deploy:fn -- <nome>` — deploy de qualquer outra Edge Function
 
 > O CLI do Supabase é devDependency do projeto (`supabase`), então não precisa de instalação global — `npm ci` já traz.
+> Os scripts de deploy usam `--use-api` (bundle no servidor): sem isso o CLI exige Docker Desktop rodando na máquina.
+> Rode sempre da raiz do projeto — `npm run` procura o `package.json` no diretório atual.
 
 ## Tech Stack
 
