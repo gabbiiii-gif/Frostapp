@@ -199,19 +199,12 @@ const EQUIPMENT_CATALOG_BY_KEY = (() => {
 // SSR, cota cheia), cai num Map em memória. Quando isso ocorre, marca-se a sessão como
 // efêmera para que o usuário seja avisado — caso contrário, perderia tudo no reload.
 let __storageIsEphemeral = false;
-try {
-  // Sanity check: alguns browsers expõem localStorage mas tiram o write em modo privado
-  const probe = "__frost_storage_probe__";
-  localStorage.setItem(probe, "1");
-  localStorage.removeItem(probe);
-  window.storage = localStorage;
-} catch {
-  // localStorage indisponível ou negando writes
-}
-if (!window.storage) {
-  __storageIsEphemeral = true;
+
+// Store volátil (Map). Usado como fallback quando o localStorage nega write e,
+// deliberadamente, como storage ÚNICO do modo demonstração.
+function criarStoreEmMemoria() {
   const _store = new Map();
-  window.storage = {
+  return {
     getItem(key) { return _store.has(key) ? _store.get(key) : null; },
     setItem(key, value) { _store.set(key, value); },
     removeItem(key) { _store.delete(key); },
@@ -219,6 +212,32 @@ if (!window.storage) {
     key(i) { return Array.from(_store.keys())[i] || null; },
     clear() { _store.clear(); },
   };
+}
+
+// FRONTEIRA DA DEMO (storage). A demonstração nunca toca o localStorage do
+// visitante. Além de não sujar o navegador de quem só está experimentando, é o
+// que impede a demo de ENXERGAR dados reais: `DB.list` varre todas as chaves do
+// storage e só filtra pelo campo `companyId` — qualquer registro sem esse campo
+// (legado, ou gravado por caminho que não taggeia) apareceria dentro da demo de
+// uma empresa logada no mesmo navegador. Com um Map em memória não há o que
+// vazar, e recarregar a página simplesmente recomeça a demo do zero.
+const __modoDemo = isDemoMode();
+if (__modoDemo) {
+  window.storage = criarStoreEmMemoria();
+} else {
+  try {
+    // Sanity check: alguns browsers expõem localStorage mas tiram o write em modo privado
+    const probe = "__frost_storage_probe__";
+    localStorage.setItem(probe, "1");
+    localStorage.removeItem(probe);
+    window.storage = localStorage;
+  } catch {
+    // localStorage indisponível ou negando writes
+  }
+  if (!window.storage) {
+    __storageIsEphemeral = true;
+    window.storage = criarStoreEmMemoria();
+  }
 }
 
 // ─── Banner de aviso quando storage é efêmero ───────────────────────────────
@@ -2806,19 +2825,21 @@ function DemoLeadForm({ onStart }) {
           <p className="text-slate-400 text-sm mt-1">Preencha para iniciar sua demonstração interativa. Você vai explorar o sistema com dados de exemplo.</p>
         </div>
         <div className="space-y-3">
+          {/* id + name + autoComplete em cada campo: sem isso o browser não
+              associa o label nem oferece autofill (avisos do DevTools). */}
           <div>
-            <label className="text-xs font-semibold text-slate-400 mb-1 block">Nome</label>
-            <input value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome"
+            <label htmlFor="demo-nome" className="text-xs font-semibold text-slate-400 mb-1 block">Nome</label>
+            <input id="demo-nome" name="nome" autoComplete="name" value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Seu nome"
               className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:outline-none focus:border-cyan-500" />
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-400 mb-1 block">WhatsApp</label>
-            <input value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="(00) 00000-0000"
+            <label htmlFor="demo-whatsapp" className="text-xs font-semibold text-slate-400 mb-1 block">WhatsApp</label>
+            <input id="demo-whatsapp" name="whatsapp" type="tel" autoComplete="tel" inputMode="tel" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="(00) 00000-0000"
               className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:outline-none focus:border-cyan-500" />
           </div>
           <div>
-            <label className="text-xs font-semibold text-slate-400 mb-1 block">Email</label>
-            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com"
+            <label htmlFor="demo-email" className="text-xs font-semibold text-slate-400 mb-1 block">Email</label>
+            <input id="demo-email" name="email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="voce@email.com"
               className="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-sm focus:outline-none focus:border-cyan-500" />
           </div>
         </div>
@@ -3500,9 +3521,12 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
                   Cole abaixo (válido por 10 min).
                 </p>
               </div>
+              <label htmlFor="login-otp-email" className="sr-only">Código de verificação enviado por email</label>
               <input
+                id="login-otp-email"
                 name="otp-email"
                 type="text"
+                autoComplete="one-time-code"
                 inputMode="numeric"
                 pattern="[0-9]{6}"
                 maxLength={6}
@@ -3548,9 +3572,12 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
                 <p className="text-sm text-gray-300">Verificação em 2 etapas</p>
                 <p className="text-xs text-gray-500 mt-1">Digite o código de 6 dígitos do seu app autenticador</p>
               </div>
+              <label htmlFor="login-totp" className="sr-only">Código do aplicativo autenticador</label>
               <input
+                id="login-totp"
                 name="totp"
                 type="text"
+                autoComplete="one-time-code"
                 inputMode="numeric"
                 pattern="[0-9]{6}"
                 maxLength={6}
@@ -3602,9 +3629,12 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
                   {pendingMfaEnroll.secret}
                 </code>
               </details>
+              <label htmlFor="login-totp-enroll" className="sr-only">Código do aplicativo autenticador</label>
               <input
+                id="login-totp-enroll"
                 name="totp-enroll"
                 type="text"
+                autoComplete="one-time-code"
                 inputMode="numeric"
                 pattern="[0-9]{6}"
                 maxLength={6}
@@ -5489,6 +5519,33 @@ function Ring({ percent, size = 132, stroke = 12, color = "#06b6d4", children })
   );
 }
 
+// Caixa de gráfico com largura medida por nós, não pelo Recharts.
+// O `ResponsiveContainer` mede via ResizeObserver e, quando é montado antes de o
+// browser resolver o layout (mount inicial, troca de módulo com crossfade), lê
+// -1 e despeja no console "The width(-1) and height(-1) of chart should be
+// greater than 0". Medindo aqui e só renderizando o gráfico depois que existe
+// largura real, o aviso some por construção e o gráfico não pisca.
+// `children` é uma função (largura, altura) => elemento do Recharts.
+function ChartBox({ height, className = "", children }) {
+  const ref = useRef(null);
+  const [largura, setLargura] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    const medir = () => setLargura(Math.max(0, Math.floor(el.clientWidth)));
+    medir();
+    if (typeof ResizeObserver === "undefined") return undefined;
+    const ro = new ResizeObserver(medir);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return (
+    <div ref={ref} className={className} style={{ height }}>
+      {largura > 0 ? children(largura, height) : null}
+    </div>
+  );
+}
+
 function Reveal({ i = 0, className = "", children, onClick }) {
   return (
     <motion.div
@@ -5715,9 +5772,9 @@ function Dashboard({ user, dateFilter, onNavigate }) {
               </div>
               <span className="text-xs text-gray-300 bg-white/5 border border-white/10 rounded-full px-3 py-1 whitespace-nowrap">{totalOs} OS no total</span>
             </div>
-            <div className="mt-4 -mx-2 h-[120px]">
-              <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={120} debounce={50}>
-                <AreaChart data={receitaSemanal} margin={{ top: 6, right: 8, left: 8, bottom: 0 }}>
+            <ChartBox height={120} className="mt-4 -mx-2">
+              {(w, h) => (
+                <AreaChart width={w} height={h} data={receitaSemanal} margin={{ top: 6, right: 8, left: 8, bottom: 0 }}>
                   <defs>
                     <linearGradient id="recArea" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.5} />
@@ -5727,8 +5784,8 @@ function Dashboard({ user, dateFilter, onNavigate }) {
                   <Tooltip contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }} formatter={(v) => [formatCurrency(v), "Receita"]} />
                   <Area type="monotone" dataKey="valor" stroke="#22d3ee" strokeWidth={2} fill="url(#recArea)" />
                 </AreaChart>
-              </ResponsiveContainer>
-            </div>
+              )}
+            </ChartBox>
           </div>
         </Reveal>
 
@@ -5784,14 +5841,14 @@ function Dashboard({ user, dateFilter, onNavigate }) {
           {osPorStatus.length > 0 ? (
             <div className="flex items-center gap-2">
               <div className="h-[170px] w-[170px] shrink-0">
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={170} debounce={50}>
-                  <PieChart>
+                {/* Caixa de tamanho fixo: dimensões explícitas dispensam o
+                    ResponsiveContainer (e o aviso de medida -1 que ele gera). */}
+                <PieChart width={170} height={170}>
                     <Pie data={osPorStatus} dataKey="value" nameKey="label" cx="50%" cy="50%" innerRadius={48} outerRadius={78} paddingAngle={3} stroke="none">
                       {osPorStatus.map((e) => <Cell key={e.key} fill={e.color} />)}
                     </Pie>
                     <Tooltip contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }} />
-                  </PieChart>
-                </ResponsiveContainer>
+                </PieChart>
               </div>
               <div className="flex-1 space-y-1.5">
                 {osPorStatus.map((e) => (
@@ -5813,8 +5870,9 @@ function Dashboard({ user, dateFilter, onNavigate }) {
             <h3 className="text-white font-semibold">Concluídas por semana</h3>
             <span className="text-xs text-gray-400">8 sem</span>
           </div>
-          <ResponsiveContainer width="100%" height={180} minWidth={0} minHeight={180} debounce={50}>
-            <BarChart data={osSemanais} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
+          <ChartBox height={180}>
+            {(w, h) => (
+              <BarChart width={w} height={h} data={osSemanais} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="barG" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#3b82f6" />
@@ -5826,8 +5884,9 @@ function Dashboard({ user, dateFilter, onNavigate }) {
               <YAxis stroke="rgba(120,140,170,0.6)" fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} width={28} />
               <Tooltip cursor={{ fill: "rgba(120,140,170,0.08)" }} contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }} />
               <Bar dataKey="concluidas" name="Concluídas" fill="url(#barG)" radius={[6, 6, 0, 0]} maxBarSize={26} />
-            </BarChart>
-          </ResponsiveContainer>
+              </BarChart>
+            )}
+          </ChartBox>
         </Reveal>
       </div>
 
@@ -15930,6 +15989,21 @@ function IAAtendimentoModule({ user, addToast }) {
     addToast?.("Proposta rejeitada.", "info");
     loadProposals();
   };
+
+  // Demo: este módulo lê ai_conversations/ai_messages/ai_os_proposals DIRETO do
+  // Supabase (não passa pelo DB local), então é o caminho que precisa de gate
+  // explícito. As outras camadas já barram (cliente da demo sem sessão +
+  // getCurrentMember fixo em cmp_demo); aqui o gate é pra ser honesto na tela
+  // em vez de mostrar uma caixa de entrada vazia parecendo defeito.
+  if (isDemoMode()) {
+    return (
+      <div className="p-6 text-center text-slate-400 max-w-md mx-auto">
+        <div className="text-3xl mb-3">✦</div>
+        <p className="text-white font-semibold mb-1">IA / Atendimento</p>
+        <p className="text-sm">O atendimento por WhatsApp funciona com conversas reais de clientes, por isso fica fora da demonstração. Fale com a equipe para ver o módulo ao vivo.</p>
+      </div>
+    );
+  }
 
   if (!supabase) {
     return (

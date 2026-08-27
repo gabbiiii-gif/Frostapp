@@ -15,16 +15,30 @@ export const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 // Cria o cliente Supabase apenas se as variáveis de ambiente estiverem disponíveis.
 // O cliente persiste sessão automaticamente (localStorage) — após signIn, todas as
 // chamadas levam o JWT do usuário e RLS no Postgres aplica isolamento por empresa.
+//
+// DEMO: o cliente da demo nasce SEM sessão e com storageKey próprio. Antes ele
+// reaproveitava o token real do localStorage, então abrir ?demo=1 num navegador
+// já logado numa empresa fazia a RLS liberar tudo — a demo mostrava dados reais
+// (conversas de WhatsApp, propostas, config). Sem token, toda query protegida
+// volta vazia e toda edge function com verify_jwt=true responde 401. A sessão
+// real fica intacta (storageKey diferente), então outras abas seguem normais.
+const _demo = isDemoMode();
 export const supabase = (supabaseUrl && supabaseKey)
   ? createClient(supabaseUrl, supabaseKey, {
-      auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
+      auth: _demo
+        ? { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'frost_demo_sem_sessao' }
+        : { persistSession: true, autoRefreshToken: true, detectSessionInUrl: false },
     })
   : null;
 
-if (supabase) {
-  console.log('%c[FrostERP] Supabase CONECTADO ✅', 'color: #22c55e; font-weight: bold');
-} else {
-  console.warn('[FrostERP] Supabase DESCONECTADO ❌ — variáveis de ambiente não encontradas. Rodando apenas local.');
+// Diagnóstico de conexão só em dev. Em produção poluía o console do cliente (e
+// anunciava a stack pra qualquer um que abrisse o DevTools).
+if (import.meta.env.DEV) {
+  if (supabase) {
+    console.log('%c[FrostERP] Supabase CONECTADO ✅', 'color: #22c55e; font-weight: bold');
+  } else {
+    console.warn('[FrostERP] Supabase DESCONECTADO ❌ — variáveis de ambiente não encontradas. Rodando apenas local.');
+  }
 }
 
 // Chaves nunca sincronizadas (dados sensíveis estritamente locais).
@@ -66,7 +80,27 @@ function sanitizeForSync(key, value) {
 let _currentMember = null;
 const MEMBER_CACHE_KEY = 'frost_session_member';
 
+// Membro sintético da demo. NÃO existe em company_members, então nenhuma query
+// escopada por ele traz linha de empresa real — e, se alguma escapar, a RLS do
+// Postgres barra (a sessão real, se houver, não é membro de cmp_demo).
+const DEMO_MEMBER = Object.freeze({
+  company_id: 'cmp_demo',
+  role: 'admin',
+  user_id: 'demo-user',
+  legacy_user_id: 'demo-user',
+  status: 'ativo',
+  is_super_admin: false,
+});
+
 export function getCurrentMember() {
+  // FRONTEIRA DA DEMO. O cache de membro vive em localStorage e sobrevive à
+  // sessão: abrir ?demo=1 num navegador que já logou numa empresa real fazia
+  // getCurrentMember() devolver o membro REAL. Módulos que consultam o Supabase
+  // direto (IA/Atendimento, Pós-Venda) escopam por esse company_id e, com a
+  // sessão real ainda válida, a RLS liberava — a demo exibia conversas de
+  // WhatsApp, propostas e config (incl. apikey da Evolution) da empresa de
+  // verdade. Na demo o membro real nunca é devolvido.
+  if (isDemoMode()) return DEMO_MEMBER;
   if (_currentMember) return _currentMember;
   try {
     const raw = localStorage.getItem(MEMBER_CACHE_KEY);
@@ -1478,6 +1512,7 @@ export async function uploadEscolaOficio(file, demandaId) {
 // incremental (re-ler só a fatia afetada) em vez de recarregar tudo.
 export function subscribeToChanges(onDataChanged) {
   if (!supabase) return () => {};
+  if (isDemoMode()) return () => {}; // demo: nada de Realtime do banco real
   const companyId = getCompanyId();
   if (!companyId) return () => {};
   const channel = supabase
