@@ -58,18 +58,21 @@ export function buildDemoUser() {
 // Limpa os dados do escopo demo (cmp_demo) e a flag global de seed, para
 // re-semear um estado limpo a cada início de demo.
 export function resetDemoData() {
+  // GUARDA OBRIGATÓRIA. Fora da demo, `window.storage` é o localStorage real do
+  // usuário — um clear() aqui apagaria os dados da empresa. Nunca remover.
+  if (!isDemoMode()) return;
   try {
-    const toRemove = [];
-    for (let i = 0; i < window.storage.length; i++) {
-      const k = window.storage.key(i);
-      if (!k) continue;
-      // Chaves escopadas viram `cmp_<companyId>:<key>`; cobrimos as variações.
-      if (k.startsWith(`cmp_${DEMO_COMPANY_ID}:`) || k.includes(`${DEMO_COMPANY_ID}:`)) {
-        toRemove.push(k);
-      }
-    }
-    toRemove.forEach((k) => window.storage.removeItem(k));
-    window.storage.removeItem('erp:seeded'); // flag global de seed → força re-seed
+    // Em modo demo o `window.storage` é um Map em memória exclusivo da
+    // demonstração (ver App.jsx), então limpar tudo é seguro e completo.
+    //
+    // A versão anterior varria as chaves procurando o prefixo `cmp_cmp_demo:`,
+    // formato que o DB.set NUNCA produz: só os singletons são reescritos com o
+    // id da empresa (`erp:config:<id>`); um `erp:client:<id>` é gravado literal,
+    // e o escopo por empresa vem do campo `companyId` do registro, filtrado no
+    // DB.list. Ou seja: o reset não apagava nada — mas apagava a flag
+    // `erp:seeded`, liberando o seedDatabase() para rodar de novo e empilhar um
+    // segundo lote de clientes e funcionários. Daí os registros duplicados.
+    window.storage.clear();
   } catch { /* ignora */ }
 }
 

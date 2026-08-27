@@ -2901,6 +2901,35 @@ function DemoLeadForm({ onStart }) {
   );
 }
 
+// Aviso padrão para módulos que ficam FORA da demonstração.
+//
+// Dois motivos, ambos válidos:
+//  • IA / Atendimento trabalha com conversas reais de clientes no WhatsApp —
+//    não há o que mostrar sem expor gente de verdade.
+//  • Pós-venda, Lembrete e Relatórios consomem a API do Claude. Deixar um
+//    visitante gerar mensagens e relatórios queima token sem retorno.
+//
+// A saída é honesta e vira conversa: diz por que está fora e chama a equipe.
+function DemoModuloIndisponivel({ icone, titulo, motivo }) {
+  return (
+    <div className="flex items-center justify-center h-full">
+      <div className="max-w-md text-center p-8">
+        <div className="text-4xl mb-4">{icone}</div>
+        <h2 className="text-xl font-semibold text-white mb-2">{titulo}</h2>
+        <p className="text-sm text-slate-400 leading-relaxed">{motivo}</p>
+        <a
+          href="https://wa.me/5593984166832?text=Ol%C3%A1!%20Vi%20a%20demonstra%C3%A7%C3%A3o%20do%20FrostERP%20e%20queria%20ver%20esse%20m%C3%B3dulo%20ao%20vivo."
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-block mt-5 px-4 py-2 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white text-sm font-semibold transition"
+        >
+          Ver ao vivo com a equipe
+        </a>
+      </div>
+    </div>
+  );
+}
+
 // Barra fixa no rodapé durante a demo: avisa que é demonstração, permite resetar
 // os dados de exemplo e leva o prospect a falar com a equipe (conversão).
 function DemoBanner({ onReset }) {
@@ -16118,11 +16147,11 @@ function IAAtendimentoModule({ user, addToast }) {
   // em vez de mostrar uma caixa de entrada vazia parecendo defeito.
   if (isDemoMode()) {
     return (
-      <div className="p-6 text-center text-slate-400 max-w-md mx-auto">
-        <div className="text-3xl mb-3">✦</div>
-        <p className="text-white font-semibold mb-1">IA / Atendimento</p>
-        <p className="text-sm">O atendimento por WhatsApp funciona com conversas reais de clientes, por isso fica fora da demonstração. Fale com a equipe para ver o módulo ao vivo.</p>
-      </div>
+      <DemoModuloIndisponivel
+        icone="✦"
+        titulo="IA / Atendimento"
+        motivo="O atendimento por WhatsApp funciona com conversas reais de clientes, por isso fica fora da demonstração. Fale com a equipe para ver o módulo ao vivo."
+      />
     );
   }
 
@@ -18672,11 +18701,29 @@ export default function App() {
             {activeModule === "ia" && (
               <IAAtendimentoModule user={user} addToast={addToast} />
             )}
+            {/* Pós-venda, Lembrete e Relatórios usam a API do Claude. Ficam
+                fora da demo pra não queimar token com visitante. */}
             {activeModule === "pos-venda" && (
-              <PosVendaModule supabase={supabase} />
+              isDemoMode() ? (
+                <DemoModuloIndisponivel
+                  icone="↻"
+                  titulo="Pós-venda"
+                  motivo="O pós-venda gera as mensagens com inteligência artificial e envia por WhatsApp para clientes reais, por isso fica fora da demonstração. Fale com a equipe para ver o módulo ao vivo."
+                />
+              ) : (
+                <PosVendaModule supabase={supabase} />
+              )
             )}
             {activeModule === "lembrete" && (
-              <LembreteModule db={DB} addToast={addToast} companyId={getActiveCompanyId()} />
+              isDemoMode() ? (
+                <DemoModuloIndisponivel
+                  icone="🔔"
+                  titulo="Lembretes"
+                  motivo="Os lembretes e o resumo do dono são escritos por inteligência artificial e disparados por WhatsApp, por isso ficam fora da demonstração. Fale com a equipe para ver o módulo ao vivo."
+                />
+              ) : (
+                <LembreteModule db={DB} addToast={addToast} companyId={getActiveCompanyId()} />
+              )
             )}
             {activeModule === "folha" && (
               <FolhaModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} />
@@ -18685,7 +18732,15 @@ export default function App() {
               <PontoModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} db={DB} />
             )}
             {activeModule === "relatorios" && (
-              <RelatoriosModule user={user} db={DB} addToast={addToast} companyId={getActiveCompanyId()} />
+              isDemoMode() ? (
+                <DemoModuloIndisponivel
+                  icone="📊"
+                  titulo="Relatórios"
+                  motivo="O relatório entende a pergunta em português usando inteligência artificial, por isso fica fora da demonstração. Fale com a equipe para ver o módulo ao vivo."
+                />
+              ) : (
+                <RelatoriosModule user={user} db={DB} addToast={addToast} companyId={getActiveCompanyId()} />
+              )
             )}
             {activeModule === "config" && (
               <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} theme={theme} setTheme={setTheme} />
