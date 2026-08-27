@@ -111,7 +111,15 @@ Modules referenced in earlier versions of this file but **no longer in the codeb
 
 ### Multi-tenancy and scoping
 
-The DB layer is **company-scoped**. Most keys (those matching `SCOPED_PREFIXES`) are automatically rewritten to `cmp_<id>:<key>` so that multiple tenants can share the same `window.storage` and Supabase `kv_store`. `SCOPED_SINGLETONS` lists keys that are scoped per-company but stored as a single value. `migrateLegacyConfigOnce` and `ensureCompanyMigration` migrate pre-multi-tenant data on load. The **Master** tier (`MasterApp`) is a separate shell for managing companies; it has its own login (`MasterLoginScreen`) and its own audit log (`MasterAuditLog`).
+The DB layer is **company-scoped by FIELD, not by key prefix.** This distinction matters — getting it wrong has already caused a real bug (see below).
+
+- **Records** (keys matching `SCOPED_PREFIXES`): the storage key stays literal — `erp:client:<id>` is stored as exactly that. `DB.set` stamps `companyId: <activeCompanyId>` **inside the record**, and `DB.list` filters by that field. Records without a `companyId` are treated as legacy and stay visible to any active tenant until `ensureCompanyMigration` tags them.
+- **Singletons** (keys in `SCOPED_SINGLETONS` — `erp:config`, `erp:calendarFeedToken`, `erp:lastBackup`, `erp:autoBackupMeta`): these are the **only** keys rewritten, and `rewriteSingletonKey` **appends** the id as a suffix — `erp:config` → `erp:config:cmp_default`. Never a `cmp_<id>:` prefix.
+- **On the server**, `kv_store` has a `company_id` **column** guarded by RLS. There is no tenant prefix in the key there either.
+
+> ⚠️ There is no `cmp_<id>:<key>` format anywhere. An earlier version of this file claimed there was, and `resetDemoData` was written against that claim — it scanned for keys starting with `cmp_cmp_demo:`, found none, deleted nothing, and only cleared the `erp:seeded` flag. The seed then ran a second time and duplicated every demo client and employee. Don't write code that matches on a tenant key prefix.
+
+`migrateLegacyConfigOnce` and `ensureCompanyMigration` migrate pre-multi-tenant data on load. The **Master** tier (`MasterApp`) is a separate shell for managing companies; it has its own login (`MasterLoginScreen`) and its own audit log (`MasterAuditLog`).
 
 ### Audit trail
 
@@ -140,7 +148,7 @@ Any new printable artifact should follow the same pattern — don't introduce a 
 
 ### Data & State Patterns
 
-- All data is persisted to `window.storage` (localStorage or in-memory polyfill) via the `DB` utility. Keys use prefixes (`frost_clients`, `frost_transactions`, `erp:config`, …) and are auto-scoped to the active company when matched by `SCOPED_PREFIXES`.
+- All data is persisted to `window.storage` (localStorage, an in-memory polyfill when localStorage refuses writes, or — in demo mode — an in-memory store on purpose) via the `DB` utility. Keys use prefixes (`erp:client:`, `erp:os:`, `erp:finance:`, …). A key matching `SCOPED_PREFIXES` gets a `companyId` **field** written into the record; the key itself is not rewritten (see [Multi-tenancy](#multi-tenancy-and-scoping)).
 - Navigation between modules uses `useState` (`activeModule`) — no URL routing.
 - Role-based access control via `ROLE_PERMISSIONS` with roles `admin`, `gerente`, `tecnico`, `atendente`. **`customPermissions`** on a user object overrides the role (admin can restrict an individual user even within their role). Always go through `hasPermission(user, module)` — don't compare roles directly.
 - Toast notifications managed at the App level and passed down as `addToast` prop.

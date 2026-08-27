@@ -207,3 +207,15 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - verificação: vitest 388/388 (23 arquivos, +21 novos); vite build OK; markup da landing balanceado.
 - touched: src/App.jsx, src/constants.js, src/demo.js, src/lib/fechamento-mensal.js (novo), src/lib/relatorios/datasets.js, landing/index.html, package.json, CLAUDE.md, modules/dashboard.md
 - PENDENTE OPERADOR: `npm run sb:login` (uma vez) + `npm run deploy:webhook` — a Fase 4 do agente WhatsApp ainda não está no ar.
+
+## [2026-08-27] fix | Auditoria da demo: duplicação, módulos de IA, e correção de doc que causou o bug
+- gatilho: usuário pediu auditoria da demo com atenção a erros; reportou clientes/funcionários duplicados
+- CAUSA RAIZ da duplicação: resetDemoData() varria o storage por chaves com prefixo `cmp_cmp_demo:` — formato que o DB.set NUNCA produz. Só SCOPED_SINGLETONS são reescritos, e como SUFIXO (`erp:config:cmp_default`). Registros normais ficam com a chave literal e o escopo vem do CAMPO `companyId` (DB.set carimba, DB.list filtra). O reset não apagava nada, mas apagava `erp:seeded` → seedDatabase rodava de novo e empilhava um 2º lote.
+- correção: em demo o window.storage já é Map em memória exclusivo → resetDemoData faz clear(). Guarda OBRIGATÓRIA `if (!isDemoMode()) return` — fora da demo esse objeto é o localStorage real e um clear() apagaria a empresa. Teste cobre os dois lados.
+- ORIGEM DO BUG: CLAUDE.md afirmava que chaves escopadas viram `cmp_<id>:<key>`. Era falso e induziu o código. Seção "Multi-tenancy and scoping" reescrita com o comportamento real (campo vs. prefixo, sufixo nos singletons, coluna company_id no kv_store) + aviso explícito citando este bug. O wiki (concepts/db-layer.md) já estava correto — não precisou de mudança.
+- módulos fora da demo: além de IA/Atendimento, agora Pós-venda, Lembrete e Relatórios — os três chamam a API do Claude e um visitante queimaria token à toa. Aviso virou componente DemoModuloIndisponivel (motivo específico por módulo + CTA pro WhatsApp da equipe).
+- demo.test.js reescrito: cada caso reimporta demo.js via vi.resetModules(). markDemoStarted fixa a demo pro resto da vida do módulo (contrato intencional), e isso vazava entre testes.
+- auditoria sem achados (documentado): outbox usa localStorage direto MAS syncToSupabase/deleteFromSupabase barram a demo antes de enfileirar; evolution-manage (verify_jwt=false) valida caller internamente; webhook n8n de status de OS não existe mais; edge functions verify_jwt=true dão 401 sem sessão; uploads de Storage barrados por RLS.
+- PENDENTE (não feito, a decidir): ensureFechamentoMensal() não roda no boot da demo (caminho separado), então a fonte "Fechamentos mensais" fica vazia lá. Irrelevante enquanto Relatórios estiver fora da demo.
+- verificação: vitest 396/396; vite build OK.
+- touched: src/demo.js, src/demo.test.js, src/App.jsx, CLAUDE.md
