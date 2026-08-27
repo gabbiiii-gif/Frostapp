@@ -192,3 +192,18 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - touched: supabase/functions/whatsapp-webhook/index.ts, supabase/functions/whatsapp-webhook/debounce.ts (novo), debounce.test.ts (novo), modules/ia-atendimento.md, CLAUDE.md
 - PENDENTE OPERADOR: `supabase functions deploy whatsapp-webhook --no-verify-jwt`; (opcional) `supabase secrets set DEBOUNCE_SECONDS=12`. Sem deploy nada disso está no ar.
 - PENDENTE (a decidir): as 4 edge functions frost-* órfãs — apagar ou corrigir. Bugs: frost-handoff grava status='handoff' que viola o CHECK de ai_conversations (500 sempre); frost-propose-os grava payload pt-BR que o painel de aprovação não lê; frost-conversation faz INSERT em conversa 'closed' violando o UNIQUE (company_id, customer_phone).
+
+## [2026-08-27] fix+feat | Dashboard (KPIs zerados + filtro de período) e Fechamento mensal
+- gatilho: usuário relatou dashboard quase todo zerado, filtro 7/30/90/tudo/personalizado sem efeito, e pediu que o mês encerrado ficasse arquivado e consultável pelo Relatórios
+- CAUSA RAIZ dos zeros: Dashboard comparava os.status com "em_andamento"/"pendente"/"concluido" — valores que o ProcessModule NUNCA grava (fluxo real: aguardando → em_deslocamento → em_execucao → finalizado, + em_servico/aguardando_finalizacao do app do técnico). O donut "OS por status" listava justamente os 3 inexistentes.
+- correção: agrupamentos viraram fonte única em constants.js (STATUS_OS_EM_ANDAMENTO, STATUS_OS_PENDENTES, STATUS_OS_CONCLUIDAS, STATUS_OS_EM_REVISAO, STATUS_OS_ENCERRADAS_SEM_SERVICO), com legados inclusos p/ bases antigas e seed.
+- CAUSA RAIZ do filtro morto: `dateFilter` chegava como prop e nunca era usado (ESLint já apontava "defined but never used"). Agora vale para OS abertas, concluídas (por dataConclusao, não abertura), receita/despesa, taxa de conclusão e donut. Rótulos estampam o recorte; "em andamento"/"aguardando" seguem sendo estado atual de propósito.
+- taxa de conclusão: base era estado atual de todos os tempos misturado com recorte do mês; virou "das OS abertas no período, quantas fecharam".
+- NOVO Fechamento mensal: src/lib/fechamento-mensal.js (puro, 21 testes — fronteira de mês, fevereiro bissexto, atribuição por data de conclusão). ensureFechamentoMensal() no boot sela cada mês encerrado em `erp:fechamento:<AAAA-MM>` (novo SCOPED_PREFIX → escopo por empresa + audit + sync). Idempotente, nunca reescreve, pula mês sem movimento.
+- Relatórios: nova fonte "fechamentos" no registry (datasets.js) → busca e pergunta em pt-BR acham o histórico ("como foi julho?"). datasets.test.js atualizado (14 → 15 fontes).
+- landing: seção Planos (3 cartões + tabela comparativa) entre FAQ e CTA + link no menu. Fonte: docs/raw/planos-frosterp.pdf (valores Bronze 79/65, Prata 159/129, Ouro 279/229; IA 150 atend/mês, excedente R$ 0,90).
+- demo: load sem ?demo=1 encerra a demo na aba — a flag de sessão ficava presa e o app real na mesma aba caía sem sessão ("Sua sessão expirou"). Regressão introduzida pelo isolamento da demo do mesmo dia.
+- chore: CLI do Supabase virou devDependency + scripts npm (sb:login, deploy:webhook, deploy:fn) — não estava instalado na máquina.
+- verificação: vitest 388/388 (23 arquivos, +21 novos); vite build OK; markup da landing balanceado.
+- touched: src/App.jsx, src/constants.js, src/demo.js, src/lib/fechamento-mensal.js (novo), src/lib/relatorios/datasets.js, landing/index.html, package.json, CLAUDE.md, modules/dashboard.md
+- PENDENTE OPERADOR: `npm run sb:login` (uma vez) + `npm run deploy:webhook` — a Fase 4 do agente WhatsApp ainda não está no ar.

@@ -29,6 +29,7 @@ Sempre lido primeiro em qualquer query. Mantenha sub-200 linhas.
 - [Evolution multi-tenant](concepts/evolution-multitenant.md) — instance→company_id, no-op gracioso, infra Evolution/Storage compartilhada
 - [Travamento por Aparelho](concepts/device-locking.md) — vínculo membro↔aparelho, aprovação pelo superadmin (Fase 1: prova soft + portão no login)
 - [Modo Demonstração](concepts/demo-mode.md) — demo interativa da landing (?demo=1), seed local isolado, captura de lead
+- [Fechamento Mensal](modules/dashboard.md#fechamento-mensal) — mês encerrado vira `erp:fechamento:<AAAA-MM>`, consultável no Relatórios
 
 ## Fluxos
 
@@ -48,5 +49,7 @@ Sempre lido primeiro em qualquer query. Mantenha sub-200 linhas.
 - [009 Hardening segurança](decisions/009-hardening-seguranca-2026-05-19.md) — pentest interno: master takeover anon, backup público, storage anon — fechados
 
 ## Fontes
+
+- [Planos e módulos (PDF)](../raw/reference/planos-frosterp.pdf) — tabela de preços Bronze/Prata/Ouro que alimenta a seção Planos da landing
 
 - [Spec IA WhatsApp v2](../superpowers/specs/2026-05-18-ia-whatsapp-v2-design.md) — 4 extensões do agente IA + ingest (2026-05-18)
