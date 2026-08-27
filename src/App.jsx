@@ -15163,14 +15163,28 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
     const inicio = new Date(ano, mm - 1, 1).getTime();
     const fim = new Date(ano, mm, 1).getTime();
 
-    // Filtra OS finalizadas (concluido ou aguardando_finalizacao) cuja saída do técnico está no mês
+    // OS que representam serviço ENTREGUE no mês: já finalizadas, ou terminadas
+    // pelo técnico e aguardando a revisão do admin (que também é produção dele).
+    const statusProdutivos = [...STATUS_OS_CONCLUIDAS, "aguardando_finalizacao"];
+
+    // Este relatório vivia zerado por DOIS motivos independentes, e cada um
+    // sozinho já bastava:
+    //  1. filtrava por "concluido", status que o app não grava — o fluxo termina
+    //     em "finalizado";
+    //  2. exigia `tecnico.saida`, que só existe quando a OS é fechada pelo app
+    //     do técnico. Fechando pelo ERP (o caso real hoje: nenhuma OS da base
+    //     tem esse campo), a OS era descartada mesmo com o status certo.
+    // Agora a data degrada do mais preciso pro mais grosseiro, sem descartar
+    // serviço entregue.
+    const dataProdutividade = (os) =>
+      os.tecnico?.saida || os.dataConclusao || os.updatedAt || null;
+
     const filtradas = orders.filter((os) => {
-      const status = os.status;
-      if (!["concluido", "aguardando_finalizacao"].includes(status)) return false;
-      const saidaIso = os.tecnico?.saida;
-      if (!saidaIso) return false;
-      const t = new Date(saidaIso).getTime();
-      return t >= inicio && t < fim;
+      if (!statusProdutivos.includes(os.status)) return false;
+      const iso = dataProdutividade(os);
+      if (!iso) return false;
+      const t = new Date(iso).getTime();
+      return Number.isFinite(t) && t >= inicio && t < fim;
     });
 
     // Agrupa por tecnicoId
@@ -15183,6 +15197,7 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
           nome: os.tecnicoNome || "Sem técnico",
           total: 0,
           tempoTotalMs: 0,
+          comTempo: 0, // quantas OS têm chegada+saída (base da média de tempo)
           valorTotal: 0,
           ordens: [],
         };
@@ -15190,9 +15205,12 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
       const grupo = agrupado[tid];
       grupo.total += 1;
       grupo.ordens.push(os);
-      // Soma tempo de execução (chegada → saída)
+      // Soma tempo de execução (chegada → saída). Só as OS fechadas pelo app do
+      // técnico têm esses carimbos — a média é feita sobre ELAS, não sobre o
+      // total, senão fechar uma OS pelo ERP derrubaria o tempo médio do técnico.
       if (os.tecnico?.chegada && os.tecnico?.saida) {
         grupo.tempoTotalMs += new Date(os.tecnico.saida) - new Date(os.tecnico.chegada);
+        grupo.comTempo += 1;
       }
       // Soma valor cobrado (campo valorTotal ou valor da OS)
       grupo.valorTotal += Number(os.valorTotal || os.valor || 0);
@@ -15248,7 +15266,10 @@ function ProductivityReport({ orders, tecnicos, onClose }) {
                     <div className="font-semibold text-white">{s.nome}</div>
                     <div className="text-xs text-gray-400 mt-0.5">
                       Tempo médio:{" "}
-                      {formatDuracao(s.total > 0 ? s.tempoTotalMs / s.total : 0)}
+                      {formatDuracao(s.comTempo > 0 ? s.tempoTotalMs / s.comTempo : 0)}
+                      {s.comTempo === 0 && (
+                        <span className="text-gray-600"> (sem registro de chegada/saída)</span>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-4">
