@@ -17507,7 +17507,10 @@ export default function App() {
   // online e avisamos pra reentrar — senão acontece silenciosamente.
   const [sessionLost, setSessionLost] = useState(false);
   useEffect(() => {
-    if (!user || !supabase) { setSessionLost(false); return; }
+    // Na demo NÃO existe sessão por design (o cliente Supabase nasce sem token
+    // pra não enxergar dado real). Sem esta guarda o aviso aparecia em cima da
+    // demonstração o tempo todo, denunciando um problema que não existe.
+    if (!user || !supabase || isDemoMode()) { setSessionLost(false); return; }
     let alive = true;
     const check = async () => {
       if (typeof navigator !== "undefined" && navigator.onLine === false) return; // offline é esperado
