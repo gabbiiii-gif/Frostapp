@@ -84,11 +84,13 @@ describe("datasets — acessores", () => {
   });
 });
 
-describe("datasets — cobertura das 14 fontes da v1", () => {
+describe("datasets — cobertura das fontes registradas", () => {
   const esperados = [
     "os", "clientes", "agenda", "financeiro", "despesas_recorrentes",
     "funcionarios", "ponto", "ocorrencias", "vales", "contracheques",
     "produtos", "estoque", "fornecedores", "servicos",
+    // Fechamento mensal — histórico congelado de cada mês encerrado.
+    "fechamentos",
   ];
 
   it("todas as fontes da v1 estão registradas", () => {

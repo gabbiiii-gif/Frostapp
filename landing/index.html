@@ -222,6 +222,46 @@
 
   /* cards genéricos */
   .glass{backdrop-filter:blur(14px); background:rgba(13,26,46,.55); border:1px solid var(--line); border-radius:18px;}
+
+  /* -- Planos: cartoes + tabela comparativa ---------------------------- */
+  .planos-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:28px;}
+  .plano{position:relative; padding:22px 20px 20px; border-radius:16px; border:1px solid var(--line);
+    background:rgba(255,255,255,.025); display:flex; flex-direction:column;}
+  .plano.destaque{border-color:var(--cyan2); background:rgba(34,211,238,.07);
+    box-shadow:0 0 0 1px var(--cyan2), 0 22px 50px -28px rgba(34,211,238,.55);}
+  .plano-top{display:flex; align-items:baseline; justify-content:space-between; gap:10px;}
+  .plano h3{font-family:var(--display); font-weight:600; font-size:20px;}
+  .plano .selo{font-size:10.5px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); white-space:nowrap;}
+  .plano.destaque .selo{color:var(--cyan2);}
+  .plano .sub{margin:8px 0 14px; font-size:13.5px; color:var(--muted); text-wrap:pretty;}
+  .plano ul{list-style:none; margin:0 0 18px; padding:0; display:grid; gap:7px;}
+  .plano li{font-size:14px; display:flex; gap:8px; align-items:flex-start;}
+  .plano li::before{content:"\2713"; color:var(--cyan2); font-size:12px; line-height:1.5; flex:none;}
+  .plano li.herdado{color:var(--muted); font-size:13px;}
+  .plano li.herdado::before{content:"\21B3"; color:var(--muted);}
+  .plano .preco{margin-top:auto; padding-top:16px; border-top:1px solid var(--line);}
+  .plano .valor{font-family:var(--display); font-size:32px; font-weight:600; line-height:1;}
+  .plano .valor span{font-size:14px; font-weight:400; color:var(--muted);}
+  .plano .anual{font-size:12.5px; color:var(--cyan2); margin-top:5px;}
+  .plano .usuarios{font-size:12px; color:var(--muted); margin-top:8px;}
+
+  .tabela-wrap{margin-top:26px; overflow-x:auto; border:1px solid var(--line); border-radius:14px;}
+  table.planos{width:100%; border-collapse:collapse; font-size:14px; min-width:520px;}
+  table.planos th, table.planos td{padding:11px 14px; text-align:left; border-bottom:1px solid var(--line);}
+  table.planos thead th{font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); font-weight:500;}
+  table.planos th:not(:first-child), table.planos td:not(:first-child){text-align:center; width:16%;}
+  table.planos tbody tr:last-child td{border-bottom:0;}
+  table.planos tbody th{font-weight:400;}
+  table.planos .sim{color:var(--ok); font-weight:600;}
+  table.planos .nao{color:rgba(255,255,255,.25);}
+  table.planos .col-ouro{background:rgba(34,211,238,.05);}
+  .planos-nota{margin-top:14px; font-size:12.5px; color:var(--muted); text-wrap:pretty;}
+  .visualmente-oculto{position:absolute; width:1px; height:1px; padding:0; margin:-1px;
+    overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;}
+
+  @media (max-width:900px){
+    .planos-grid{grid-template-columns:1fr;}
+  }
   .pain-list{display:flex; flex-direction:column; gap:14px; margin-top:30px;}
   .pain{padding:18px 20px; border-radius:14px; border:1px solid var(--line);
     background:rgba(255,255,255,.025); display:flex; gap:15px; align-items:flex-start;}
@@ -456,6 +496,7 @@
   <nav class="topnav">
     <a href="#solucao">Recursos</a>
     <a href="#demo">Demo</a>
+    <a href="#planos">Planos</a>
     <a href="#faq">FAQ</a>
   </nav>
   <a class="btn btn-ghost" href="#cta">Agendar reunião</a>
@@ -557,6 +598,97 @@
         <div class="faq-item" data-reveal><button class="faq-q" type="button" aria-expanded="false">Funciona no celular?<span class="pm" aria-hidden="true">+</span></button><div class="faq-a"><div>Sim. Interface responsiva para usar em qualquer dispositivo.</div></div></div>
       </div>
     </div></div>
+  </section>
+
+  <!-- 05b PLANOS -->
+  <section class="panel" id="planos" data-side="center" data-screen-label="Planos">
+    <div class="panel-inner" style="flex-direction:column;">
+      <div style="width:100%; max-width:1040px; margin:0 auto;">
+        <h2 class="h-sec" data-reveal style="text-align:center;">Planos e m&oacute;dulos</h2>
+        <p class="lead" data-reveal style="text-align:center; margin-left:auto; margin-right:auto;">
+          Tr&ecirc;s planos, montados por m&oacute;dulo. Cada plano inclui tudo do anterior &mdash; a empresa
+          come&ccedil;a pelo operacional e vai acrescentando financeiro e intelig&ecirc;ncia conforme cresce.
+        </p>
+
+        <div class="planos-grid">
+          <div class="plano" data-reveal>
+            <div class="plano-top"><h3>Bronze</h3><span class="selo">4 m&oacute;dulos</span></div>
+            <p class="sub">O essencial da opera&ccedil;&atilde;o em campo.</p>
+            <ul>
+              <li>Dashboard</li>
+              <li>Ordem de servi&ccedil;o</li>
+              <li>Cadastro</li>
+              <li>Agenda</li>
+            </ul>
+            <div class="preco">
+              <div class="valor">R$ 79 <span>/m&ecirc;s</span></div>
+              <div class="anual">R$ 65/m&ecirc;s no plano anual</div>
+              <div class="usuarios">2 usu&aacute;rios inclusos &middot; extra R$ 19/m&ecirc;s</div>
+            </div>
+          </div>
+
+          <div class="plano" data-reveal>
+            <div class="plano-top"><h3>Prata</h3><span class="selo">Bronze + 1</span></div>
+            <p class="sub">Os 4 m&oacute;dulos do Bronze, mais o controle do dinheiro.</p>
+            <ul>
+              <li class="herdado">Tudo do Bronze</li>
+              <li>Financeiro e folha de pagamento</li>
+            </ul>
+            <div class="preco">
+              <div class="valor">R$ 159 <span>/m&ecirc;s</span></div>
+              <div class="anual">R$ 129/m&ecirc;s no plano anual</div>
+              <div class="usuarios">3 usu&aacute;rios inclusos &middot; extra R$ 19/m&ecirc;s</div>
+            </div>
+          </div>
+
+          <div class="plano destaque" data-reveal>
+            <div class="plano-top"><h3>Ouro</h3><span class="selo">Completo</span></div>
+            <p class="sub">Tudo do Bronze e do Prata, mais a camada de intelig&ecirc;ncia.</p>
+            <ul>
+              <li class="herdado">Tudo do Prata</li>
+              <li>IA de atendimento</li>
+              <li>Relat&oacute;rios</li>
+              <li>P&oacute;s-venda</li>
+            </ul>
+            <div class="preco">
+              <div class="valor">R$ 279 <span>/m&ecirc;s</span></div>
+              <div class="anual">R$ 229/m&ecirc;s no plano anual</div>
+              <div class="usuarios">5 usu&aacute;rios inclusos &middot; extra R$ 29/m&ecirc;s</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tabela-wrap" data-reveal>
+          <table class="planos">
+            <caption class="visualmente-oculto">Comparativo de m&oacute;dulos por plano</caption>
+            <thead>
+              <tr>
+                <th scope="col">M&oacute;dulo</th>
+                <th scope="col">Bronze</th>
+                <th scope="col">Prata</th>
+                <th scope="col" class="col-ouro">Ouro</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><th scope="row">Dashboard</th><td class="sim">&#10003;</td><td class="sim">&#10003;</td><td class="sim col-ouro">&#10003;</td></tr>
+              <tr><th scope="row">Ordem de servi&ccedil;o</th><td class="sim">&#10003;</td><td class="sim">&#10003;</td><td class="sim col-ouro">&#10003;</td></tr>
+              <tr><th scope="row">Cadastro</th><td class="sim">&#10003;</td><td class="sim">&#10003;</td><td class="sim col-ouro">&#10003;</td></tr>
+              <tr><th scope="row">Agenda</th><td class="sim">&#10003;</td><td class="sim">&#10003;</td><td class="sim col-ouro">&#10003;</td></tr>
+              <tr><th scope="row">Financeiro e folha de pagamento</th><td class="nao">&mdash;</td><td class="sim">&#10003;</td><td class="sim col-ouro">&#10003;</td></tr>
+              <tr><th scope="row">IA de atendimento</th><td class="nao">&mdash;</td><td class="nao">&mdash;</td><td class="sim col-ouro">&#10003;</td></tr>
+              <tr><th scope="row">P&oacute;s-venda</th><td class="nao">&mdash;</td><td class="nao">&mdash;</td><td class="sim col-ouro">&#10003;</td></tr>
+              <tr><th scope="row">Relat&oacute;rios</th><td class="nao">&mdash;</td><td class="nao">&mdash;</td><td class="sim col-ouro">&#10003;</td></tr>
+              <tr><th scope="row">Usu&aacute;rios inclusos</th><td>2</td><td>3</td><td class="col-ouro">5</td></tr>
+              <tr><th scope="row">Usu&aacute;rio extra</th><td>R$ 19/m&ecirc;s</td><td>R$ 19/m&ecirc;s</td><td class="col-ouro">R$ 29/m&ecirc;s</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <p class="planos-nota" data-reveal>
+          IA de atendimento (Ouro): 150 atendimentos/m&ecirc;s inclusos. Atendimento adicional: R$ 0,90 cada.
+        </p>
+      </div>
+    </div>
   </section>
 
   <!-- 06 CTA FINAL -->

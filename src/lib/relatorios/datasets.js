@@ -57,6 +57,33 @@ export const DATASETS = [
     ],
   },
   {
+    // Fechamento mensal: um registro por mês ENCERRADO, gravado automaticamente
+    // na virada (ensureFechamentoMensal em App.jsx). É a fonte para perguntas
+    // do tipo "como foi julho?" — o Dashboard só mostra o mês corrente, e sem
+    // isto o histórico teria que ser reconstruído OS por OS.
+    id: "fechamentos",
+    label: "Fechamentos mensais",
+    prefixo: "erp:fechamento:",
+    campoData: "data",
+    sensivel: false,
+    campos: [
+      { id: "mes", label: "Mês (AAAA-MM)", tipo: "texto" },
+      { id: "data", label: "Início do mês", tipo: "data" },
+      { id: "osAbertas", label: "OS abertas", tipo: "numero" },
+      { id: "osConcluidas", label: "OS concluídas", tipo: "numero" },
+      { id: "osCanceladas", label: "OS canceladas/não autorizadas", tipo: "numero" },
+      { id: "valorConcluidas", label: "Valor das OS concluídas", tipo: "moeda" },
+      { id: "ticketMedio", label: "Ticket médio", tipo: "moeda" },
+      { id: "receita", label: "Receita recebida", tipo: "moeda" },
+      { id: "despesas", label: "Despesas pagas", tipo: "moeda" },
+      { id: "saldo", label: "Saldo do mês", tipo: "moeda" },
+      { id: "aReceber", label: "A receber", tipo: "moeda" },
+      { id: "clientesNovos", label: "Clientes novos", tipo: "numero" },
+      { id: "tecnicoDestaque", label: "Técnico destaque", tipo: "texto" },
+      { id: "geradoEm", label: "Arquivado em", tipo: "data" },
+    ],
+  },
+  {
     id: "clientes",
     label: "Clientes",
     prefixo: "erp:client:",

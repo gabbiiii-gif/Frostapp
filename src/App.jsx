@@ -13,6 +13,7 @@ import { motion } from "motion/react";
 import gsap from "gsap";
 import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, masterEvolution, adminEvolution, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig, deviceEnroll, deviceVerify, masterDevices } from "./supabase.js";
 import { isDemoMode, DEMO_COMPANY_ID, markDemoStarted, resetDemoData, buildDemoUser, recordDemoLead } from "./demo.js";
+import { mesesAFechar, montarFechamento, fechamentoTemMovimento } from "./lib/fechamento-mensal.js";
 import { computePaymentState } from "./lib/pagamentos.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
@@ -147,6 +148,9 @@ import {
   CARGOS_GERENCIA,
   EQUIPMENT_TYPES,
   SERVICE_TYPES_OS,
+  STATUS_OS_EM_ANDAMENTO,
+  STATUS_OS_PENDENTES,
+  STATUS_OS_CONCLUIDAS,
 } from "./constants.js";
 
 // ─── Índice do catálogo de equipamentos por tipo interno ────────────────────
@@ -302,6 +306,8 @@ const SCOPED_PREFIXES = [
   // Relatórios salvos: guarda a CONFIGURAÇÃO (ReportSpec) da consulta por
   // empresa, nunca o resultado — reabrir recalcula com os dados atuais.
   "erp:relatorio:",
+  // Fechamento mensal: retrato congelado de cada mês encerrado (erp:fechamento:<AAAA-MM>)
+  "erp:fechamento:",
   // Log de consentimento LGPD (aceite de Termos + Privacidade no cadastro/convite)
   "erp:consent:",
   // Solicitações de exclusão de conta/dados pelo titular (LGPD art. 18)
@@ -633,6 +639,40 @@ const DB = {
 // Garante que existe uma "empresa padrão" e tagga todos os registros antigos
 // com `companyId`. Idempotente — pode ser chamado em todo boot.
 const DEFAULT_COMPANY_ID = "cmp_default";
+
+// Sela os meses já encerrados que ainda não têm fechamento.
+//
+// Roda no boot (junto das outras migrações). Idempotente por construção: só
+// cria a chave `erp:fechamento:<AAAA-MM>` que ainda não existe, e nunca toca em
+// mês já fechado — o snapshot nasce imutável, senão perde a serventia de ser
+// "o que valia quando o mês virou".
+//
+// O efeito prático é o que o dono espera: no primeiro acesso de agosto, julho
+// inteiro fica arquivado e o "Resumo do mês" do Dashboard começa do zero.
+// Passa pelo DB.set normal, então herda escopo por empresa, auditoria e sync.
+function ensureFechamentoMensal() {
+  try {
+    const existentes = DB.list("erp:fechamento:").map((f) => f?.mes).filter(Boolean);
+    const pendentes = mesesAFechar(new Date(), existentes);
+    if (!pendentes.length) return;
+
+    const serviceOrders = DB.list("erp:os:");
+    const transactions = DB.list("erp:finance:");
+    const clients = DB.list("erp:client:");
+
+    pendentes.forEach((mes) => {
+      const fechamento = montarFechamento({ mes, serviceOrders, transactions, clients });
+      // Mês sem nenhum movimento não vira registro: arquivo cheio de meses
+      // zerados só atrapalha quem for consultar depois.
+      if (!fechamentoTemMovimento(fechamento)) return;
+      DB.set("erp:fechamento:" + mes, fechamento);
+    });
+  } catch (e) {
+    // Fechamento é histórico, não caminho crítico: falhar aqui nunca pode
+    // impedir o app de abrir.
+    console.warn("[fechamento] falhou:", e?.message);
+  }
+}
 
 function ensureCompanyMigration() {
   try {
@@ -5592,37 +5632,76 @@ function Dashboard({ user, dateFilter, onNavigate }) {
   const mesAtual = now.getMonth();
   const anoAtual = now.getFullYear();
 
-  const receitaRealizadaMes = useMemo(() => {
-    return transactions
-      .filter((t) => {
-        if (t.tipo !== "receita" || t.status !== "pago" || !t.data) return false;
-        const d = new Date(t.data);
-        return d.getMonth() === mesAtual && d.getFullYear() === anoAtual;
-      })
-      .reduce((acc, t) => acc + (Number(t.valor) || 0), 0);
-  }, [transactions, mesAtual, anoAtual]);
+  // ── Duas escalas de tempo, de propósito ───────────────────────────────────
+  // "Resumo do mês" é sempre o mês CORRENTE (vira sozinho na virada do mês).
+  // Todo o resto obedece ao filtro de período da barra superior — que antes era
+  // recebido como prop e simplesmente ignorado: trocar 7/30/90 dias não mexia
+  // em nada na tela.
+  const osNoPeriodo = useMemo(
+    () => filterByDate(serviceOrders, "dataAbertura", dateFilter),
+    [serviceOrders, dateFilter],
+  );
+  const transacoesNoPeriodo = useMemo(
+    () => filterByDate(transactions, "data", dateFilter),
+    [transactions, dateFilter],
+  );
+  // Concluídas contam pela data em que FECHARAM, não pela de abertura: uma OS
+  // aberta em junho e finalizada em julho é produção de julho.
+  const osConcluidasNoPeriodo = useMemo(() => {
+    const fechadas = serviceOrders.filter(
+      (os) => STATUS_OS_CONCLUIDAS.includes(os.status) && os.dataConclusao,
+    );
+    return filterByDate(fechadas, "dataConclusao", dateFilter);
+  }, [serviceOrders, dateFilter]);
 
-  const despesasMes = useMemo(() => {
-    return transactions
-      .filter((t) => {
-        if (t.tipo !== "despesa" || t.status !== "pago" || !t.data) return false;
-        const d = new Date(t.data);
-        return d.getMonth() === mesAtual && d.getFullYear() === anoAtual;
-      })
-      .reduce((acc, t) => acc + (Number(t.valor) || 0), 0);
-  }, [transactions, mesAtual, anoAtual]);
+  const somaPagas = (lista, tipo) => lista
+    .filter((t) => t.tipo === tipo && t.status === "pago" && t.data)
+    .reduce((acc, t) => acc + (Number(t.valor) || 0), 0);
 
+  const receitaPeriodo = useMemo(() => somaPagas(transacoesNoPeriodo, "receita"), [transacoesNoPeriodo]);
+  const despesasPeriodo = useMemo(() => somaPagas(transacoesNoPeriodo, "despesa"), [transacoesNoPeriodo]);
+
+  // Mês corrente — independe do filtro. Zera sozinho todo dia 1º.
+  const doMesCorrente = (t) => {
+    const d = new Date(t.data);
+    return d.getMonth() === mesAtual && d.getFullYear() === anoAtual;
+  };
+  const receitaRealizadaMes = useMemo(
+    () => somaPagas(transactions.filter((t) => t.data && doMesCorrente(t)), "receita"),
+    [transactions, mesAtual, anoAtual],
+  );
+  const despesasMes = useMemo(
+    () => somaPagas(transactions.filter((t) => t.data && doMesCorrente(t)), "despesa"),
+    [transactions, mesAtual, anoAtual],
+  );
   const saldoMes = receitaRealizadaMes - despesasMes;
 
-  const osEmAndamento = useMemo(() => serviceOrders.filter((os) => os.status === "em_andamento").length, [serviceOrders]);
-  const osPendentes = useMemo(() => serviceOrders.filter((os) => os.status === "pendente").length, [serviceOrders]);
-  const osConcluidasMes = useMemo(() => {
-    return serviceOrders.filter((os) => {
-      if (os.status !== "concluido" || !os.dataConclusao) return false;
-      const d = new Date(os.dataConclusao);
-      return d.getMonth() === mesAtual && d.getFullYear() === anoAtual;
-    }).length;
-  }, [serviceOrders, mesAtual, anoAtual]);
+  // Estado ATUAL da operação — não filtra por período de propósito: uma OS
+  // aberta há 3 meses e ainda em execução continua sendo trabalho em aberto
+  // hoje. Os status vêm dos grupos de constants.js; comparar com as strings
+  // soltas "em_andamento"/"pendente"/"concluido" era o motivo de tudo aparecer
+  // zerado — o ProcessModule grava aguardando/em_deslocamento/em_execucao/
+  // finalizado, e nenhum desses batia.
+  const osEmAndamento = useMemo(
+    () => serviceOrders.filter((os) => STATUS_OS_EM_ANDAMENTO.includes(os.status)).length,
+    [serviceOrders],
+  );
+  const osPendentes = useMemo(
+    () => serviceOrders.filter((os) => STATUS_OS_PENDENTES.includes(os.status)).length,
+    [serviceOrders],
+  );
+  const osAbertasPeriodo = osNoPeriodo.length;
+  const osConcluidasMes = osConcluidasNoPeriodo.length;
+
+  // Texto curto do período ativo, pra estampar nos rótulos e não deixar dúvida
+  // sobre o que cada número está medindo.
+  const rotuloPeriodo = useMemo(() => {
+    const p = dateFilter?.period;
+    if (p === "custom" && dateFilter?.startDate && dateFilter?.endDate) {
+      return `${formatDate(dateFilter.startDate)} a ${formatDate(dateFilter.endDate)}`;
+    }
+    return { hoje: "hoje", "7dias": "7 dias", "30dias": "30 dias", "90dias": "90 dias", all: "todo o período" }[p] || "período";
+  }, [dateFilter]);
 
   const agendamentosHoje = useMemo(() => {
     const schedHoje = schedule.filter((s) => s.data && s.data.startsWith(todayStr)).length;
@@ -5635,23 +5714,34 @@ function Dashboard({ user, dateFilter, onNavigate }) {
 
   const clientesAtivos = useMemo(() => clients.filter((c) => c.status !== "inativo").length, [clients]);
 
+  // Taxa de conclusão do PERÍODO: das OS abertas na janela, quantas já fecharam.
+  // A base anterior misturava estado atual (em andamento + pendentes, de todos
+  // os tempos) com o recorte do mês, então o percentual não significava nada.
   const taxaConclusao = useMemo(() => {
-    const base = osEmAndamento + osPendentes + osConcluidasMes;
-    return base > 0 ? Math.round((osConcluidasMes / base) * 100) : 0;
-  }, [osEmAndamento, osPendentes, osConcluidasMes]);
+    const abertas = osNoPeriodo.length;
+    if (!abertas) return 0;
+    const fechadas = osNoPeriodo.filter((os) => STATUS_OS_CONCLUIDAS.includes(os.status)).length;
+    return Math.round((fechadas / abertas) * 100);
+  }, [osNoPeriodo]);
 
   const osPorStatus = useMemo(() => {
+    // Status reais do fluxo (STATUS_OS_KEYS). O donut listava "em_andamento",
+    // "pendente" e "concluido", que o ProcessModule nunca grava — ficava vazio.
     const defs = [
-      { key: "em_andamento", label: "Em andamento", color: "#06b6d4" },
-      { key: "pendente", label: "Pendentes", color: "#f59e0b" },
-      { key: "aguardando_finalizacao", label: "Aguard. final.", color: "#8b5cf6" },
-      { key: "concluido", label: "Concluidas", color: "#10b981" },
+      { key: "aguardando", label: "Aguardando", color: "#f59e0b" },
+      { key: "agendado", label: "Agendadas", color: "#0ea5e9" },
+      { key: "em_deslocamento", label: "Em deslocamento", color: "#22d3ee" },
+      { key: "em_execucao", label: "Em execução", color: "#3b82f6" },
+      { key: "em_servico", label: "Em serviço", color: "#2563eb" },
+      { key: "aguardando_finalizacao", label: "Aguard. revisão", color: "#8b5cf6" },
+      { key: "finalizado", label: "Finalizadas", color: "#10b981" },
       { key: "cancelado", label: "Canceladas", color: "#ef4444" },
+      { key: "nao_autorizada", label: "Não autorizadas", color: "#be123c" },
     ];
     return defs
-      .map((d) => ({ ...d, value: serviceOrders.filter((o) => o.status === d.key).length }))
+      .map((d) => ({ ...d, value: osNoPeriodo.filter((o) => o.status === d.key).length }))
       .filter((d) => d.value > 0);
-  }, [serviceOrders]);
+  }, [osNoPeriodo]);
   const totalOs = serviceOrders.length;
 
   const receitaSemanal = useMemo(() => {
@@ -5743,12 +5833,15 @@ function Dashboard({ user, dateFilter, onNavigate }) {
   const horaStr = now.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
   const dataStr = now.toLocaleDateString("pt-BR", { weekday: "long", day: "2-digit", month: "long" });
 
+  // Rótulos deixam explícito o que obedece ao filtro de período e o que é
+  // estado atual da operação — os dois convivem na mesma tela.
   const stats = [
-    { label: "OS em Andamento", value: osEmAndamento, icon: "🔧", grad: "from-cyan-500/25 to-cyan-500/0", to: "processos" },
-    { label: "OS Pendentes", value: osPendentes, icon: "⏳", grad: "from-amber-500/25 to-amber-500/0", to: "processos" },
-    { label: "Agendamentos Hoje", value: agendamentosHoje, icon: "📅", grad: "from-blue-500/25 to-blue-500/0", to: "agenda" },
-    { label: "Clientes Ativos", value: clientesAtivos, icon: "👥", grad: "from-violet-500/25 to-violet-500/0", to: "cadastro" },
-    { label: "Concluídas no Mês", value: osConcluidasMes, icon: "✅", grad: "from-emerald-500/25 to-emerald-500/0", to: "processos" },
+    { label: `OS abertas · ${rotuloPeriodo}`, value: osAbertasPeriodo, icon: "🗂️", grad: "from-sky-500/25 to-sky-500/0", to: "processos" },
+    { label: `Concluídas · ${rotuloPeriodo}`, value: osConcluidasMes, icon: "✅", grad: "from-emerald-500/25 to-emerald-500/0", to: "processos" },
+    { label: "OS em andamento (hoje)", value: osEmAndamento, icon: "🔧", grad: "from-cyan-500/25 to-cyan-500/0", to: "processos" },
+    { label: "OS aguardando (hoje)", value: osPendentes, icon: "⏳", grad: "from-amber-500/25 to-amber-500/0", to: "processos" },
+    { label: "Agendamentos hoje", value: agendamentosHoje, icon: "📅", grad: "from-blue-500/25 to-blue-500/0", to: "agenda" },
+    { label: "Clientes ativos", value: clientesAtivos, icon: "👥", grad: "from-violet-500/25 to-violet-500/0", to: "cadastro" },
   ];
 
   return (
@@ -5814,7 +5907,7 @@ function Dashboard({ user, dateFilter, onNavigate }) {
       </div>
 
       {/* STAT TILES */}
-      <div className="relative grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="relative grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
         {stats.map((s, i) => (
           <Reveal key={s.label} i={i}>
             <button onClick={() => onNavigate(s.to)} className={`group w-full text-left ${GLASS} p-4 hover:border-white/20 hover:bg-white/[0.06] transition`}>
@@ -5832,7 +5925,7 @@ function Dashboard({ user, dateFilter, onNavigate }) {
           <h3 className="text-white font-semibold self-start mb-4">Taxa de conclusão</h3>
           <Ring percent={taxaConclusao} color="#22d3ee">
             <CountUp value={taxaConclusao} format={(v) => `${Math.round(v)}%`} className="text-3xl font-bold text-white" />
-            <span className="text-[11px] text-gray-400 mt-1">{osConcluidasMes} concluídas</span>
+            <span className="text-[11px] text-gray-400 mt-1">{osConcluidasMes} concluídas · {rotuloPeriodo}</span>
           </Ring>
         </Reveal>
 
@@ -17177,6 +17270,9 @@ export default function App() {
       await seedDatabase();
       // Multi-tenant: garante company padrão e tagga registros legados
       ensureCompanyMigration();
+      // Arquiva os meses já encerrados que ainda não foram fechados.
+      // Depois da migração de empresa, pra que os registros já estejam taggeados.
+      ensureFechamentoMensal();
       // Backfill: empresas legadas precisam ter "financeiro" em allowedModules
       // pra que usuários com permissão custom marcando Financeiro vejam o módulo.
       ensureFinanceiroModuleEnabled();

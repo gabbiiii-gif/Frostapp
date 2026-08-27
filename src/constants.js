@@ -51,6 +51,32 @@ export const STATUS_OS_KEYS = [
   "nao_autorizada",
 ];
 
+// ─── Agrupamentos de status de OS ────────────────────────────────────────────
+// O fluxo real da OS tem 11 status (STATUS_OS_KEYS acima) e vários módulos
+// precisam raciocinar em GRUPOS ("está em andamento?", "já concluiu?"), não em
+// status individual. Antes cada lugar reinventava o agrupamento — o Dashboard
+// comparava com "em_andamento"/"pendente"/"concluido", que o ProcessModule
+// nunca grava (ele grava aguardando → em_deslocamento → em_execucao →
+// finalizado), e por isso os KPIs ficavam sempre zerados.
+//
+// Os status legados ("pendente", "em_andamento", "concluido") continuam nas
+// listas porque existem em bases antigas e no seed de demonstração.
+
+// Trabalho em execução agora.
+export const STATUS_OS_EM_ANDAMENTO = ["em_deslocamento", "em_execucao", "em_servico", "em_andamento"];
+
+// Aceita, mas ainda não começou.
+export const STATUS_OS_PENDENTES = ["aguardando", "agendado", "confirmado", "pendente"];
+
+// Técnico terminou e espera revisão do admin/gerente (Regra 4).
+export const STATUS_OS_EM_REVISAO = ["aguardando_finalizacao"];
+
+// Terminadas com serviço prestado. É o grupo que alimenta receita e produtividade.
+export const STATUS_OS_CONCLUIDAS = ["finalizado", "concluido"];
+
+// Encerradas SEM serviço — não entram em receita nem em taxa de conclusão.
+export const STATUS_OS_ENCERRADAS_SEM_SERVICO = ["cancelado", "nao_autorizada"];
+
 // Matriz de permissões por role — inclui módulo financeiro
 // Módulos novos:
 //   ponto  — Ponto Eletrônico (todos os usuários internos batem o próprio

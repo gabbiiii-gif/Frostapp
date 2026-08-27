@@ -7,6 +7,23 @@ import { supabaseUrl, supabaseKey } from './supabase.js';
 export const DEMO_COMPANY_ID = 'cmp_demo';
 const DEMO_FLAG = 'frost_demo';
 
+// Um carregamento de página SEM ?demo=1 encerra a demo naquela aba.
+//
+// A flag de sessão existe só para sobreviver à navegação INTERNA do app (que é
+// por estado, sem reload). Sem esta limpeza a aba ficava presa em modo demo pra
+// sempre: quem experimentava a demo e depois abria o app de verdade na mesma
+// aba caía num cliente Supabase sem sessão e via "Sua sessão expirou —
+// alterações não estão sincronizando". Como os dados da demo vivem em memória,
+// recarregar a página já reiniciava a demo de qualquer forma — encerrá-la aqui
+// é o comportamento coerente.
+//
+// Roda no import do módulo, antes de qualquer isDemoMode() (supabase.js decide
+// no init se o cliente nasce com ou sem sessão).
+try {
+  const naUrl = new URLSearchParams(window.location.search).get('demo') === '1';
+  if (!naUrl) sessionStorage.removeItem(DEMO_FLAG);
+} catch { /* sessionStorage indisponível — isDemoMode já tolera */ }
+
 // Detecta demo por querystring (?demo=1) ou flag de sessão (persiste ao navegar
 // dentro do app, já que a navegação é por estado e a URL não muda).
 export function isDemoMode() {
