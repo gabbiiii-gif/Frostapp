@@ -5,38 +5,38 @@
 import { supabaseUrl, supabaseKey } from './supabase.js';
 
 export const DEMO_COMPANY_ID = 'cmp_demo';
-const DEMO_FLAG = 'frost_demo';
-
-// Um carregamento de página SEM ?demo=1 encerra a demo naquela aba.
+// A demo dura enquanto a PÁGINA viver. Não persiste em sessionStorage.
 //
-// A flag de sessão existe só para sobreviver à navegação INTERNA do app (que é
-// por estado, sem reload). Sem esta limpeza a aba ficava presa em modo demo pra
-// sempre: quem experimentava a demo e depois abria o app de verdade na mesma
-// aba caía num cliente Supabase sem sessão e via "Sua sessão expirou —
-// alterações não estão sincronizando". Como os dados da demo vivem em memória,
-// recarregar a página já reiniciava a demo de qualquer forma — encerrá-la aqui
-// é o comportamento coerente.
+// Antes a flag ficava em sessionStorage pra sobreviver à navegação interna do
+// app — e ficava presa: quem experimentava a demo e depois abria o app de
+// verdade na mesma aba herdava o modo demo, com storage em memória (dados
+// somem da tela) e cliente Supabase sem sessão ("Sua sessão expirou").
 //
-// Roda no import do módulo, antes de qualquer isDemoMode() (supabase.js decide
-// no init se o cliente nasce com ou sem sessão).
-try {
-  const naUrl = new URLSearchParams(window.location.search).get('demo') === '1';
-  if (!naUrl) sessionStorage.removeItem(DEMO_FLAG);
-} catch { /* sessionStorage indisponível — isDemoMode já tolera */ }
+// Tentei limpar a flag no import deste módulo, mas demo.js e supabase.js se
+// importam mutuamente: se supabase.js for avaliado primeiro, ele lê a flag
+// ANTES da limpeza rodar e decide errado. Guardar em memória tira a ordem de
+// avaliação da jogada — não há estado entre carregamentos para dar errado.
+//
+// Não se perde nada: os dados da demo já vivem num Map em memória, então
+// recarregar a página sempre reiniciou a demo de qualquer forma.
+let _demoNaSessao = false;
 
-// Detecta demo por querystring (?demo=1) ou flag de sessão (persiste ao navegar
-// dentro do app, já que a navegação é por estado e a URL não muda).
+// Detecta demo por querystring (?demo=1) — o app não muda a URL ao navegar,
+// então o parâmetro acompanha a demo inteira — ou pela flag em memória, para o
+// caso de algum fluxo limpar a querystring no meio do caminho.
 export function isDemoMode() {
+  if (_demoNaSessao) return true;
   try {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('demo') === '1') return true;
-    return sessionStorage.getItem(DEMO_FLAG) === '1';
+    return new URLSearchParams(window.location.search).get('demo') === '1';
   } catch { return false; }
 }
 
-// Fixa a flag de sessão para a demo continuar mesmo sem a querystring.
+// Fixa a demo para o restante da vida desta página.
 export function markDemoStarted() {
-  try { sessionStorage.setItem(DEMO_FLAG, '1'); } catch { /* ignora */ }
+  _demoNaSessao = true;
+  // Higiene: se alguma aba antiga ainda carrega a flag da versão anterior,
+  // remove — senão ela reaparece como modo demo no próximo acesso real.
+  try { sessionStorage.removeItem('frost_demo'); } catch { /* ignora */ }
 }
 
 // Usuário sintético (Servidor/admin) só em memória/local — não passa por

@@ -791,6 +791,13 @@ function formatCurrency(value) {
   }).format(value || 0);
 }
 
+// "14/07 a 20/07" — rótulo curto de um intervalo de datas, usado nos gráficos
+// semanais do Dashboard.
+function rotuloIntervalo(inicio, fim) {
+  const dm = (d) => `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`;
+  return `${dm(inicio)} a ${dm(fim)}`;
+}
+
 function formatDate(dateStr) {
   if (!dateStr) return "—";
   try {
@@ -5755,7 +5762,11 @@ function Dashboard({ user, dateFilter, onNavigate }) {
           const d = new Date(t.data); return d >= ws && d < we;
         })
         .reduce((a, t) => a + (Number(t.valor) || 0), 0);
-      weeks.push({ name: `S${8 - i}`, valor });
+      // Rótulo = intervalo real do bloco ("14/07 a 20/07"). Os blocos são
+      // janelas móveis de 7 dias contadas a partir de hoje, não semanas do
+      // calendário — "S1..S8" dava a entender o contrário.
+      const ultimoDia = new Date(we); ultimoDia.setDate(ultimoDia.getDate() - 1);
+      weeks.push({ name: rotuloIntervalo(ws, ultimoDia), valor });
     }
     return weeks;
   }, [transactions, now]);
@@ -5769,7 +5780,8 @@ function Dashboard({ user, dateFilter, onNavigate }) {
         if (os.status !== "concluido" || !os.dataConclusao) return false;
         const d = new Date(os.dataConclusao); return d >= ws && d < we;
       }).length;
-      weeks.push({ name: `S${8 - i}`, concluidas: count });
+      const ultimoDia = new Date(we); ultimoDia.setDate(ultimoDia.getDate() - 1);
+      weeks.push({ name: `S${8 - i}`, periodo: rotuloIntervalo(ws, ultimoDia), concluidas: count });
     }
     return weeks;
   }, [serviceOrders, now]);
@@ -5874,7 +5886,15 @@ function Dashboard({ user, dateFilter, onNavigate }) {
                       <stop offset="100%" stopColor="#06b6d4" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <Tooltip contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }} formatter={(v) => [formatCurrency(v), "Receita"]} />
+                  {/* Eixo oculto só para nomear o ponto: sem um XAxis com
+                      dataKey, o Recharts rotula o tooltip com o ÍNDICE do array
+                      (0..7) — aparecia "6" e "2" sem significado nenhum. */}
+                  <XAxis dataKey="name" hide />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }}
+                    labelFormatter={(l) => `Receita recebida · ${l}`}
+                    formatter={(v) => [formatCurrency(v), "Total"]}
+                  />
                   <Area type="monotone" dataKey="valor" stroke="#22d3ee" strokeWidth={2} fill="url(#recArea)" />
                 </AreaChart>
               )}
@@ -5975,7 +5995,13 @@ function Dashboard({ user, dateFilter, onNavigate }) {
               <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,140,170,0.12)" vertical={false} />
               <XAxis dataKey="name" stroke="rgba(120,140,170,0.6)" fontSize={11} tickLine={false} axisLine={false} />
               <YAxis stroke="rgba(120,140,170,0.6)" fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} width={28} />
-              <Tooltip cursor={{ fill: "rgba(120,140,170,0.08)" }} contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }} />
+              {/* O eixo mostra S1..S8 (cabe na largura); o tooltip abre o
+                  intervalo de datas real do bloco. */}
+              <Tooltip
+                cursor={{ fill: "rgba(120,140,170,0.08)" }}
+                contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }}
+                labelFormatter={(l, p) => p?.[0]?.payload?.periodo || l}
+              />
               <Bar dataKey="concluidas" name="Concluídas" fill="url(#barG)" radius={[6, 6, 0, 0]} maxBarSize={26} />
               </BarChart>
             )}
