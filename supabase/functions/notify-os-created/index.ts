@@ -1,6 +1,6 @@
 // Edge Function: notify-os-created
 // ─────────────────────────────────────────────────────────────────────────────
-// Dispara email pra admin/gerente da empresa + técnico atribuído quando uma
+// Dispara email pra admin/gerente da empresa + TODOS os técnicos escalados quando uma
 // nova OS é criada. Lê emails via auth.admin.getUserById (service_role).
 // Usa edge function send-email (Resend).
 //
@@ -22,7 +22,8 @@
 //       descricao?: string,
 //       valor?: number,
 //       tecnicoId?: string,        // legacy id em erp:user (mapeia em company_members.legacy_user_id)
-//       tecnicoNome?: string,
+//       tecnicoNome?: string,       // responsável (1º da equipe)
+//       tecnicos?: [{ id, nome }], // equipe completa; ausente em OS antiga
 //       dataAgendada?: string,
 //       horaAgendada?: string,
 //     }
@@ -58,13 +59,31 @@ function fmtDate(s: unknown): string {
   return d.toLocaleDateString("pt-BR");
 }
 
+// Equipe de técnicos da OS. Espelha `osTecnicos` de src/utils.js: uma OS pode
+// ter vários técnicos em `tecnicos`, e as antigas trazem só tecnicoId/Nome.
+// Se divergir daquele helper, o email lista gente diferente de quem vê a OS.
+function equipeTecnicos(os: Record<string, unknown>): Array<{ id: string; nome: string }> {
+  const lista = Array.isArray(os.tecnicos) ? os.tecnicos : [];
+  const limpos = lista
+    .filter((t: unknown) => t && typeof t === "object")
+    .map((t: Record<string, unknown>) => ({ id: String(t.id || ""), nome: String(t.nome || "").trim() }))
+    .filter((t) => t.id || t.nome);
+  if (limpos.length) return limpos;
+  const nome = String(os.tecnicoNome || "").trim();
+  if (os.tecnicoId || (nome && nome !== "—")) {
+    return [{ id: String(os.tecnicoId || ""), nome }];
+  }
+  return [];
+}
+
 function osEmailHtml(empresa: string, os: Record<string, unknown>): string {
   const numero = os.numero ? `#${os.numero}` : (os.id ? `#${String(os.id).slice(0, 8)}` : "");
   const cliente = os.clienteNome || "—";
   const equipamento = os.equipamentoTipo || "—";
   const descricao = os.descricao || "—";
   const valor = fmtCurrency(os.valor);
-  const tecnico = os.tecnicoNome || "—";
+  const equipe = equipeTecnicos(os).map((t) => t.nome).filter(Boolean);
+  const tecnico = equipe.length ? equipe.join(", ") : "—";
   const dataAg = fmtDate(os.dataAgendada);
   const horaAg = os.horaAgendada ? ` às ${String(os.horaAgendada)}` : "";
   return `
@@ -76,7 +95,7 @@ function osEmailHtml(empresa: string, os: Record<string, unknown>): string {
         <tr><td style="padding:6px 0; color:#6b7280;">Equipamento</td><td style="padding:6px 0;">${equipamento}</td></tr>
         <tr><td style="padding:6px 0; color:#6b7280;">Descrição</td><td style="padding:6px 0;">${descricao}</td></tr>
         <tr><td style="padding:6px 0; color:#6b7280;">Valor estimado</td><td style="padding:6px 0;">${valor}</td></tr>
-        <tr><td style="padding:6px 0; color:#6b7280;">Técnico atribuído</td><td style="padding:6px 0;">${tecnico}</td></tr>
+        <tr><td style="padding:6px 0; color:#6b7280;">${equipe.length > 1 ? "Técnicos" : "Técnico atribuído"}</td><td style="padding:6px 0;">${tecnico}</td></tr>
         <tr><td style="padding:6px 0; color:#6b7280;">Agendada para</td><td style="padding:6px 0;">${dataAg}${horaAg}</td></tr>
       </table>
       <p style="color:#6b7280; font-size:13px;">Abra o FrostERP pra ver detalhes e acompanhar.</p>
@@ -157,15 +176,18 @@ Deno.serve(async (req: Request) => {
     .eq("status", "ativo");
   (gestores || []).forEach((m) => recipientUserIds.add(m.user_id));
 
-  const tecnicoLegacyId = osData.tecnicoId ? String(osData.tecnicoId) : "";
-  if (tecnicoLegacyId) {
-    const { data: tec } = await admin
+  // TODOS os técnicos escalados, não só o responsável: a OS aparece no app de
+  // cada um deles, então o aviso tem que chegar em todos.
+  const idsEquipe = equipeTecnicos(osData).map((t) => t.id).filter(Boolean);
+  if (idsEquipe.length) {
+    const { data: tecs } = await admin
       .from("company_members")
       .select("user_id")
       .eq("company_id", companyId)
-      .eq("legacy_user_id", tecnicoLegacyId)
-      .maybeSingle();
-    if (tec?.user_id) recipientUserIds.add(tec.user_id);
+      .in("legacy_user_id", idsEquipe);
+    (tecs || []).forEach((t: { user_id: string }) => {
+      if (t?.user_id) recipientUserIds.add(t.user_id);
+    });
   }
 
   if (recipientUserIds.size === 0) {
@@ -189,7 +211,7 @@ Deno.serve(async (req: Request) => {
   const html = osEmailHtml(empresaNome, osData);
 
   // Texto plano básico (fallback pra clientes sem HTML)
-  const text = `Nova OS ${numero} em ${empresaNome}. Cliente: ${osData.clienteNome || "—"}. Técnico: ${osData.tecnicoNome || "—"}. Valor: ${fmtCurrency(osData.valor)}.`;
+  const text = `Nova OS ${numero} em ${empresaNome}. Cliente: ${osData.clienteNome || "—"}. Técnicos: ${equipeTecnicos(osData).map((t) => t.nome).filter(Boolean).join(", ") || "—"}. Valor: ${fmtCurrency(osData.valor)}.`;
 
   const emailHeaders: Record<string, string> = {
     "Content-Type": "application/json",

@@ -1,7 +1,7 @@
 ---
 title: Ordens de Serviço (ProcessModule)
 type: module
-updated: 2026-05-10
+updated: 2026-08-27
 sources: []
 related:
   - ./cadastro.md
@@ -80,3 +80,44 @@ Botões abrem `generateOrcamentoHTML(os, clients)`, `generateOSHTML(os, clients)
 
 - [a expandir] Upload de fotos (`fotos[]`) → bucket Supabase `os-fotos` — tratado em [tecnico-mobile](./tecnico-mobile.md)
 - [a expandir] viewMode != "lista" não documentado
+
+## Equipe de técnicos (atualização 2026-08-27)
+
+Uma OS — e um agendamento — pode ter **mais de um técnico**.
+
+### Modelo
+
+- `os.tecnicos` = `[{ id, nome }]` — a equipe, na ordem de escalação.
+- `os.tecnicoId` / `os.tecnicoNome` — continuam existindo e apontam para o
+  **primeiro da lista** (o responsável, ★ na interface).
+
+O campo antigo foi mantido de propósito: **não houve migração de dados**. As OS
+anteriores, o feed iCal (`api/calendar.js`), o e-mail de OS criada e os
+documentos impressos leem o responsável e seguem funcionando. Quem precisa da
+equipe inteira usa os helpers.
+
+### Helpers (`src/utils.js`, testados)
+
+| Helper | Para quê |
+| --- | --- |
+| `osTecnicos(os)` | A equipe normalizada. OS antiga vira lista de um. **Leia sempre por aqui**, nunca do campo direto. |
+| `osTecnicoNomes(os)` | `"Ana, Beto"` para tabela, busca e documento |
+| `osTemTecnico(os, id, nome)` | Este técnico está escalado? Casa por id e, como rede, por nome |
+| `camposTecnicos(equipe)` | Devolve `{ tecnicos, tecnicoId, tecnicoNome }` já sincronizados para gravar |
+
+### Consequências espalhadas
+
+- **App do técnico** (Regra 4): a OS aparece para **todos** os escalados — na
+  lista, no gate de "é minha OS" e no push. Antes só o responsável via.
+- **Agenda**: o conflito de horário bate se **qualquer** técnico da equipe já
+  estiver ocupado, e a mensagem diz quem.
+- **Produtividade** (`ProductivityReport`): a OS conta para cada técnico, mas o
+  **valor é rateado em partes iguais**. Creditar o total cheio a cada um faria a
+  soma da tela passar do faturamento real. O total do cabeçalho conta OS
+  distintas, senão o trabalho em dupla contaria duas vezes.
+- **`notify-os-created`**: avisa todos os escalados. O helper `equipeTecnicos`
+  ali **espelha** `osTecnicos` — se um mudar, o outro precisa mudar junto, senão
+  o e-mail lista gente diferente de quem vê a OS.
+
+> A Agenda ganhou equipe também, mas o resto do sistema (dashboard, relatórios)
+> ainda lê `tecnicoNome` do agendamento, ou seja, só o responsável.
