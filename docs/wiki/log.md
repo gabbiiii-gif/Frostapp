@@ -291,3 +291,12 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - configuração por `data-*` no elemento: `data-type-text` (JSON array), `-speed`, `-delay`, `-pause`, `-delete`, `-blink`, `-cursor` (`"none"` remove) e `-variable="min,max"` (o `variableSpeed` do original)
 - verificação: vitest 406/406; happy-dom em 3 cenários — normal (começa vazio e chega à frase exata em 42 passos), `prefers-reduced-motion` (frase inteira na hora, sem cursor) e SEM GSAP (digita igual, só não pisca). Laço multi-frase testado à parte: alterna, volta e o fantasma escolhe a frase mais longa
 - touched: landing/index.html, landing/scroll.js, concepts/landing-scroll-3d.md
+
+## [2026-08-30] fix | Landing: título digitado vazava por cima do lead
+- gatilho: print do usuário — "em planilha." desenhado por cima do parágrafo — mais "tá muito rápido"
+- causa: o fantasma reservava a caixa, mas a camada viva era `position:absolute; inset:0`. Com absolute a altura da camada é a do h1, e o conteúdo que não couber TRANSBORDA em vez de empurrar. A camada viva pede mais linha que o fantasma porque leva o cursor `inline-block` junto, e `text-wrap:balance` (que o `.h-hero` usa) reequilibra diferente com ele
+- correção: fantasma e camada viva empilhados na MESMA célula de grid (`display:grid` + `grid-area:1/1`) em vez de absolute. A linha do grid cresce pelo maior dos dois — não existe transbordo, seja qual for a causa. Escolhido por ser robusto à causa, não por depender do diagnóstico estar certo
+- `white-space:pre-wrap` no `.text-type__content` (estava no CSS original do React Bits e eu tinha deixado de fora): sem ele o espaço no fim do trecho digitado colapsa e o texto treme a cada palavra
+- velocidade: 52ms → 92ms, faixa variável 38–95 → 68–145. A frase passa de ~3,2s para ~4,8s
+- verificação: happy-dom confirma a estrutura montada e o texto final igual ao fantasma; asserções de regex garantem que o `position:absolute` saiu e o grid entrou. O empilhamento em si é CSS — não dá pra verificar sem browser
+- touched: landing/index.html

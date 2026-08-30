@@ -217,9 +217,17 @@
      invisível da frase mais longa: ele segura a caixa do título pra lead e
      botões não pularem enquanto o texto é digitado letra a letra. Sem a classe
      .tt-on (JS não rodou) o h1 aparece normal, com a frase inteira. */
-  .text-type{position:relative;}
+  /* Fantasma e texto digitado empilhados na MESMA célula de grid, não com
+     position:absolute. Com absolute a camada viva podia precisar de mais linhas
+     que o fantasma (o cursor inline-block muda o text-wrap:balance) e vazava por
+     cima do parágrafo. No grid a linha cresce pelo maior dos dois: não há como
+     sobrepor. */
+  .text-type.tt-on{display:grid;}
+  .text-type.tt-on .tt-ghost,
+  .text-type.tt-on .tt-live{grid-area:1 / 1;}
   .text-type .tt-ghost{visibility:hidden;}
-  .text-type.tt-on .tt-live{position:absolute; inset:0;}
+  /* espaço no fim do trecho digitado não pode colapsar, senão o texto treme */
+  .text-type__content{white-space:pre-wrap;}
   .text-type__cursor{
     display:inline-block; margin-left:.06em; font-size:.58em; line-height:1;
     vertical-align:baseline; color:var(--cyan2); opacity:.9;
@@ -618,7 +626,7 @@
       <!-- data-type-text aceita uma lista: com 2+ frases ele apaga e alterna em laço;
            com 1 só, digita uma vez e para. O texto abaixo é o que aparece sem JS. -->
       <h1 class="h-hero text-type" data-type-text='["Refrigeração não se gerencia em planilha."]'
-          data-type-speed="52" data-type-delay="450" data-type-variable="38,95"
+          data-type-speed="92" data-type-delay="450" data-type-variable="68,145"
           data-type-cursor="█">Refrigeração não se gerencia em planilha.</h1>
       <p class="lead" data-reveal>OS, agenda de manutenção, financeiro e estoque num sistema só. Sem instalação, sem fidelidade.</p>
       <div class="cta-row" data-reveal>
