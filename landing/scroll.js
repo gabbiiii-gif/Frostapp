@@ -128,115 +128,6 @@
   start();
 })();
 
-// ===== Carrossel de módulos (independente do 3D) =====
-(function () {
-  const MODS = {
-    dashboard: {
-      ico: "◴", name: "Dashboard", tag: ["core", "Núcleo"],
-      desc: "A visão de comando da operação. KPIs do dia, gráficos e atividade recente numa tela só.",
-      feats: ["OS em andamento", "Receita do mês", "Clientes ativos", "Gráficos em tempo real"],
-    },
-    os: {
-      ico: "▦", name: "Ordens de Serviço", tag: ["core", "Núcleo"],
-      desc: "O coração do FrostERP. Kanban de \"Aguardando\" a \"Finalizado\", com histórico técnico, fotos do serviço e assinatura digital do cliente. Nada se perde no caminho.",
-      feats: ["Lista + Kanban", "Fotos e histórico", "Assinatura digital", "Revisão por admin"],
-    },
-    financeiro: {
-      ico: "◷", name: "Financeiro", tag: ["core", "Núcleo"],
-      desc: "Operacional conversando com o caixa. Pipeline a receber, a pagar, vencidos e saldo previsto — com relatórios prontos pra imprimir.",
-      feats: ["A receber / a pagar", "Vencidos e saldo previsto", "Receitas e despesas", "Relatórios imprimíveis"],
-    },
-    agenda: {
-      ico: "▤", name: "Agenda", tag: ["core", "Núcleo"],
-      desc: "Atividades dos técnicos sincronizadas com cada OS. Exporta direto pro Google Calendar e Outlook via feed iCal.",
-      feats: ["Agenda por técnico", "Sincronizada com a OS", "Feed iCal", "Google / Outlook"],
-    },
-    cadastro: {
-      ico: "⬡", name: "Cadastro", tag: ["core", "Núcleo"],
-      desc: "Tudo centralizado num lugar: clientes, funcionários, fornecedores, produtos, serviços e movimentação de estoque.",
-      feats: ["Clientes e fornecedores", "Produtos e serviços", "Funcionários", "Movimentação de estoque"],
-    },
-    config: {
-      ico: "⚙", name: "Configurações", tag: ["core", "Núcleo"],
-      desc: "Controle total da conta da empresa. Usuários e permissões por papel, 2FA, login biométrico, backup automático e segurança.",
-      feats: ["Usuários e permissões", "2FA + biometria", "Backup automático", "Segurança da empresa"],
-    },
-    ia: {
-      ico: "✦", name: "IA / Atendimento", tag: ["add", "Adicional"],
-      desc: "Um agente no WhatsApp que atende seus clientes 24/7: responde dúvidas, propõe Ordens de Serviço pra sua aprovação e passa pro humano quando precisa.",
-      feats: ["Atende no WhatsApp", "Propõe OS pra aprovar", "Handoff pro humano", "Ativado sob demanda"],
-    },
-    posvenda: {
-      ico: "↻", name: "Pós-venda", tag: ["add", "Adicional"],
-      desc: "Mantém o cliente perto depois do serviço. Follow-up automático, pesquisas e campanhas — personalizado de empresa para empresa.",
-      feats: ["Follow-up automático", "Pesquisa de satisfação", "Campanhas", "Personalizável por empresa"],
-    },
-    custom: {
-      ico: "✜", name: "Módulos sob medida", tag: ["custom", "Exclusivo"],
-      desc: "Precisa de algo que nenhum ERP de prateleira tem? A gente desenha e constrói o módulo específico pra sua operação — do seu jeito, na sua realidade.",
-      feats: ["Feito pra sua operação", "Integra com o que já existe", "Do levantamento ao deploy", "Evolui junto com você"],
-    },
-  };
-
-  function renderDetail(key) {
-    const m = MODS[key];
-    const detail = document.getElementById("mod-detail");
-    if (!m || !detail) return;
-    detail.innerHTML =
-      '<div class="d-ico" aria-hidden="true">' + m.ico + "</div>" +
-      '<div class="d-body">' +
-        '<div class="d-head"><h3>' + m.name + "</h3>" +
-          '<span class="tag ' + m.tag[0] + '">' + m.tag[1] + "</span></div>" +
-        '<p class="d-desc">' + m.desc + "</p>" +
-        '<ul class="d-feats">' +
-          m.feats.map((f) => '<li><span class="ck" aria-hidden="true">✓</span>' + f + "</li>").join("") +
-        "</ul>" +
-      "</div>";
-    if (window.gsap) {
-      window.gsap.fromTo(detail, { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.4, ease: "power2.out" });
-    }
-  }
-
-  function initCarousel() {
-    const track = document.getElementById("car-track");
-    if (!track) return;
-    const cards = Array.from(track.querySelectorAll(".mod-card"));
-
-    cards.forEach((card) => {
-      // estado inicial de acessibilidade
-      card.setAttribute("aria-pressed", card.classList.contains("active") ? "true" : "false");
-      card.addEventListener("click", () => {
-        cards.forEach((c) => { c.classList.remove("active"); c.setAttribute("aria-pressed", "false"); });
-        card.classList.add("active");
-        card.setAttribute("aria-pressed", "true");
-        renderDetail(card.dataset.key);
-        card.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
-      });
-    });
-
-    const prev = document.querySelector(".car-prev");
-    const next = document.querySelector(".car-next");
-    const step = () => Math.max(220, track.clientWidth * 0.7);
-    prev && prev.addEventListener("click", () => track.scrollBy({ left: -step(), behavior: "smooth" }));
-    next && next.addEventListener("click", () => track.scrollBy({ left: step(), behavior: "smooth" }));
-
-    renderDetail("dashboard"); // estado inicial
-
-    // o painel de detalhe muda a altura da página → recalcula as posições
-    // dos ScrollTriggers (senão a explosão do #cta dispara cedo demais)
-    if (window.ScrollTrigger) {
-      window.ScrollTrigger.refresh();
-      setTimeout(() => window.ScrollTrigger.refresh(), 400);
-    }
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initCarousel);
-  } else {
-    initCarousel();
-  }
-})();
-
 // ===== ScrollStack — porte vanilla do <ScrollStack /> do React Bits =====
 // Fonte: https://reactbits.dev/components/scroll-stack (variante JS-CSS).
 // Mesma matemática de pin + escala + blur por profundidade do componente React.
@@ -247,7 +138,7 @@
 //  2. Offsets via offsetTop (layout) em vez de getBoundingClientRect: o rect é
 //     afetado pelo transform que a própria pilha aplica → realimentação.
 (function () {
-  const CFG = {
+  const PADRAO = {
     itemDistance: 120,       // espaço de rolagem entre um cartão e o próximo
     itemScale: 0.03,         // cada degrau da pilha fica um tico maior que o de baixo
     itemStackDistance: 40,   // desencontro vertical entre os cartões empilhados
@@ -256,7 +147,26 @@
     baseScale: 0.88,         // escala do cartão do fundo da pilha
     rotationAmount: 0,       // giro por profundidade (0 = pilha reta)
     blurAmount: 1.6,         // desfoque por profundidade (só no desktop)
+    blurMax: 5,              // teto do desfoque: com muitos cartões ele cresce sem fim
   };
+
+  // Afinação por pilha, via data-attribute no elemento [data-scroll-stack].
+  // Sem atributo, vale o PADRAO.
+  function cfgDe(root) {
+    const d = root.dataset;
+    const num = (k, p) => (d[k] === undefined || d[k] === "" ? p : parseFloat(d[k]));
+    return {
+      itemDistance: num("distance", PADRAO.itemDistance),
+      itemScale: num("scale", PADRAO.itemScale),
+      itemStackDistance: num("stackDistance", PADRAO.itemStackDistance),
+      stackPosition: num("stackPosition", PADRAO.stackPosition),
+      scaleEndPosition: num("scaleEnd", PADRAO.scaleEndPosition),
+      baseScale: num("baseScale", PADRAO.baseScale),
+      rotationAmount: num("rotation", PADRAO.rotationAmount),
+      blurAmount: num("blur", PADRAO.blurAmount),
+      blurMax: num("blurMax", PADRAO.blurMax),
+    };
+  }
 
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const narrow = window.matchMedia("(max-width: 820px)").matches;
@@ -276,6 +186,7 @@
     const endEl = root.querySelector(".scroll-stack-end");
     if (!cards.length || !endEl || reduced) return;  // reduced-motion: CSS já neutraliza
 
+    const CFG = cfgDe(root);
     const blurAmount = narrow ? 0 : CFG.blurAmount;
     const enterShift = narrow ? 44 : 110;
     // entra pelo lado em que o painel está ancorado (mesma regra do resto da página)
@@ -310,7 +221,8 @@
         const scaleP = progress(scrollTop, pinStart, cardTop - scaleEndPx);
         const scale = 1 - scaleP * (1 - (CFG.baseScale + i * CFG.itemScale));
         const rotation = CFG.rotationAmount ? i * CFG.rotationAmount * scaleP : 0;
-        const blur = blurAmount && i < topIndex ? (topIndex - i) * blurAmount : 0;
+        const blur = blurAmount && i < topIndex
+          ? Math.min(CFG.blurMax, (topIndex - i) * blurAmount) : 0;
 
         // pin: o cartão acompanha o scroll pra ficar parado na tela
         let translateY = 0;
