@@ -364,3 +364,149 @@
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();
 })();
+
+// ===== CardSwap — porte vanilla do <CardSwap /> do React Bits =====
+// Fonte: https://reactbits.dev/components/card-swap (variante JS-CSS).
+// O original já depende de GSAP, que a landing carrega, então a matemática dos
+// slots (makeSlot/placeNow) e a timeline de troca vieram inteiras. O que mudou:
+//  1. Camada React (refs, cloneElement, useEffect) virou DOM puro.
+//  2. As imagens são pré-carregadas: tela que não existe no servidor simplesmente
+//     não entra, e com menos de 2 telas a vitrine some em vez de mostrar quadro
+//     quebrado no meio da seção.
+//  3. Rodízio de telas: a pilha tem 5 cartões, mas o pool de telas pode ser maior.
+//     A troca de imagem acontece no instante em que o cartão da frente já caiu
+//     fora do quadro — então a mudança não aparece.
+//  4. Só anima com a seção na tela (IntersectionObserver): timeline rodando em
+//     background é CPU à toa.
+(function () {
+  const CFG = {
+    cardDistance: 56,       // desencontro horizontal entre cartões da pilha
+    verticalDistance: 46,   // desencontro vertical
+    delay: 5000,            // intervalo entre trocas
+    pauseOnHover: false,
+    skewAmount: 6,
+    dropDistance: 500,      // quanto o cartão da frente cai antes de voltar pro fundo
+    stackSize: 5,           // cartões visíveis na pilha (o resto entra por rodízio)
+    easing: "elastic",
+  };
+
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  const makeSlot = (i, distX, distY, total) => ({
+    x: i * distX, y: -i * distY, z: -i * distX * 1.5, zIndex: total - i,
+  });
+
+  const placeNow = (gsap, el, slot, skew) => gsap.set(el, {
+    x: slot.x, y: slot.y, z: slot.z, xPercent: -50, yPercent: -50,
+    skewY: skew, transformOrigin: "center center", zIndex: slot.zIndex, force3D: true,
+  });
+
+  // resolve true/false sem estourar: tela ausente não pode derrubar a seção
+  const preload = (src) => new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve(true);
+    img.onerror = () => resolve(false);
+    img.src = src;
+  });
+
+  function paint(card, shot) {
+    const img = card.querySelector("img");
+    const tag = card.querySelector(".swap-tag");
+    if (img) { img.src = shot.src; img.alt = "FrostERP — tela de " + shot.label; }
+    if (tag) tag.textContent = shot.label;
+  }
+
+  async function initSwap(stage) {
+    const gsap = window.gsap;
+    const shots = stage.closest(".demo-shots");
+    const declared = Array.from(stage.querySelectorAll(".swap-card"));
+    if (!shots || !declared.length) return;
+
+    // pool = só as telas que existem mesmo no servidor
+    const pool = [];
+    for (const card of declared) {
+      const img = card.querySelector("img");
+      const src = img && img.dataset.src;
+      if (src && (await preload(src))) pool.push({ src, label: card.dataset.label || "" });
+    }
+    if (pool.length < 2) { declared.forEach((c) => c.remove()); return; }
+
+    const total = Math.min(CFG.stackSize, pool.length);
+    declared.slice(total).forEach((c) => c.remove());
+    const cards = declared.slice(0, total);
+    cards.forEach((card, i) => paint(card, pool[i]));
+    let nextShot = total % pool.length;
+
+    shots.classList.add("ready");
+    cards.forEach((el, i) =>
+      placeNow(gsap, el, makeSlot(i, CFG.cardDistance, CFG.verticalDistance, total), CFG.skewAmount));
+
+    if (reduced) return;   // pilha estática, sem rodízio
+
+    const config = CFG.easing === "elastic"
+      ? { ease: "elastic.out(0.6,0.9)", durDrop: 2, durMove: 2, durReturn: 2, promoteOverlap: 0.9, returnDelay: 0.05 }
+      : { ease: "power1.inOut", durDrop: 0.8, durMove: 0.8, durReturn: 0.8, promoteOverlap: 0.45, returnDelay: 0.2 };
+
+    let order = cards.map((_, i) => i);
+
+    function swap() {
+      if (order.length < 2) return;
+      const [front, ...rest] = order;
+      const elFront = cards[front];
+      const tl = gsap.timeline();
+
+      tl.to(elFront, { y: "+=" + CFG.dropDistance, duration: config.durDrop, ease: config.ease });
+      tl.addLabel("promote", "-=" + config.durDrop * config.promoteOverlap);
+
+      rest.forEach((idx, i) => {
+        const el = cards[idx];
+        const slot = makeSlot(i, CFG.cardDistance, CFG.verticalDistance, total);
+        tl.set(el, { zIndex: slot.zIndex }, "promote");
+        tl.to(el, { x: slot.x, y: slot.y, z: slot.z, duration: config.durMove, ease: config.ease },
+          "promote+=" + i * 0.15);
+      });
+
+      const backSlot = makeSlot(total - 1, CFG.cardDistance, CFG.verticalDistance, total);
+      tl.addLabel("return", "promote+=" + config.durMove * config.returnDelay);
+      tl.call(() => {
+        gsap.set(elFront, { zIndex: backSlot.zIndex });
+        // o cartão está caído fora do quadro agora — trocar a tela aqui é invisível
+        if (pool.length > total) {
+          paint(elFront, pool[nextShot]);
+          nextShot = (nextShot + 1) % pool.length;
+        }
+      }, undefined, "return");
+      tl.to(elFront, { x: backSlot.x, y: backSlot.y, z: backSlot.z, duration: config.durReturn, ease: config.ease }, "return");
+      tl.call(() => { order = [...rest, front]; });
+    }
+
+    // roda só com a seção na tela. O intervalo nunca é destruído no meio de uma
+    // troca — parar a timeline pela metade deixaria a pilha desalinhada.
+    let visible = false;
+    let hovering = false;
+    setInterval(() => { if (visible && !hovering) swap(); }, CFG.delay);
+
+    // sempre via window: o identificador solto não resolve em todo contexto
+    const IO = window.IntersectionObserver;
+    if (IO) {
+      new IO((entries) => {
+        entries.forEach((e) => {
+          if (e.isIntersecting && !visible) { visible = true; swap(); }
+          else if (!e.isIntersecting) visible = false;
+        });
+      }, { threshold: 0.15 }).observe(shots);
+    } else { visible = true; swap(); }
+
+    if (CFG.pauseOnHover) {
+      shots.addEventListener("mouseenter", () => { hovering = true; });
+      shots.addEventListener("mouseleave", () => { hovering = false; });
+    }
+  }
+
+  function boot() {
+    if (!window.gsap) return void setTimeout(boot, 60);
+    document.querySelectorAll("[data-card-swap]").forEach(initSwap);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
+})();

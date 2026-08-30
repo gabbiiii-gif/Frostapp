@@ -128,6 +128,8 @@
     --line:rgba(255,255,255,.10);
     /* superfície de cartão quase opaca: o floco 3D passa ATRÁS, não através */
     --card:rgba(19,36,63,.92);
+    /* tamanho do cartão da vitrine de telas (CardSwap) */
+    --swap-w:460px; --swap-h:264px;
     --display:"Space Grotesk", system-ui, sans-serif;
     --body:"Geist", system-ui, sans-serif;
     --mono:"Geist Mono", ui-monospace, monospace;
@@ -368,6 +370,61 @@
     .mod-card{flex-basis:160px;}
   }
 
+  /* ---------- CARD SWAP — vitrine de telas do app ----------
+     Porte vanilla do <CardSwap /> do React Bits (reactbits.dev/components/card-swap).
+     O original já depende de GSAP, que a landing carrega — a matemática dos slots
+     veio inteira; só a camada React (refs + cloneElement) virou DOM puro. */
+  /* Uma coluna é o estado BASE, não o fallback: enquanto não houver tela
+     carregada em screens/, a vitrine fica escondida e a seção segue centrada
+     como sempre foi. A 2ª coluna só existe quando o JS confirma as imagens. */
+  .demo-top{display:grid; grid-template-columns:1fr; gap:30px; align-items:center;}
+  #demo .demo-top .h-sec, #demo .demo-top .lead{text-align:center; margin-left:auto; margin-right:auto;}
+  #demo .demo-nota{display:none;}
+  #demo .demo-top:has(.demo-shots.ready){grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);}
+  #demo .demo-top:has(.demo-shots.ready) .h-sec,
+  #demo .demo-top:has(.demo-shots.ready) .lead{text-align:left; margin-left:0; margin-right:0;}
+  #demo .demo-top:has(.demo-shots.ready) .demo-nota{display:block;}
+  .demo-nota{margin-top:16px; font-size:12.5px; color:var(--muted); font-family:var(--mono);
+    letter-spacing:.04em;}
+
+  /* o JS só liga a vitrine quando as imagens carregam de fato */
+  .demo-shots{display:none;}
+  .demo-shots.ready{display:block;}
+  /* moldura: recorta a queda do cartão e esvai a borda de baixo */
+  .shots-frame{
+    position:relative; height:clamp(320px,46vh,470px); overflow:hidden;
+    -webkit-mask-image:linear-gradient(to bottom,#000 74%,transparent 100%);
+    mask-image:linear-gradient(to bottom,#000 74%,transparent 100%);
+  }
+  .card-swap-stage{position:absolute; inset:0; perspective:900px; transform:translate(-13%,9%);}
+  .swap-card{
+    position:absolute; top:50%; left:50%;
+    width:var(--swap-w); height:var(--swap-h);
+    border-radius:14px; overflow:hidden; background:#0b1729;
+    border:1px solid rgba(148,197,255,.32);
+    box-shadow:0 30px 70px -30px rgba(0,0,0,.95);
+    transform-style:preserve-3d; will-change:transform; backface-visibility:hidden;
+  }
+  .swap-card img{width:100%; height:100%; object-fit:cover; object-position:left top; display:block;}
+  .swap-tag{
+    position:absolute; left:10px; bottom:10px;
+    font-family:var(--mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
+    padding:4px 9px; border-radius:99px; color:var(--cyan2);
+    background:rgba(6,16,30,.9); border:1px solid rgba(34,211,238,.35);
+  }
+  @media (max-width:1180px){ :root{--swap-w:390px; --swap-h:224px;} }
+  @media (max-width:980px){
+    #demo .demo-top:has(.demo-shots.ready){grid-template-columns:1fr; gap:16px;}
+    #demo .demo-top:has(.demo-shots.ready) .h-sec,
+    #demo .demo-top:has(.demo-shots.ready) .lead{text-align:center; margin-left:auto; margin-right:auto;}
+    .card-swap-stage{transform:translate(-7%,6%) scale(.82);}
+  }
+  @media (max-width:560px){
+    :root{--swap-w:300px; --swap-h:176px;}
+    .shots-frame{height:clamp(240px,38vh,320px);}
+    .card-swap-stage{transform:translate(-5%,4%) scale(.88);}
+  }
+
   /* faq */
   .faq-list{margin-top:30px; max-width:600px; display:flex; flex-direction:column; gap:10px;}
   .faq-item{border:1px solid var(--line); border-radius:13px; background:var(--card); backdrop-filter:blur(10px); overflow:hidden;}
@@ -585,9 +642,29 @@
   <!-- 03 DEMO — carrossel de módulos -->
   <section class="panel" id="demo" data-side="center" data-screen-label="Demo" data-dim="0.22">
     <div class="panel-inner" style="flex-direction:column;">
-      <div style="width:100%; max-width:980px; margin:0 auto;">
-        <h2 class="h-sec" data-reveal style="text-align:center;">Veja como funciona</h2>
-        <p class="lead" data-reveal style="text-align:center; margin-left:auto; margin-right:auto;">Clique em cada módulo e explore o que ele faz. Os 6 do núcleo vêm em todo plano — e dá pra ir além com módulos adicionais e até criados sob medida.</p>
+      <div style="width:100%; max-width:1100px; margin:0 auto;">
+        <div class="demo-top">
+          <div class="demo-copy">
+            <h2 class="h-sec" data-reveal>Veja como funciona</h2>
+            <p class="lead" data-reveal>Clique em cada módulo e explore o que ele faz. Os 6 do núcleo vêm em todo plano — e dá pra ir além com módulos adicionais e até criados sob medida.</p>
+            <p class="demo-nota" data-reveal>Telas reais do sistema</p>
+          </div>
+          <!-- vitrine de telas: 5 cartões na pilha, as 11 telas entram por rodízio -->
+          <div class="demo-shots" data-reveal>
+            <div class="shots-frame">
+              <div class="card-swap-stage" data-card-swap>
+            <div class="swap-card" data-label="Dashboard"><img data-src="screens/dashboard.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Ordens de Serviço"><img data-src="screens/os.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Agenda"><img data-src="screens/agenda.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Financeiro"><img data-src="screens/financeiro.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Cadastros"><img data-src="screens/cadastros.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Relatórios"><img data-src="screens/relatorios.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Lembrete"><img data-src="screens/lembrete.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Configurações"><img data-src="screens/config.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
+              </div>
+            </div>
+          </div>
+        </div>
 
         <div class="carousel" data-reveal>
           <button class="car-arrow car-prev" aria-label="Anterior">‹</button>

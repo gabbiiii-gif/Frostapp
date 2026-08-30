@@ -4,6 +4,7 @@ type: concept
 updated: 2026-08-30
 sources:
   - https://reactbits.dev/components/scroll-stack
+  - https://reactbits.dev/components/card-swap
 related:
   - ./demo-mode.md
 code_refs:
@@ -83,3 +84,34 @@ reescrita como IIFE no fim do `scroll.js`. Três desvios deliberados do original
 Os cartões da pilha **não** levam `data-reveal`: quem escreve o `transform` deles é o ScrollStack,
 e o GSAP brigaria pelo mesmo atributo. A entrada lateral deles vai no mesmo `transform`, derivada
 do próprio scroll.
+
+## CardSwap — vitrine de telas em `#demo`
+
+A seção "Veja como funciona" ganhou uma pilha 3D de screenshots do app, porte vanilla do
+[`<CardSwap />` do React Bits](https://reactbits.dev/components/card-swap). Esse original **já
+depende de GSAP**, que a landing carrega — então `makeSlot`/`placeNow` e a timeline de troca
+vieram inteiras; só a camada React virou DOM puro. Quatro acréscimos:
+
+1. **Pré-carga das imagens.** Cada `data-src` é testado com `new Image()` antes de montar. Tela
+   ausente não entra; com menos de duas a vitrine se apaga inteira em vez de mostrar quadro
+   quebrado. Isso é o que permite soltar os PNGs aos poucos sem quebrar a seção no ar.
+2. **Rodízio.** A pilha tem 5 cartões e o pool de telas é maior (8 hoje). A troca de `src`
+   acontece no callback do label `return`, quando o cartão da frente já caiu fora do quadro —
+   a mudança não aparece.
+3. **`IntersectionObserver`.** A timeline só roda com a seção na tela. O intervalo nunca é
+   destruído no meio de uma troca: parar a timeline pela metade deixaria a pilha desalinhada.
+   Sempre via `window.IntersectionObserver`, nunca o identificador solto.
+4. **Layout condicional.** Uma coluna é o estado **base** do `.demo-top`, não o fallback. A 2ª
+   coluna só aparece via `:has(.demo-shots.ready)`, ou seja, depois que o JS confirma as
+   imagens. Onde `:has()` não existe, fica em coluna única — que é o layout mobile, e funciona.
+
+A moldura (`.shots-frame`) recorta com `mask-image` a queda de 500px do cartão. A máscara fica
+num **ancestral** do elemento que tem `perspective`: `mask`/`filter` no próprio elemento com
+`perspective` achataria o 3D dos filhos.
+
+### Telas: nada de dado real
+
+`landing/screens/` guarda os PNGs e o README com os nomes esperados. As capturas devem sair do
+modo demonstração (`?demo=1`). As telas de **IA / Atendimento**, **Pós-Venda** e **Folha de
+Pagamento** foram deliberadamente deixadas de fora da primeira leva: as capturas traziam nome e
+telefone de clientes reais e nomes/valores de funcionários, e a landing é pública e indexada.

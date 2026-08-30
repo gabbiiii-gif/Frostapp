@@ -227,3 +227,14 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - `frostScene.setDim(0..1)` novo: opacidade relativa do floco por seção, lida de `data-dim` na `.panel` (demo 0.22, planos 0.25, dores/solucao 0.6, faq 0.55)
 - verificação: vitest 406/406; matemática do pin simulada de 640px a 1440px de altura (3 cartões encaixam em todas); IIFE do ScrollStack executada contra o DOM real via happy-dom sem erro
 - touched: landing/index.html, landing/scroll.js, landing/scene3d.js, concepts/landing-scroll-3d.md (nova), index.md
+
+## [2026-08-30] feature | Landing: CardSwap com telas do app na seção "Veja como funciona"
+- gatilho: usuário pediu o `<CardSwap />` do React Bits na seção e mandou 11 capturas de tela do app
+- mesma história do ScrollStack: landing é HTML estático, `npx shadcn add` não aplica. Portado pra vanilla no `scroll.js`. O CardSwap já depende de GSAP (que a landing carrega), então a matemática dos slots veio inteira
+- PRIVACIDADE: 3 das 11 capturas tinham dado real — IA/Atendimento e Pós-Venda com nome e telefone de clientes da MINAS REFRIGERAÇÃO, Folha de Pagamento com nomes de funcionários e valores. Sinalizado ao usuário, que mandou tirar. Ficaram 8 telas. `landing/screens/README.md` registra a regra (capturar sempre em `?demo=1`)
+- as imagens ainda NÃO estão no repo: só o README. O JS pré-carrega cada `data-src` e a vitrine se apaga sozinha enquanto não houver 2 telas — dá pra ir soltando os PNGs sem quebrar a seção no ar
+- bug pego no teste: o código checava `"IntersectionObserver" in window` mas chamava o identificador solto. Passa no browser por acaso (é global) e explode em qualquer contexto onde só o `window` tem a propriedade. Trocado por `window.IntersectionObserver`
+- layout: uma coluna é o estado BASE do `.demo-top`; a 2ª só aparece via `:has(.demo-shots.ready)`. Sem `:has()` ou sem imagens, fica coluna única — que é o layout mobile e funciona
+- verificação: vitest 406/406; CardSwap executado contra o DOM real via happy-dom com GSAP dublado — 8 telas declaradas viram pilha de 5, `.ready` só liga depois da carga, timeline com 6 `to` (1 queda + 4 promoções + 1 retorno), rodízio troca a tela do cartão caído. Caso de degradação testado à parte: sem nenhuma imagem os cartões somem e o carrossel/heading continuam
+- NÃO verificado: aparência. Sem browser headless no projeto — posições e escalas do `CFG` são chute informado
+- touched: landing/index.html, landing/scroll.js, landing/screens/README.md (novo), concepts/landing-scroll-3d.md
