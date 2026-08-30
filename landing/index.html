@@ -129,7 +129,7 @@
     /* superfície de cartão quase opaca: o floco 3D passa ATRÁS, não através */
     --card:rgba(19,36,63,.92);
     /* tamanho do cartão da vitrine de telas (CardSwap) */
-    --swap-w:460px; --swap-h:264px;
+    --swap-w:460px; --swap-h:240px;
     --display:"Space Grotesk", system-ui, sans-serif;
     --body:"Geist", system-ui, sans-serif;
     --mono:"Geist Mono", ui-monospace, monospace;
@@ -426,7 +426,7 @@
     padding:4px 9px; border-radius:99px; color:var(--cyan2);
     background:rgba(6,16,30,.9); border:1px solid rgba(34,211,238,.35);
   }
-  @media (max-width:1180px){ :root{--swap-w:390px; --swap-h:224px;} }
+  @media (max-width:1180px){ :root{--swap-w:390px; --swap-h:204px;} }
   @media (max-width:980px){
     #demo .demo-top:has(.demo-shots.ready){grid-template-columns:1fr; gap:16px;}
     #demo .demo-top:has(.demo-shots.ready) .h-sec,
@@ -434,7 +434,7 @@
     .card-swap-stage{transform:translate(-7%,6%) scale(.82);}
   }
   @media (max-width:560px){
-    :root{--swap-w:300px; --swap-h:176px;}
+    :root{--swap-w:300px; --swap-h:157px;}
     .shots-frame{height:clamp(240px,38vh,320px);}
     .card-swap-stage{transform:translate(-5%,4%) scale(.88);}
   }
@@ -667,14 +667,14 @@
           <div class="demo-shots" data-reveal>
             <div class="shots-frame">
               <div class="card-swap-stage" data-card-swap>
-            <div class="swap-card" data-label="Dashboard"><img data-src="screens/dashboard.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
-            <div class="swap-card" data-label="Ordens de Serviço"><img data-src="screens/os.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
-            <div class="swap-card" data-label="Agenda"><img data-src="screens/agenda.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
-            <div class="swap-card" data-label="Financeiro"><img data-src="screens/financeiro.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
-            <div class="swap-card" data-label="Cadastros"><img data-src="screens/cadastros.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
-            <div class="swap-card" data-label="Relatórios"><img data-src="screens/relatorios.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
-            <div class="swap-card" data-label="Lembrete"><img data-src="screens/lembrete.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
-            <div class="swap-card" data-label="Configurações"><img data-src="screens/config.png" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Dashboard"><img data-src="screens/dashboard.jpg" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Ordens de Serviço"><img data-src="screens/os.jpg" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Agenda"><img data-src="screens/agenda.jpg" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Financeiro"><img data-src="screens/financeiro.jpg" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Cadastros"><img data-src="screens/cadastros.jpg" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Relatórios"><img data-src="screens/relatorios.jpg" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Lembrete"><img data-src="screens/lembrete.jpg" alt="" loading="lazy"><span class="swap-tag"></span></div>
+            <div class="swap-card" data-label="Configurações"><img data-src="screens/config.jpg" alt="" loading="lazy"><span class="swap-tag"></span></div>
               </div>
             </div>
           </div>

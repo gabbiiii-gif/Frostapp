@@ -246,3 +246,12 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - `?preview=1` desenha cartões de mentira (sidebar + cabeçalho falsos + nome do módulo) no lugar das telas ausentes, pra conferir geometria e ritmo da pilha ANTES de exportar 8 imagens. Visitante sem o parâmetro continua caindo no caminho normal (vitrine escondida)
 - verificação: happy-dom nos dois caminhos — sem parâmetro 0 cartões e `.ready` false; com `?preview=1` pilha de 5 mocks, `.ready` true e a nota trocada pra "PRÉVIA"
 - touched: landing/scroll.js, landing/index.html
+
+## [2026-08-30] feature | Landing: as 8 telas do CardSwap entraram no repo
+- usuário soltou 11 JPEGs em `landing/screens/` com nome de WhatsApp. Identificadas uma a uma abrindo cada arquivo; renomeadas pros nomes que o `index.html` espera
+- 3 ficaram FORA: IA/Atendimento e Pós-Venda (nome + telefone de clientes reais) e Folha de Pagamento (nomes de funcionários e valores). Movidas pra `docs/raw/telas-com-dados-reais/`, que entrou no `.gitignore`
+- por que mover e não só deixar de referenciar: a Vercel serve TUDO que está em `landing/`. Arquivo parado ali vira URL pública mesmo sem estar no HTML — bastava alguém adivinhar o nome
+- formato: as capturas vieram JPEG (WhatsApp), não PNG. `data-src` trocado de `.png` pra `.jpg`
+- altura do cartão 264px → 240px: as capturas são 1600×~750 (~2,1:1) e com `object-fit:cover` a 264px o recorte comia 18% da direita; a 240px cai pra ~10%
+- verificação: os 8 `data-src` batem com arquivo existente em disco; happy-dom confirma pilha de 5 com os `.jpg` certos e rodízio entrando em Relatórios; `git diff --cached` confirma que nenhuma das 3 telas sensíveis foi pro commit
+- touched: landing/screens/ (8 jpg novos + README), landing/index.html, .gitignore

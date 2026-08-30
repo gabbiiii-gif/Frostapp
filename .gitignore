@@ -43,3 +43,6 @@ ios/App/App/public
 ios/.DS_Store
 
 .vercel
+
+# Capturas de tela com dado real de cliente — nunca publicar (a landing serve tudo que esta em landing/)
+docs/raw/telas-com-dados-reais/
