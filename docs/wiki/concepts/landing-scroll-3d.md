@@ -115,3 +115,41 @@ num **ancestral** do elemento que tem `perspective`: `mask`/`filter` no próprio
 modo demonstração (`?demo=1`). As telas de **IA / Atendimento**, **Pós-Venda** e **Folha de
 Pagamento** foram deliberadamente deixadas de fora da primeira leva: as capturas traziam nome e
 telefone de clientes reais e nomes/valores de funcionários, e a landing é pública e indexada.
+
+## Pilha de módulos em `#demo` — o carrossel de clicar saiu
+
+O carrossel de módulos (clicar num cartão → o painel de detalhe abaixo trocava de conteúdo)
+foi substituído por um ScrollStack: os 13 cartões chegam sozinhos na rolagem. O motivo é de
+produto — o carrossel escondia o conteúdo atrás de uma descoberta ("dá pra clicar aqui"), e
+quem apenas rolava a página via um módulo dos treze.
+
+Dois efeitos colaterais úteis da troca:
+
+- Os módulos passaram a existir no **HTML estático**. Antes viviam só no objeto `MODS` do
+  `scroll.js` e eram injetados por `innerHTML` — invisíveis para buscador e para quem está
+  sem JS.
+- A lista estava **desatualizada em 4 módulos**: Lembrete, Folha de Pagamento, Ponto
+  Eletrônico e Relatórios existem no `navItems` do app (`src/App.jsx`) e não apareciam na
+  landing. Ao portar, os 12 do ERP foram conferidos um a um contra o `navItems`.
+
+### Afinação por pilha (`data-*`)
+
+Três cartões baixos e treze cartões altos não aceitam os mesmos números, então o `CFG` do
+ScrollStack virou `PADRAO` + `cfgDe(root)`, que lê `data-distance`, `data-stack-distance`,
+`data-scale`, `data-base-scale`, `data-stack-position`, `data-blur` e `data-blur-max`. A
+pilha da seção de dores não declara nenhum e segue no padrão.
+
+Duas travas que os 13 cartões impuseram:
+
+- **`itemScale` teve de cair para 0.008.** A fórmula do React Bits é
+  `targetScale = baseScale + i * itemScale`. Com 0.03 e treze cartões, o do topo passaria de
+  **1** e ficaria MAIOR que o da frente — o oposto do efeito de profundidade.
+- **O desfoque ganhou teto (`blurMax`).** `blur = profundidade * blurAmount` é ilimitado no
+  original; com doze níveis de profundidade o cartão do fundo virava mancha.
+
+### O que foi removido junto
+
+A IIFE do carrossel no `scroll.js` (objeto `MODS`, `renderDetail`, `initCarousel`) e o CSS de
+`.carousel`, `.car-track`, `.car-arrow` e `.mod-card`. A base do pill subiu de `.mod-card .tag`
+para `.tag`: o antigo painel de detalhe usava `.tag` sem casar com aquele seletor, então o
+rótulo "Núcleo" saía como texto solto em vez de pill.

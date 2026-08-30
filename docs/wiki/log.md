@@ -267,3 +267,15 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - `resize` refaz as contas e reassenta a pilha (girar o celular)
 - verificação: geometria simulada em 16 resoluções de 320×568 a 1920×1080 — todas cabem na horizontal e na vertical, com a base do cartão da frente acima da linha de fade; happy-dom confirma pilha de 3 e rodízio
 - touched: landing/scroll.js, landing/index.html
+
+## [2026-08-30] feature | Landing: carrossel de módulos vira ScrollStack (e ganha os 4 que faltavam)
+- gatilho: "quero tirar o peso do usuário ter que clicar para ver sobre o módulo, faça igual na seção custa caro hoje"
+- o carrossel escondia conteúdo atrás de uma descoberta ("dá pra clicar"): quem só rolava via 1 módulo de 13. Trocado pelo mesmo ScrollStack da seção de dores
+- ACHADO no meio do caminho, apontado pelo usuário: a lista da landing estava desatualizada em 4 — Lembrete, Folha de Pagamento, Ponto Eletrônico e Relatórios existem no `navItems` de `src/App.jsx` e não apareciam. Agora são 13 cartões (12 do ERP + a oferta sob medida), conferidos um a um contra o `navItems`
+- descrições dos 4 novos escritas a partir do código, não inventadas: Ponto (facial + geofence + banco de horas + ocorrências), Folha (INSS/IRRF/FGTS por tabela 2026, vale descontado no mês seguinte), Relatórios (motor genérico, builder ou pergunta pt-BR, CSV/imprimível/WhatsApp), Lembrete (90d PJ / 180d PF, aviso antes de vencer)
+- efeito colateral bom: os módulos passaram a existir no HTML estático. Antes viviam só no objeto `MODS` do `scroll.js` e entravam por `innerHTML` — invisíveis pra buscador e pra quem está sem JS
+- `CFG` do ScrollStack virou `PADRAO` + `cfgDe(root)` lendo `data-*`. 3 cartões baixos e 13 altos não aceitam os mesmos números
+- duas travas que os 13 impuseram: `itemScale` caiu pra 0.008 (a fórmula `baseScale + i*itemScale` do React Bits passaria de 1 com 0.03, deixando o cartão do topo MAIOR que o da frente) e o desfoque ganhou teto `blurMax` (`profundidade * blurAmount` é ilimitado no original; com 12 níveis o fundo virava mancha)
+- removidos: IIFE do carrossel no `scroll.js` (MODS, renderDetail, initCarousel) e o CSS de `.carousel/.car-track/.car-arrow/.mod-card`. A base do pill subiu de `.mod-card .tag` pra `.tag` — o painel de detalhe usava `.tag` sem casar com aquele seletor e o rótulo saía como texto solto
+- verificação: vitest 406/406; happy-dom confirma 2 pilhas independentes (dores no padrão, demo com config própria) e os 13 cartões com 4 itens cada; cross-check automático contra o `navItems` do App.jsx não acusa módulo faltando; pin math simulada de 640px a 1080px de altura — os 13 encaixam e a pilha cabe na tela mesmo com cartão de 300px (mobile)
+- touched: landing/index.html, landing/scroll.js, concepts/landing-scroll-3d.md
