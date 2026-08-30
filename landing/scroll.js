@@ -386,15 +386,44 @@
     pauseOnHover: false,
     skewAmount: 6,
     dropDistance: 500,      // quanto o cartão da frente cai antes de voltar pro fundo
-    stackSize: 5,           // cartões visíveis na pilha (o resto entra por rodízio)
+    stackSize: 3,           // cartões visíveis na pilha (o resto entra por rodízio).
+                            // 3 é o teto real: com 4+ a separação vertical cai abaixo
+                            // de 28px em tela de laptop e a pilha vira um cartão só.
     easing: "elastic",
   };
 
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  const makeSlot = (i, distX, distY, total) => ({
-    x: i * distX, y: -i * distY, z: -i * distX * 1.5, zIndex: total - i,
+  const makeSlot = (i, geo, total) => ({
+    x: i * geo.distX, y: -i * geo.distY, z: -i * geo.depth, zIndex: total - i,
   });
+
+  // Mede a moldura e devolve a geometria que cabe nela. Em tela estreita a pilha
+  // RECUA (z) e SOBE (y) em vez de se abrir pro lado — abrir na horizontal é o
+  // que estourava a borda e cortava os cartões.
+  function measure(cards, stage, frame, total) {
+    const narrow = window.matchMedia("(max-width: 560px)").matches;
+    const mid = window.matchMedia("(max-width: 980px)").matches;
+    let distX = narrow ? 12 : mid ? 30 : CFG.cardDistance;
+    let distY = narrow ? 32 : mid ? 40 : CFG.verticalDistance;
+    const depth = narrow ? 104 : mid ? 92 : CFG.cardDistance * 1.5;
+
+    const span = Math.max(1, total - 1);
+    const cardW = cards[0].offsetWidth, cardH = cards[0].offsetHeight;
+    const frameW = frame.clientWidth, frameH = frame.clientHeight;
+    // trava dura: a caixa da pilha nunca passa da moldura, em largura nenhuma
+    if (frameW && cardW) distX = Math.min(distX, Math.max(0, (frameW - cardW - 16) / span));
+    // a caixa da pilha ocupa no máximo 75% da altura: o resto é a pista de queda
+    if (frameH && cardH) distY = Math.min(distY, Math.max(0, (frameH * 0.75 - cardH) / span));
+
+    // a pilha cresce pra cima e pra direita. Centraliza na horizontal e assenta a
+    // base do cartão da frente em 80% da altura — abaixo disso é onde a máscara
+    // esvai, e o cartão que se lê não pode cair dentro dela.
+    const shiftY = frameH ? frameH * 0.3 - cardH / 2 : span * distY / 2;
+    stage.style.transform =
+      "translate(" + (-span * distX / 2).toFixed(1) + "px," + shiftY.toFixed(1) + "px)";
+    return { distX, distY, depth };
+  }
 
   const placeNow = (gsap, el, slot, skew) => gsap.set(el, {
     x: slot.x, y: slot.y, z: slot.z, xPercent: -50, yPercent: -50,
@@ -456,13 +485,16 @@
     cards.forEach((card, i) => paint(card, pool[i]));
     let nextShot = total % pool.length;
 
+    const frame = stage.parentElement;
+    let geo = measure(cards, stage, frame, total);
+
     shots.classList.add("ready");
     if (PREVIEW) {
       const nota = shots.parentElement && shots.parentElement.querySelector(".demo-nota");
       if (nota) nota.textContent = "PRÉVIA — cartões de exemplo, não são as telas reais";
     }
-    cards.forEach((el, i) =>
-      placeNow(gsap, el, makeSlot(i, CFG.cardDistance, CFG.verticalDistance, total), CFG.skewAmount));
+    geo = measure(cards, stage, frame, total);
+    cards.forEach((el, i) => placeNow(gsap, el, makeSlot(i, geo, total), CFG.skewAmount));
 
     if (reduced) return;   // pilha estática, sem rodízio
 
@@ -483,13 +515,13 @@
 
       rest.forEach((idx, i) => {
         const el = cards[idx];
-        const slot = makeSlot(i, CFG.cardDistance, CFG.verticalDistance, total);
+        const slot = makeSlot(i, geo, total);
         tl.set(el, { zIndex: slot.zIndex }, "promote");
         tl.to(el, { x: slot.x, y: slot.y, z: slot.z, duration: config.durMove, ease: config.ease },
           "promote+=" + i * 0.15);
       });
 
-      const backSlot = makeSlot(total - 1, CFG.cardDistance, CFG.verticalDistance, total);
+      const backSlot = makeSlot(total - 1, geo, total);
       tl.addLabel("return", "promote+=" + config.durMove * config.returnDelay);
       tl.call(() => {
         gsap.set(elFront, { zIndex: backSlot.zIndex });
@@ -519,6 +551,16 @@
         });
       }, { threshold: 0.15 }).observe(shots);
     } else { visible = true; swap(); }
+
+    // girar o aparelho / redimensionar refaz as contas e reassenta a pilha
+    let rt = 0;
+    window.addEventListener("resize", () => {
+      clearTimeout(rt);
+      rt = setTimeout(() => {
+        geo = measure(cards, stage, frame, total);
+        order.forEach((idx, i) => placeNow(gsap, cards[idx], makeSlot(i, geo, total), CFG.skewAmount));
+      }, 150);
+    });
 
     if (CFG.pauseOnHover) {
       shots.addEventListener("mouseenter", () => { hovering = true; });

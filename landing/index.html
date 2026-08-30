@@ -392,11 +392,12 @@
   .demo-shots.ready{display:block;}
   /* moldura: recorta a queda do cartão e esvai a borda de baixo */
   .shots-frame{
-    position:relative; height:clamp(320px,46vh,470px); overflow:hidden;
-    -webkit-mask-image:linear-gradient(to bottom,#000 74%,transparent 100%);
-    mask-image:linear-gradient(to bottom,#000 74%,transparent 100%);
+    position:relative; height:clamp(340px,50vh,520px); overflow:hidden;
+    -webkit-mask-image:linear-gradient(to bottom,#000 82%,transparent 100%);
+    mask-image:linear-gradient(to bottom,#000 82%,transparent 100%);
   }
-  .card-swap-stage{position:absolute; inset:0; perspective:900px; transform:translate(-13%,9%);}
+  /* sem transform aqui: o JS mede a moldura e assenta a pilha (measure() no scroll.js) */
+  .card-swap-stage{position:absolute; inset:0; perspective:900px;}
   .swap-card{
     position:absolute; top:50%; left:50%;
     width:var(--swap-w); height:var(--swap-h);
@@ -427,16 +428,18 @@
     background:rgba(6,16,30,.9); border:1px solid rgba(34,211,238,.35);
   }
   @media (max-width:1180px){ :root{--swap-w:390px; --swap-h:204px;} }
+  /* janela baixa (laptop 768p) espreme a pilha tanto quanto janela estreita:
+     a moldura é 50vh, então cartão alto demais não deixa os degraus aparecerem */
+  @media (max-height:820px){ :root{--swap-w:390px; --swap-h:204px;} }
+  @media (max-height:660px){ :root{--swap-w:330px; --swap-h:172px;} }
   @media (max-width:980px){
     #demo .demo-top:has(.demo-shots.ready){grid-template-columns:1fr; gap:16px;}
     #demo .demo-top:has(.demo-shots.ready) .h-sec,
     #demo .demo-top:has(.demo-shots.ready) .lead{text-align:center; margin-left:auto; margin-right:auto;}
-    .card-swap-stage{transform:translate(-7%,6%) scale(.82);}
   }
   @media (max-width:560px){
-    :root{--swap-w:300px; --swap-h:157px;}
-    .shots-frame{height:clamp(240px,38vh,320px);}
-    .card-swap-stage{transform:translate(-5%,4%) scale(.88);}
+    :root{--swap-w:270px; --swap-h:141px;}
+    .shots-frame{height:clamp(300px,44vh,380px);}
   }
 
   /* faq */

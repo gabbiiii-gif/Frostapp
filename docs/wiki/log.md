@@ -255,3 +255,15 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - altura do cartão 264px → 240px: as capturas são 1600×~750 (~2,1:1) e com `object-fit:cover` a 264px o recorte comia 18% da direita; a 240px cai pra ~10%
 - verificação: os 8 `data-src` batem com arquivo existente em disco; happy-dom confirma pilha de 5 com os `.jpg` certos e rodízio entrando em Relatórios; `git diff --cached` confirma que nenhuma das 3 telas sensíveis foi pro commit
 - touched: landing/screens/ (8 jpg novos + README), landing/index.html, .gitignore
+
+## [2026-08-30] fix | Landing: pilha do CardSwap saía da moldura em tela estreita
+- gatilho: usuário mandou print com os cartões cortados na direita — "joga mais pra trás ou pra cima"
+- causa: a geometria era fixa (cardDistance 56 em qualquer largura) e a pilha se abre PRA DIREITA. Em moldura estreita a caixa passava da borda e o `overflow:hidden` cortava
+- `measure()` novo: lê `clientWidth/Height` da moldura e `offsetWidth/Height` do cartão, escolhe a faixa por media query e então APLICA UMA TRAVA — `distX ≤ (moldura − cartão − 16)/span`. Não tem largura em que estoure
+- em tela estreita a pilha agora RECUA (z) e SOBE (y) em vez de abrir pro lado, que era o pedido. Por isso `z` foi separado de `x`: no React Bits z é sempre `distX*1.5`, então encolher o avanço lateral encolhia junto a profundidade e a pilha virava um cartão só
+- o JS passou a ser dono do `transform` do palco (o CSS só guarda a `perspective`). A base do cartão da frente é assentada em 80% da altura da moldura: a máscara esvai a partir de 82% e o cartão que se lê não pode cair dentro dela
+- `stackSize` 5 → 3. Simulação em 16 resoluções mostrou que com 4+ a separação vertical cai abaixo de 28px em laptop e a pilha achata. Com 3 fica entre 32 e 46px em todas
+- breakpoint por ALTURA (`max-height:820px` e `660px`) além dos de largura: 1366×768 é largo mas baixo, e a moldura é 50vh — cartão alto demais não deixava os degraus aparecerem
+- `resize` refaz as contas e reassenta a pilha (girar o celular)
+- verificação: geometria simulada em 16 resoluções de 320×568 a 1920×1080 — todas cabem na horizontal e na vertical, com a base do cartão da frente acima da linha de fade; happy-dom confirma pilha de 3 e rodízio
+- touched: landing/scroll.js, landing/index.html
