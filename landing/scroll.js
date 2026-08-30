@@ -29,13 +29,20 @@
       },
     });
 
-    // ---- 2. Por painel: balanço do cristal + revelação do texto ----
+    // ---- 2. Por painel: balanço do cristal + entrada lateral do conteúdo ----
+    const narrow = window.matchMedia("(max-width: 820px)").matches;
+    const SHIFT = narrow ? 44 : 110;   // quanto o conteúdo desliza na horizontal
+    const USE_BLUR = !narrow;          // blur reblura a cada frame — pesado no celular
+
     const panels = gsap.utils.toArray(".panel");
     panels.forEach((panel, i) => {
       const side = panel.dataset.side || "center";
       // cristal vai para o lado OPOSTO ao texto
       const balance = side === "left" ? 1.9 : side === "right" ? -1.9 : 0;
       const twist = (i % 2 === 0 ? 1 : -1) * 0.25;
+      // data-dim: seções de texto denso pedem o floco discreto (default 1 = cheio)
+      const dimAttr = parseFloat(panel.dataset.dim);
+      const dim = isNaN(dimAttr) ? 1 : dimAttr;
 
       ScrollTrigger.create({
         trigger: panel,
@@ -45,34 +52,40 @@
           if (self.isActive) {
             fs.setBalance(balance);
             fs.setTwist(twist);
+            if (fs.setDim) fs.setDim(dim);
           }
         },
       });
 
-      // revelação dos elementos internos
+      // Entrada lateral: cada item entra pelo lado em que o painel está ancorado,
+      // com fade+blur amarrados à rolagem (scrub) — não é um disparo único.
       const items = panel.querySelectorAll("[data-reveal]");
-      if (items.length) {
-        if (reduced) {
-          gsap.set(items, { opacity: 1, y: 0, filter: "none" });
-        } else {
-          gsap.set(items, { opacity: 0, y: 34, filter: "blur(6px)" });
-          ScrollTrigger.create({
-            trigger: panel,
-            start: "top 72%",
-            onEnter: () => revealGroup(items),
-            once: false,
-            onEnterBack: () => revealGroup(items),
-          });
-        }
-      }
-    });
+      if (!items.length) return;
 
-    function revealGroup(items) {
-      gsap.to(items, {
-        opacity: 1, y: 0, filter: "blur(0px)",
-        duration: 0.9, ease: "power3.out", stagger: 0.09, overwrite: true,
+      if (reduced) {
+        gsap.set(items, { opacity: 1, x: 0, y: 0, filter: "none" });
+        return;
+      }
+
+      // painéis centrais alternam o lado pra não ficar monótono; o hero não desliza
+      const dir = side === "left" ? -1 : side === "right" ? 1 : (i % 2 === 0 ? -1 : 1);
+      const fromX = panel.id === "hero" ? 0 : dir * SHIFT;
+
+      gsap.set(items, {
+        opacity: 0,
+        x: fromX,
+        y: fromX ? 0 : 34,
+        filter: USE_BLUR ? "blur(6px)" : "none",
       });
-    }
+
+      gsap.timeline({
+        scrollTrigger: { trigger: panel, start: "top 88%", end: "top 38%", scrub: 0.7 },
+      }).to(items, {
+        opacity: 1, x: 0, y: 0,
+        filter: USE_BLUR ? "blur(0px)" : "none",
+        ease: "power2.out", duration: 1, stagger: 0.12,
+      });
+    });
 
     // ---- 4. Hero: título com anime.js (split em palavras) ----
     const heroTitle = document.querySelector("[data-hero-title]");
@@ -222,4 +235,132 @@
   } else {
     initCarousel();
   }
+})();
+
+// ===== ScrollStack — porte vanilla do <ScrollStack /> do React Bits =====
+// Fonte: https://reactbits.dev/components/scroll-stack (variante JS-CSS).
+// Mesma matemática de pin + escala + blur por profundidade do componente React.
+// Duas adaptações conscientes:
+//  1. SEM Lenis (dependência do pacote original): o smooth-scroll global dele
+//     sequestra o scroll da janela e brigaria com o ScrollTrigger que dirige o
+//     floco 3D. Aqui a leitura é do scroll nativo, num rAF com throttle.
+//  2. Offsets via offsetTop (layout) em vez de getBoundingClientRect: o rect é
+//     afetado pelo transform que a própria pilha aplica → realimentação.
+(function () {
+  const CFG = {
+    itemDistance: 120,       // espaço de rolagem entre um cartão e o próximo
+    itemScale: 0.03,         // cada degrau da pilha fica um tico maior que o de baixo
+    itemStackDistance: 40,   // desencontro vertical entre os cartões empilhados
+    stackPosition: 0.26,     // onde a pilha "gruda" (fração da altura da viewport)
+    scaleEndPosition: 0.12,  // onde a redução de escala termina
+    baseScale: 0.88,         // escala do cartão do fundo da pilha
+    rotationAmount: 0,       // giro por profundidade (0 = pilha reta)
+    blurAmount: 1.6,         // desfoque por profundidade (só no desktop)
+  };
+
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const narrow = window.matchMedia("(max-width: 820px)").matches;
+
+  // posição no documento por offsetTop — imune aos transforms da pilha
+  function docTop(el) {
+    let y = 0, node = el;
+    while (node) { y += node.offsetTop; node = node.offsetParent; }
+    return y;
+  }
+
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const progress = (v, a, b) => (b === a ? (v >= b ? 1 : 0) : clamp01((v - a) / (b - a)));
+
+  function initStack(root) {
+    const cards = Array.from(root.querySelectorAll(".scroll-stack-card"));
+    const endEl = root.querySelector(".scroll-stack-end");
+    if (!cards.length || !endEl || reduced) return;  // reduced-motion: CSS já neutraliza
+
+    const blurAmount = narrow ? 0 : CFG.blurAmount;
+    const enterShift = narrow ? 44 : 110;
+    // entra pelo lado em que o painel está ancorado (mesma regra do resto da página)
+    const panel = root.closest(".panel");
+    const side = (panel && panel.dataset.side) || "left";
+    const dirX = side === "right" ? 1 : -1;
+
+    cards.forEach((card, i) => {
+      if (i < cards.length - 1) card.style.marginBottom = CFG.itemDistance + "px";
+    });
+
+    const last = new Map();
+    let ticking = false;
+
+    function update() {
+      ticking = false;
+      const vh = window.innerHeight;
+      const scrollTop = window.scrollY;
+      const stackPx = CFG.stackPosition * vh;
+      const scaleEndPx = CFG.scaleEndPosition * vh;
+      const pinEnd = docTop(endEl) - vh / 2;
+
+      // qual cartão está no topo da pilha agora — define a profundidade do blur
+      let topIndex = 0;
+      for (let j = 0; j < cards.length; j++) {
+        if (scrollTop >= docTop(cards[j]) - stackPx - CFG.itemStackDistance * j) topIndex = j;
+      }
+
+      cards.forEach((card, i) => {
+        const cardTop = docTop(card);
+        const pinStart = cardTop - stackPx - CFG.itemStackDistance * i;
+        const scaleP = progress(scrollTop, pinStart, cardTop - scaleEndPx);
+        const scale = 1 - scaleP * (1 - (CFG.baseScale + i * CFG.itemScale));
+        const rotation = CFG.rotationAmount ? i * CFG.rotationAmount * scaleP : 0;
+        const blur = blurAmount && i < topIndex ? (topIndex - i) * blurAmount : 0;
+
+        // pin: o cartão acompanha o scroll pra ficar parado na tela
+        let translateY = 0;
+        if (scrollTop >= pinStart && scrollTop <= pinEnd) {
+          translateY = scrollTop - cardTop + stackPx + CFG.itemStackDistance * i;
+        } else if (scrollTop > pinEnd) {
+          translateY = pinEnd - cardTop + stackPx + CFG.itemStackDistance * i;
+        }
+
+        // entrada lateral + fade no MESMO transform (o GSAP não toca nestes cartões)
+        const enterP = progress(scrollTop, cardTop - vh, cardTop - vh * 0.62);
+        const translateX = (1 - enterP) * enterShift * dirX;
+
+        const t = {
+          x: Math.round(translateX * 100) / 100,
+          y: Math.round(translateY * 100) / 100,
+          s: Math.round(scale * 1000) / 1000,
+          r: Math.round(rotation * 100) / 100,
+          b: Math.round(blur * 100) / 100,
+          o: Math.round(enterP * 100) / 100,
+        };
+        const p = last.get(i);
+        if (p && Math.abs(p.x - t.x) <= 0.1 && Math.abs(p.y - t.y) <= 0.1 &&
+            Math.abs(p.s - t.s) <= 0.001 && Math.abs(p.r - t.r) <= 0.1 &&
+            Math.abs(p.b - t.b) <= 0.1 && Math.abs(p.o - t.o) <= 0.01) return;
+
+        card.style.transform =
+          "translate3d(" + t.x + "px, " + t.y + "px, 0) scale(" + t.s + ") rotate(" + t.r + "deg)";
+        card.style.filter = t.b > 0 ? "blur(" + t.b + "px)" : "";
+        card.style.opacity = String(t.o);
+        last.set(i, t);
+      });
+    }
+
+    function onScroll() {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(update);
+    }
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", () => { last.clear(); onScroll(); });
+    // a pilha muda a altura da página → o ScrollTrigger precisa remedir
+    if (window.ScrollTrigger) setTimeout(() => window.ScrollTrigger.refresh(), 300);
+    update();
+  }
+
+  function boot() {
+    document.querySelectorAll("[data-scroll-stack]").forEach(initStack);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
 })();

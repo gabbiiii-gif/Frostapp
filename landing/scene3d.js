@@ -14,6 +14,7 @@ const state = {
   targetX: 0,       // deslocamento horizontal alvo (balanço com o texto)
   targetTwist: 0,   // ênfase extra por seção
   intensity: 0.6,   // 0..1
+  dim: 1,           // 0..1 — multiplicador de opacidade por seção (texto denso pede floco discreto)
   particles: true,
   palette: "frost",
   reduced: window.matchMedia("(prefers-reduced-motion: reduce)").matches,
@@ -36,7 +37,7 @@ const ICE_OPACITY = 0.75;  // opacidade geral do floco (desktop)
 let restOpacity = ICE_OPACITY;  // opacidade de repouso do floco — menor no mobile pra não roubar atenção (partículas ficam intactas)
 let raf = 0;
 const clock = new THREE.Clock();
-let curX = 0, curScroll = 0, curTwist = 0;
+let curX = 0, curScroll = 0, curTwist = 0, curDim = 1;
 
 function makeEnv() {
   const c = document.createElement("canvas");
@@ -318,6 +319,7 @@ function loop() {
   curX += (state.targetX - curX) * 0.06;
   curScroll += (state.scroll - curScroll) * 0.08;
   curTwist += (state.targetTwist - curTwist) * 0.06;
+  curDim += (state.dim - curDim) * 0.05;   // fade lento: não pisca ao trocar de seção
 
   if (group) {
     group.position.x = curX * state.balanceScale;
@@ -328,7 +330,11 @@ function loop() {
     const s = (1 + Math.sin(curScroll * Math.PI) * 0.18 * (0.4 + state.intensity)) * state.fitScale;
     group.scale.setScalar(s);
   }
-  if (core) core.material.opacity = 0.4 + Math.sin(t * 1.6) * 0.18;
+  if (core) core.material.opacity = (0.4 + Math.sin(t * 1.6) * 0.18) * curDim;
+  if (crystal && crystal.visible) crystal.material.opacity = curDim;
+  if (edges && edges.visible) edges.material.opacity = 0.45 * curDim;
+  if (points) points.material.opacity = 0.85 * (0.45 + 0.55 * curDim);
+  if (iceMat && !exploding) iceMat.opacity = restOpacity * curDim;
   if (model && !exploding) model.rotation.z = t * 0.25 * k;   // floco gira no próprio eixo
 
   // explosão no footer
@@ -350,7 +356,7 @@ function loop() {
     // modelo encolhe e some rápido enquanto os cacos partem
     const mp = Math.min(1, life / 0.18);
     if (model) model.scale.setScalar(THREE.MathUtils.lerp(1, 0.15, mp));
-    if (iceMat) iceMat.opacity = restOpacity * (1 - mp);
+    if (iceMat) iceMat.opacity = restOpacity * curDim * (1 - mp);
 
     if (life > EXPLODE_T) {
       exploding = false;
@@ -410,7 +416,7 @@ function resetExplosion() {
   exploded = false;
   if (burst) burst.visible = false;
   if (model) { model.visible = true; model.scale.setScalar(1); }
-  if (iceMat) iceMat.opacity = restOpacity;
+  if (iceMat) iceMat.opacity = restOpacity * curDim;
 }
 
 // API pública
@@ -419,6 +425,8 @@ window.frostScene = {
   setBalance(x) { state.targetX = x; },
   setTwist(v) { state.targetTwist = v; },
   setIntensity(v) { state.intensity = Math.max(0, Math.min(1, v)); },
+  // opacidade relativa do floco — chamado por seção pelo scroll.js
+  setDim(v) { state.dim = Math.max(0, Math.min(1, v)); },
   setParticles(on) { state.particles = !!on; },
   setPalette(name) { state.palette = name; applyPalette(); },
   explode() { explode(); },

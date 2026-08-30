@@ -126,6 +126,8 @@
     --blue:#3B82F6; --cyan:#06B6D4; --cyan2:#22D3EE;
     --ink:#F8FAFC; --muted:#94A3B8; --ok:#10B981; --warn:#F59E0B;
     --line:rgba(255,255,255,.10);
+    /* superfície de cartão quase opaca: o floco 3D passa ATRÁS, não através */
+    --card:rgba(19,36,63,.92);
     --display:"Space Grotesk", system-ui, sans-serif;
     --body:"Geist", system-ui, sans-serif;
     --mono:"Geist Mono", ui-monospace, monospace;
@@ -184,7 +186,7 @@
 
   /* ---------- PAINÉIS ---------- */
   .panel{
-    position:relative; min-height:100vh;
+    position:relative; min-height:100vh; overflow-x:clip;
     display:flex; align-items:center;
     padding:120px clamp(20px,7vw,120px);
   }
@@ -221,7 +223,7 @@
   @keyframes wheel{0%{opacity:1; top:6px;}70%{opacity:0; top:16px;}100%{opacity:0;}}
 
   /* cards genéricos */
-  .glass{backdrop-filter:blur(14px); background:rgba(13,26,46,.55); border:1px solid var(--line); border-radius:18px;}
+  .glass{backdrop-filter:blur(14px); background:rgba(13,26,46,.93); border:1px solid var(--line); border-radius:18px;}
 
   /* -- Planos: cartoes + tabela comparativa ---------------------------- */
   .planos-grid{display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:28px;}
@@ -261,7 +263,7 @@
   table.planos .col-ouro{background:rgba(34,211,238,.07);}
   .planos-nota{margin-top:14px; font-size:12.5px; color:var(--muted); text-wrap:pretty;
     text-shadow:0 2px 10px rgba(6,14,26,.9);}
-  #planos .h-sec, #planos .lead{text-shadow:0 2px 14px rgba(6,14,26,.95), 0 0 30px rgba(6,14,26,.7);}
+  .h-sec, .lead, .h-hero{text-shadow:0 2px 14px rgba(6,14,26,.9), 0 0 30px rgba(6,14,26,.6);}
   .visualmente-oculto{position:absolute; width:1px; height:1px; padding:0; margin:-1px;
     overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; border:0;}
 
@@ -270,14 +272,37 @@
   }
   .pain-list{display:flex; flex-direction:column; gap:14px; margin-top:30px;}
   .pain{padding:18px 20px; border-radius:14px; border:1px solid var(--line);
-    background:rgba(255,255,255,.025); display:flex; gap:15px; align-items:flex-start;}
+    background:var(--card); backdrop-filter:blur(10px); display:flex; gap:15px; align-items:flex-start;}
+
+  /* ---------- SCROLL STACK ----------
+     Porte vanilla do <ScrollStack /> do React Bits (reactbits.dev/components/scroll-stack).
+     Mesma matemática de pin + escala; sem Lenis, porque o smooth-scroll global
+     brigaria com o ScrollTrigger que dirige o floco 3D. Os cartões PRECISAM ser
+     opacos (--card): eles se empilham por cima uns dos outros. */
+  .pain-list.scroll-stack{gap:0;}
+  .scroll-stack{position:relative;}
+  .scroll-stack-card{
+    transform-origin:top center; will-change:transform, filter, opacity;
+    backface-visibility:hidden; position:relative;
+  }
+  .pain.scroll-stack-card{
+    min-height:104px; align-items:center;
+    box-shadow:0 22px 46px -26px rgba(2,8,18,.9);
+  }
+  /* marcador do fim da pilha: o margin-top é a "pista" de rolagem que segura
+     o pin até o último cartão encaixar (pinEnd = topo do marcador - metade da tela) */
+  .scroll-stack-end{width:100%; height:1px; margin-top:36vh; pointer-events:none;}
+  @media (prefers-reduced-motion:reduce){
+    .scroll-stack-card{transform:none !important; filter:none !important; opacity:1 !important;}
+    .scroll-stack-end{height:0;}
+  }
   .pain .x{flex:0 0 30px; height:30px; border-radius:9px; display:grid; place-items:center;
     background:rgba(245,158,11,.14); color:var(--warn); font-weight:700;}
   .pain h3{font-family:var(--display); font-weight:600; font-size:16.5px; line-height:1.3;}
   .pain p{margin:5px 0 0; font-size:14.5px; color:var(--muted);}
 
   .mod-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:13px; margin-top:30px;}
-  .mod{padding:18px; border-radius:14px; border:1px solid var(--line); background:rgba(255,255,255,.025);}
+  .mod{padding:18px; border-radius:14px; border:1px solid var(--line); background:var(--card); backdrop-filter:blur(10px);}
   .mod .ico{width:34px; height:34px; border-radius:10px; display:grid; place-items:center; margin-bottom:12px;
     background:linear-gradient(135deg,rgba(34,211,238,.18),rgba(59,130,246,.18)); color:var(--cyan2);}
   .mod h3{font-family:var(--display); font-weight:600; font-size:15.5px; line-height:1.3; display:block;}
@@ -296,11 +321,14 @@
   .mod-card{
     scroll-snap-align:center; flex:0 0 188px; text-align:left; cursor:pointer;
     padding:20px 18px; border-radius:16px; border:1px solid var(--line);
-    background:rgba(255,255,255,.025); color:var(--ink); transition:.25s;
+    background:var(--card); backdrop-filter:blur(10px); color:var(--ink); transition:.25s;
     display:flex; flex-direction:column; gap:10px; position:relative;
   }
-  .mod-card:hover{transform:translateY(-4px); border-color:rgba(34,211,238,.4); background:rgba(34,211,238,.06);}
-  .mod-card.active{border-color:var(--cyan2); background:rgba(34,211,238,.1); box-shadow:0 0 0 1px var(--cyan2), 0 18px 40px -20px rgba(34,211,238,.5);}
+  .mod-card:hover{transform:translateY(-4px); border-color:rgba(34,211,238,.4);
+    background:linear-gradient(rgba(34,211,238,.10),rgba(34,211,238,.10)), var(--card);}
+  .mod-card.active{border-color:var(--cyan2);
+    background:linear-gradient(rgba(34,211,238,.16),rgba(34,211,238,.16)), var(--card);
+    box-shadow:0 0 0 1px var(--cyan2), 0 18px 40px -20px rgba(34,211,238,.5);}
   .mod-card .ico{
     width:42px; height:42px; border-radius:12px; display:grid; place-items:center; font-size:20px;
     background:linear-gradient(135deg,rgba(34,211,238,.18),rgba(59,130,246,.18)); color:var(--cyan2);
@@ -315,8 +343,9 @@
   .tag.custom{color:#04121f; background:linear-gradient(135deg,var(--cyan2),var(--blue)); font-weight:600;}
   .car-arrow{
     flex:0 0 auto; width:44px; height:44px; border-radius:50%; cursor:pointer;
-    border:1px solid var(--line); background:rgba(13,26,46,.7); color:var(--ink);
+    border:1px solid var(--line); background:rgba(13,26,46,.93); color:var(--ink);
     font-size:22px; line-height:1; display:grid; place-items:center; transition:.2s;
+    backdrop-filter:blur(10px);
   }
   .car-arrow:hover{border-color:var(--cyan2); color:var(--cyan2); background:rgba(34,211,238,.1);}
 
@@ -341,7 +370,7 @@
 
   /* faq */
   .faq-list{margin-top:30px; max-width:600px; display:flex; flex-direction:column; gap:10px;}
-  .faq-item{border:1px solid var(--line); border-radius:13px; background:rgba(255,255,255,.025); overflow:hidden;}
+  .faq-item{border:1px solid var(--line); border-radius:13px; background:var(--card); backdrop-filter:blur(10px); overflow:hidden;}
   .faq-q{width:100%; padding:17px 20px; font-family:var(--display); font-weight:500; font-size:16px; cursor:pointer;
     background:transparent; border:0; color:var(--ink); text-align:left;
     display:flex; justify-content:space-between; align-items:center; gap:14px;}
@@ -369,7 +398,7 @@
       backdrop-filter:none;
       background:linear-gradient(180deg, rgba(10,22,40,.95) 0%, rgba(10,22,40,.82) 50%, rgba(10,22,40,0) 100%);
     }
-    .glass, .mod-detail{backdrop-filter:none;}
+    .glass, .mod-detail, .pain, .mod, .mod-card, .faq-item, .car-arrow{backdrop-filter:none;}
   }
   @media (prefers-reduced-motion:reduce){
     html{scroll-behavior:auto;}
@@ -525,19 +554,20 @@
   </section>
 
   <!-- 01 DORES -->
-  <section class="panel" id="dores" data-side="left" data-screen-label="Dores">
+  <section class="panel" id="dores" data-side="left" data-screen-label="Dores" data-dim="0.6">
     <div class="panel-inner"><div class="col">
-      <h2 class="h-sec" data-reveal style="letter-spacing: -3.8px; line-height: 1.2; font-size: 50px; opacity: 0.9">O que custa caro hoje?</h2>
-      <div class="pain-list">
-        <div class="pain" data-reveal><div class="x" aria-hidden="true">!</div><div><h3>Suas OS vivem em grupos de WhatsApp</h3><p>Você perde histórico técnico, fotos do serviço e prazo de garantia.</p></div></div>
-        <div class="pain" data-reveal><div class="x" aria-hidden="true">!</div><div><h3>Financeiro não conversa com o operacional</h3><p>Você fecha OS mas não sabe o que entrou no caixa.</p></div></div>
-        <div class="pain" data-reveal><div class="x" aria-hidden="true">!</div><div><h3>Estoque é uma planilha desatualizada</h3><p>Compressor que você jurou ter, sumiu. Peça parada virou prejuízo.</p></div></div>
+      <h2 class="h-sec" data-reveal style="letter-spacing: -3.8px; line-height: 1.2; font-size: 50px;">O que custa caro hoje?</h2>
+      <div class="pain-list scroll-stack" data-scroll-stack>
+        <div class="pain scroll-stack-card"><div class="x" aria-hidden="true">!</div><div><h3>Suas OS vivem em grupos de WhatsApp</h3><p>Você perde histórico técnico, fotos do serviço e prazo de garantia.</p></div></div>
+        <div class="pain scroll-stack-card"><div class="x" aria-hidden="true">!</div><div><h3>Financeiro não conversa com o operacional</h3><p>Você fecha OS mas não sabe o que entrou no caixa.</p></div></div>
+        <div class="pain scroll-stack-card"><div class="x" aria-hidden="true">!</div><div><h3>Estoque é uma planilha desatualizada</h3><p>Compressor que você jurou ter, sumiu. Peça parada virou prejuízo.</p></div></div>
+        <div class="scroll-stack-end" aria-hidden="true"></div>
       </div>
     </div></div>
   </section>
 
   <!-- 02 SOLUÇÃO -->
-  <section class="panel" id="solucao" data-side="right" data-screen-label="Solução">
+  <section class="panel" id="solucao" data-side="right" data-screen-label="Solução" data-dim="0.6">
     <div class="panel-inner"><div class="col">
       <h2 class="h-sec" data-reveal>Sua equipe mais rápida. Seu cliente impressionado.</h2>
       <p class="lead" data-reveal>Os módulos você explora ao lado — aqui estão os diferenciais que viram vantagem competitiva no dia a dia da sua empresa.</p>
@@ -553,7 +583,7 @@
   </section>
 
   <!-- 03 DEMO — carrossel de módulos -->
-  <section class="panel" id="demo" data-side="center" data-screen-label="Demo">
+  <section class="panel" id="demo" data-side="center" data-screen-label="Demo" data-dim="0.22">
     <div class="panel-inner" style="flex-direction:column;">
       <div style="width:100%; max-width:980px; margin:0 auto;">
         <h2 class="h-sec" data-reveal style="text-align:center;">Veja como funciona</h2>
@@ -593,7 +623,7 @@
   </section>
 
   <!-- 05 FAQ -->
-  <section class="panel" id="faq" data-side="left" data-screen-label="FAQ">
+  <section class="panel" id="faq" data-side="left" data-screen-label="FAQ" data-dim="0.55">
     <div class="panel-inner"><div class="col">
       <h2 class="h-sec" data-reveal>Perguntas frequentes</h2>
       <div class="faq-list">
@@ -607,7 +637,7 @@
   </section>
 
   <!-- 05b PLANOS -->
-  <section class="panel" id="planos" data-side="center" data-screen-label="Planos">
+  <section class="panel" id="planos" data-side="center" data-screen-label="Planos" data-dim="0.25">
     <div class="panel-inner" style="flex-direction:column;">
       <div style="width:100%; max-width:1040px; margin:0 auto;">
         <h2 class="h-sec" data-reveal style="text-align:center;">Planos e m&oacute;dulos</h2>

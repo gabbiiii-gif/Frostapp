@@ -219,3 +219,11 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - PENDENTE (não feito, a decidir): ensureFechamentoMensal() não roda no boot da demo (caminho separado), então a fonte "Fechamentos mensais" fica vazia lá. Irrelevante enquanto Relatórios estiver fora da demo.
 - verificação: vitest 396/396; vite build OK.
 - touched: src/demo.js, src/demo.test.js, src/App.jsx, CLAUDE.md
+
+## [2026-08-30] feature | Landing: entrada lateral no scroll, floco discreto e ScrollStack em #dores
+- gatilho: usuário pediu (a) seção entrando pela lateral em fade preso ao scroll, (b) "o floco está atrapalhando ver essa seção", (c) o `<ScrollStack />` do React Bits na seção "O que custa caro hoje?"
+- a landing é HTML estático + GSAP: `npx shadcn add` não tem onde instalar. ScrollStack foi PORTADO pra vanilla no fim do `scroll.js`, sem Lenis (brigaria com o ScrollTrigger da cena 3D), com `offsetTop` no lugar de `getBoundingClientRect` (o rect realimenta o próprio transform) e espaçador de 36vh (o `pinEnd` do original assume cartões de 20rem; com os nossos de ~104px o 3º cartão não encaixava em tela alta)
+- floco: 2ª vez que cartão translúcido (`rgba(255,255,255,.025)`) deixa a cena 3D aparecer ATRAVÉS do conteúdo — antes só `.plano` tinha sido corrigido. Token `--card` agora vale pra `.pain`, `.mod`, `.mod-card`, `.faq-item`, `.glass`, `.car-arrow`; hover/active viram camada de tinta sobre a base opaca
+- `frostScene.setDim(0..1)` novo: opacidade relativa do floco por seção, lida de `data-dim` na `.panel` (demo 0.22, planos 0.25, dores/solucao 0.6, faq 0.55)
+- verificação: vitest 406/406; matemática do pin simulada de 640px a 1440px de altura (3 cartões encaixam em todas); IIFE do ScrollStack executada contra o DOM real via happy-dom sem erro
+- touched: landing/index.html, landing/scroll.js, landing/scene3d.js, concepts/landing-scroll-3d.md (nova), index.md
