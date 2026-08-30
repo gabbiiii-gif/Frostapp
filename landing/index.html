@@ -212,9 +212,18 @@
   .dot-live{width:7px; height:7px; border-radius:50%; background:var(--ok); box-shadow:0 0 8px var(--ok); animation:pulse 2s infinite;}
   @keyframes pulse{50%{opacity:.4;}}
 
-  /* hero word animation */
-  [data-hero-title] .word{display:inline-block; overflow:hidden; vertical-align:top;}
-  [data-hero-title] .w-in{display:inline-block; will-change:transform;}
+  /* ---------- TEXT TYPE (efeito de digitação no h1) ----------
+     Porte vanilla do <TextType /> do React Bits. O fantasma é uma cópia
+     invisível da frase mais longa: ele segura a caixa do título pra lead e
+     botões não pularem enquanto o texto é digitado letra a letra. Sem a classe
+     .tt-on (JS não rodou) o h1 aparece normal, com a frase inteira. */
+  .text-type{position:relative;}
+  .text-type .tt-ghost{visibility:hidden;}
+  .text-type.tt-on .tt-live{position:absolute; inset:0;}
+  .text-type__cursor{
+    display:inline-block; margin-left:.06em; font-size:.58em; line-height:1;
+    vertical-align:baseline; color:var(--cyan2); opacity:.9;
+  }
 
   .scroll-hint{position:absolute; bottom:34px; left:50%; transform:translateX(-50%);
     font-family:var(--mono); font-size:11px; letter-spacing:.2em; color:var(--muted); text-transform:uppercase;
@@ -606,7 +615,11 @@
   <section class="panel" id="hero" data-side="center" data-screen-label="Hero" style="justify-content: flex-start">
     <div class="panel-inner"><div class="col">
       <span class="badge" data-reveal><span class="dot-live"></span> Já rodando em Altamira e região</span>
-      <h1 class="h-hero" data-hero-title>Refrigeração não se gerencia em planilha.</h1>
+      <!-- data-type-text aceita uma lista: com 2+ frases ele apaga e alterna em laço;
+           com 1 só, digita uma vez e para. O texto abaixo é o que aparece sem JS. -->
+      <h1 class="h-hero text-type" data-type-text='["Refrigeração não se gerencia em planilha."]'
+          data-type-speed="52" data-type-delay="450" data-type-variable="38,95"
+          data-type-cursor="█">Refrigeração não se gerencia em planilha.</h1>
       <p class="lead" data-reveal>OS, agenda de manutenção, financeiro e estoque num sistema só. Sem instalação, sem fidelidade.</p>
       <div class="cta-row" data-reveal>
         <a class="btn btn-primary" href="https://wa.me/5593984166832?text=Ol%C3%A1!%20Tenho%20interesse%20no%20FrostERP%20e%20gostaria%20de%20falar%20com%20a%20equipe." target="_blank" rel="noopener">Falar com a gente no WhatsApp</a>
@@ -982,7 +995,6 @@
 <!-- libs globais -->
 <script src="https://unpkg.com/gsap@3.12.5/dist/gsap.min.js"></script>
 <script src="https://unpkg.com/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
-<script src="https://unpkg.com/animejs@3.2.1/lib/anime.min.js"></script>
 
 <!-- three.js como módulo -->
 <script type="importmap">

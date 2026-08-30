@@ -1,4 +1,5 @@
-// scroll.js — orquestra texto alternado + cena 3D no scroll (GSAP + anime.js)
+// scroll.js — orquestra revelação de texto + cena 3D no scroll, mais os componentes
+// portados do React Bits: ScrollStack, CardSwap e TextType. Tudo em cima de GSAP.
 (function () {
   function start() {
     if (!window.gsap || !window.ScrollTrigger || !window.frostScene) {
@@ -86,23 +87,6 @@
         ease: "power2.out", duration: 1, stagger: 0.12,
       });
     });
-
-    // ---- 4. Hero: título com anime.js (split em palavras) ----
-    const heroTitle = document.querySelector("[data-hero-title]");
-    if (heroTitle && window.anime && !reduced) {
-      const words = heroTitle.textContent.trim().split(/\s+/);
-      heroTitle.innerHTML = words
-        .map((w) => `<span class="word"><span class="w-in">${w}</span></span>`)
-        .join(" ");
-      anime({
-        targets: heroTitle.querySelectorAll(".w-in"),
-        translateY: ["110%", "0%"],
-        opacity: [0, 1],
-        easing: "easeOutExpo",
-        duration: 1100,
-        delay: anime.stagger(70, { start: 200 }),
-      });
-    }
 
     // hint de scroll some ao rolar
     const hint = document.querySelector(".scroll-hint");
@@ -483,6 +467,119 @@
   function boot() {
     if (!window.gsap) return void setTimeout(boot, 60);
     document.querySelectorAll("[data-card-swap]").forEach(initSwap);
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
+})();
+
+// ===== TextType — porte vanilla do <TextType /> do React Bits =====
+// Fonte: https://reactbits.dev/text-animations/text-type (variante JS-CSS).
+// O original já depende de GSAP (só pra piscar o cursor), que a landing carrega.
+// A máquina de estados — digita → pausa → apaga → próxima → repete — é a mesma;
+// o que era efeito com setState virou um laço de setTimeout.
+//
+// Três adaptações que o hero exigiu e o componente não resolve sozinho:
+//  1. FANTASMA. Digitar caractere a caractere muda a quebra de linha, e o <h1>
+//     ocupa 2 linhas: sem reservar a caixa, lead e botões pulam a cada letra.
+//     Uma cópia da frase mais longa fica invisível segurando o espaço, e o texto
+//     digitado é sobreposto nela.
+//  2. DEGRADA SEM JS. A frase real fica no HTML e só é escondida quando o script
+//     assume (classe .tt-on). Se o GSAP não carregar, o título aparece inteiro —
+//     é o h1 da página, não pode depender de JS.
+//  3. Uma frase só não entra em laço: digita uma vez e para, com o cursor
+//     piscando. Laço de apagar/redigitar a mesma frase num hero é irritante.
+(function () {
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  function initType(host) {
+    let frases;
+    try { frases = JSON.parse(host.dataset.typeText); }
+    catch (e) { frases = [host.dataset.typeText]; }
+    if (!Array.isArray(frases)) frases = [frases];
+    frases = frases.filter(function (f) { return typeof f === "string" && f.length; });
+    if (!frases.length) return;
+
+    const num = (k, p) => (host.dataset[k] === undefined || host.dataset[k] === "" ? p : parseFloat(host.dataset[k]));
+    const CFG = {
+      typingSpeed: num("typeSpeed", 55),
+      initialDelay: num("typeDelay", 350),
+      pauseDuration: num("typePause", 2000),
+      deletingSpeed: num("typeDelete", 30),
+      cursorBlink: num("typeBlink", 0.5),
+      cursorChar: host.dataset.typeCursor || "|",
+      loop: frases.length > 1,
+    };
+    const vs = String(host.dataset.typeVariable || "").split(",").map(Number).filter((n) => !isNaN(n));
+    const variavel = vs.length === 2 ? { min: Math.min(vs[0], vs[1]), max: Math.max(vs[0], vs[1]) } : null;
+    const velocidade = () => (variavel ? Math.random() * (variavel.max - variavel.min) + variavel.min : CFG.typingSpeed);
+
+    // fantasma = a frase mais longa, pra caixa nunca encolher no meio da digitação
+    const maisLonga = frases.reduce((a, b) => (b.length > a.length ? b : a), frases[0]);
+    const doc = host.ownerDocument;
+    const mk = (cls, txt) => { const e = doc.createElement("span"); e.className = cls; if (txt) e.textContent = txt; return e; };
+
+    const fantasma = mk("tt-ghost", maisLonga);
+    fantasma.setAttribute("aria-hidden", "true");
+    const conteudo = mk("text-type__content");
+    const vivo = mk("tt-live");
+    vivo.appendChild(conteudo);
+
+    let cursor = null;
+    if (host.dataset.typeCursor !== "none") {
+      cursor = mk("text-type__cursor", CFG.cursorChar);
+      cursor.setAttribute("aria-hidden", "true");
+      vivo.appendChild(cursor);
+    }
+
+    // leitor de tela recebe a frase pronta, não a digitação tremendo
+    if (!host.getAttribute("aria-label")) host.setAttribute("aria-label", frases[0]);
+    host.textContent = "";
+    host.appendChild(fantasma);
+    host.appendChild(vivo);
+    host.classList.add("tt-on");
+
+    if (reduced) {                       // sem animação: frase final e pronto
+      conteudo.textContent = frases[0];
+      if (cursor) cursor.remove();
+      return;
+    }
+
+    if (cursor && window.gsap) {
+      window.gsap.set(cursor, { opacity: 1 });
+      window.gsap.to(cursor, {
+        opacity: 0, duration: CFG.cursorBlink, repeat: -1, yoyo: true, ease: "power2.inOut",
+      });
+    }
+
+    let iFrase = 0, iChar = 0, apagando = false, texto = "";
+    function tick() {
+      if (apagando) {
+        if (texto === "") {
+          apagando = false;
+          iFrase = (iFrase + 1) % frases.length;
+          iChar = 0;
+          return void setTimeout(tick, CFG.pauseDuration);
+        }
+        texto = texto.slice(0, -1);
+        conteudo.textContent = texto;
+        return void setTimeout(tick, CFG.deletingSpeed);
+      }
+      const alvo = frases[iFrase];
+      if (iChar < alvo.length) {
+        texto += alvo.charAt(iChar++);
+        conteudo.textContent = texto;
+        return void setTimeout(tick, velocidade());
+      }
+      if (!CFG.loop) return;             // frase única: para aqui, cursor segue piscando
+      apagando = true;
+      setTimeout(tick, CFG.pauseDuration);
+    }
+    setTimeout(tick, CFG.initialDelay);
+  }
+
+  function boot() {
+    // sem GSAP o cursor não pisca, mas a digitação roda igual — não vale travar por isso
+    document.querySelectorAll("[data-type-text]").forEach(initType);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
   else boot();

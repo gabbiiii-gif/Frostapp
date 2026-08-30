@@ -153,3 +153,38 @@ A IIFE do carrossel no `scroll.js` (objeto `MODS`, `renderDetail`, `initCarousel
 `.carousel`, `.car-track`, `.car-arrow` e `.mod-card`. A base do pill subiu de `.mod-card .tag`
 para `.tag`: o antigo painel de detalhe usava `.tag` sem casar com aquele seletor, então o
 rótulo "Núcleo" saía como texto solto em vez de pill.
+
+## TextType — digitação no `<h1>` do hero
+
+Porte vanilla do [`<TextType />` do React Bits](https://reactbits.dev/text-animations/text-type).
+A máquina de estados (digita → pausa → apaga → próxima → repete) veio igual; o que era efeito
+com `setState` virou um laço de `setTimeout`. O GSAP aparece só para piscar o cursor.
+
+Substituiu a animação de palavras do **anime.js** que existia no mesmo `<h1>` — as duas
+brigariam pelo elemento. Como aquele era o **único** uso do anime.js na landing, a tag
+`<script src=".../anime.min.js">` saiu junto: menos uma requisição e ~17KB.
+
+Três adaptações que o hero exigiu e o componente não resolve sozinho:
+
+1. **Fantasma.** Digitar caractere a caractere muda a quebra de linha, e o `<h1>` ocupa duas
+   linhas em quase toda largura. Sem reservar a caixa, lead e botões pulam a cada letra. Uma
+   cópia da **frase mais longa** fica com `visibility:hidden` segurando o espaço, e a camada
+   digitada é posicionada por cima em `position:absolute`.
+2. **Degrada sem JS.** A frase real continua no HTML; ela só é escondida quando o script
+   assume, pela classe `.tt-on`. É o `h1` da página — o título não pode depender de JS.
+3. **Uma frase não entra em laço.** Com um item em `data-type-text`, digita uma vez e para,
+   cursor piscando. Apagar e redigitar a mesma frase num hero é irritante. Com dois ou mais,
+   o laço liga sozinho.
+
+Acessibilidade: o `h1` recebe `aria-label` com a primeira frase e as camadas visuais levam
+`aria-hidden`. Leitor de tela recebe a frase pronta, não a digitação tremendo.
+
+### Configuração (`data-*` no próprio elemento)
+
+`data-type-text` (JSON array — obrigatório), `data-type-speed`, `data-type-delay`,
+`data-type-pause`, `data-type-delete`, `data-type-blink`, `data-type-cursor`
+(`"none"` remove o cursor) e `data-type-variable="min,max"` para velocidade irregular, que é
+o `variableSpeed` do original.
+
+Para alternar frases no hero, basta acrescentar itens ao array do `data-type-text` — o laço,
+o apagar e o fantasma se ajustam sozinhos.

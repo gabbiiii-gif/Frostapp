@@ -279,3 +279,15 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - removidos: IIFE do carrossel no `scroll.js` (MODS, renderDetail, initCarousel) e o CSS de `.carousel/.car-track/.car-arrow/.mod-card`. A base do pill subiu de `.mod-card .tag` pra `.tag` — o painel de detalhe usava `.tag` sem casar com aquele seletor e o rótulo saía como texto solto
 - verificação: vitest 406/406; happy-dom confirma 2 pilhas independentes (dores no padrão, demo com config própria) e os 13 cartões com 4 itens cada; cross-check automático contra o `navItems` do App.jsx não acusa módulo faltando; pin math simulada de 640px a 1080px de altura — os 13 encaixam e a pilha cabe na tela mesmo com cartão de 300px (mobile)
 - touched: landing/index.html, landing/scroll.js, concepts/landing-scroll-3d.md
+
+## [2026-08-30] feature | Landing: TextType digitando o h1 do hero (e adeus anime.js)
+- gatilho: usuário pediu o `<TextType />` do React Bits apontando o título do hero
+- terceiro porte vanilla da série (depois de ScrollStack e CardSwap). A máquina de estados veio igual; o que era efeito com setState virou laço de setTimeout. GSAP só pisca o cursor
+- substituiu a animação de palavras do anime.js no MESMO `<h1>` — as duas brigariam pelo elemento. Era o único uso de anime.js na landing, então a tag `<script>` da CDN saiu junto (~17KB e uma requisição a menos)
+- FANTASMA: digitar letra a letra muda a quebra de linha e o h1 tem 2 linhas; sem reservar a caixa, lead e botões pulariam a cada caractere. Cópia da frase mais longa com `visibility:hidden` segura o espaço e a camada digitada vai por cima em absolute
+- degrada sem JS: a frase real fica no HTML e só some quando o script assume (classe `.tt-on`). É o h1 da página, não pode depender de JS
+- uma frase só não entra em laço (digita e para). Apagar e redigitar a mesma frase num hero é irritante. Com 2+ o laço liga sozinho
+- a11y: `aria-label` no h1 com a frase pronta, `aria-hidden` nas camadas visuais — leitor de tela não acompanha a digitação
+- configuração por `data-*` no elemento: `data-type-text` (JSON array), `-speed`, `-delay`, `-pause`, `-delete`, `-blink`, `-cursor` (`"none"` remove) e `-variable="min,max"` (o `variableSpeed` do original)
+- verificação: vitest 406/406; happy-dom em 3 cenários — normal (começa vazio e chega à frase exata em 42 passos), `prefers-reduced-motion` (frase inteira na hora, sem cursor) e SEM GSAP (digita igual, só não pisca). Laço multi-frase testado à parte: alterna, volta e o fantasma escolhe a frase mais longa
+- touched: landing/index.html, landing/scroll.js, concepts/landing-scroll-3d.md
