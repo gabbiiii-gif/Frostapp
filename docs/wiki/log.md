@@ -238,3 +238,11 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - verificação: vitest 406/406; CardSwap executado contra o DOM real via happy-dom com GSAP dublado — 8 telas declaradas viram pilha de 5, `.ready` só liga depois da carga, timeline com 6 `to` (1 queda + 4 promoções + 1 retorno), rodízio troca a tela do cartão caído. Caso de degradação testado à parte: sem nenhuma imagem os cartões somem e o carrossel/heading continuam
 - NÃO verificado: aparência. Sem browser headless no projeto — posições e escalas do `CFG` são chute informado
 - touched: landing/index.html, landing/scroll.js, landing/screens/README.md (novo), concepts/landing-scroll-3d.md
+
+## [2026-08-30] fix | Landing: modo `?preview=1` pra ver o CardSwap sem as telas
+- gatilho: usuário reportou "não tem as telas, aparentemente nada mudou"
+- diagnóstico por curl: o deploy ESTAVA no ar (index.html e scroll.js publicados com todos os marcadores novos); as 8 imagens em /screens/ dão 404 porque nunca foram para o repo. A vitrine se escondendo era o fail-soft funcionando
+- limitação de fundo: as capturas foram coladas no chat, não existem como arquivo. Não há como o agente gravar os bytes em disco — só o usuário pode pôr os PNGs em `landing/screens/`
+- `?preview=1` desenha cartões de mentira (sidebar + cabeçalho falsos + nome do módulo) no lugar das telas ausentes, pra conferir geometria e ritmo da pilha ANTES de exportar 8 imagens. Visitante sem o parâmetro continua caindo no caminho normal (vitrine escondida)
+- verificação: happy-dom nos dois caminhos — sem parâmetro 0 cartões e `.ready` false; com `?preview=1` pilha de 5 mocks, `.ready` true e a nota trocada pra "PRÉVIA"
+- touched: landing/scroll.js, landing/index.html

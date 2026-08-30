@@ -409,10 +409,27 @@
     img.src = src;
   });
 
+  // ?preview=1 mostra cartões de mentira no lugar das telas que ainda não existem.
+  // Serve pra conferir geometria e ritmo da pilha antes de exportar os prints —
+  // nunca aparece pra visitante, que cai no caminho normal (vitrine escondida).
+  const PREVIEW = /[?&]preview=1(&|$)/.test(window.location.search);
+
   function paint(card, shot) {
     const img = card.querySelector("img");
     const tag = card.querySelector(".swap-tag");
-    if (img) { img.src = shot.src; img.alt = "FrostERP — tela de " + shot.label; }
+    if (shot.src) {
+      card.classList.remove("mock");
+      if (img) { img.src = shot.src; img.alt = "FrostERP — tela de " + shot.label; }
+    } else {
+      card.classList.add("mock");
+      let name = card.querySelector(".mock-name");
+      if (!name) {
+        name = card.ownerDocument.createElement("span");
+        name.className = "mock-name";
+        card.appendChild(name);
+      }
+      name.textContent = shot.label;
+    }
     if (tag) tag.textContent = shot.label;
   }
 
@@ -427,7 +444,9 @@
     for (const card of declared) {
       const img = card.querySelector("img");
       const src = img && img.dataset.src;
-      if (src && (await preload(src))) pool.push({ src, label: card.dataset.label || "" });
+      const label = card.dataset.label || "";
+      if (src && (await preload(src))) pool.push({ src, label });
+      else if (PREVIEW) pool.push({ src: null, label });   // placeholder só na prévia
     }
     if (pool.length < 2) { declared.forEach((c) => c.remove()); return; }
 
@@ -438,6 +457,10 @@
     let nextShot = total % pool.length;
 
     shots.classList.add("ready");
+    if (PREVIEW) {
+      const nota = shots.parentElement && shots.parentElement.querySelector(".demo-nota");
+      if (nota) nota.textContent = "PRÉVIA — cartões de exemplo, não são as telas reais";
+    }
     cards.forEach((el, i) =>
       placeNow(gsap, el, makeSlot(i, CFG.cardDistance, CFG.verticalDistance, total), CFG.skewAmount));
 

@@ -406,6 +406,20 @@
     transform-style:preserve-3d; will-change:transform; backface-visibility:hidden;
   }
   .swap-card img{width:100%; height:100%; object-fit:cover; object-position:left top; display:block;}
+  /* cartão de mentira do ?preview=1: desenha uma sidebar e um cabeçalho falsos
+     só pra dar volume à pilha enquanto os prints reais não chegam */
+  .swap-card.mock{
+    display:grid; place-items:center;
+    background:
+      linear-gradient(90deg, rgba(34,211,238,.13) 0 21%, transparent 21%),
+      linear-gradient(180deg, rgba(255,255,255,.07) 0 14%, transparent 14%),
+      #0d1b30;
+  }
+  .swap-card.mock img{display:none;}
+  .swap-card.mock .mock-name{
+    font-family:var(--display); font-weight:600; font-size:19px; color:#cdd9ea;
+    padding-left:18%; text-align:center;
+  }
   .swap-tag{
     position:absolute; left:10px; bottom:10px;
     font-family:var(--mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase;
