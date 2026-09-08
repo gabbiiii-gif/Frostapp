@@ -1,7 +1,8 @@
 ---
-title: Travamento por Aparelho
+title: Travamento por Aparelho (REMOVIDO)
 type: concept
-updated: 2026-07-22
+updated: 2026-09-08
+status: removido
 sources:
   - ../../superpowers/specs/2026-07-22-device-locking-servidor-terminais-design.md
 related:
@@ -9,58 +10,51 @@ related:
   - ./role-permissions.md
   - ./master-tier.md
 code_refs:
-  - src/device-identity.js
-  - src/lib/device-policy.js
-  - supabase/functions/device-verify/index.ts
-  - supabase/functions/master-devices/index.ts
+  - supabase/migrations/20260908000000_remove_device_locking.sql
 ---
 
-# Travamento por Aparelho (Fase 1)
+# Travamento por Aparelho — REMOVIDO em 2026-09-08
 
-Cada membro fica preso a um aparelho aprovado pelo superadmin (camada Master).
-A Fase 1 usa prova "soft" (`device_uuid`). O enforcement é de UX (portão no
-login); o bloqueio via RLS entra na Fase 3. Estrito 1:1 (índices únicos parciais).
+> ⚠️ **Este recurso não existe mais.** A página fica como registro do que foi
+> tentado e por que saiu — não descreve o comportamento atual do app.
 
-## Peças
+O recurso prendia cada membro a **um único aparelho** aprovado pelo superadmin
+(camada Master). Rodou em produção de 2026-07-22 a 2026-09-08 e foi retirado
+depois do teste de campo: na prática travava mais o usuário legítimo (trocou de
+máquina, de navegador, limpou o site, entrou pelo celular → tela de "aguardando
+aprovação") do que impedia acesso indevido, e cada liberação virava trabalho
+manual do superadmin.
 
-- **Tabelas** (`supabase/migrations/20260722000000_device_locking.sql`): `member_devices`
-  (vínculo, status `pending|approved|rejected|revoked`) e `device_sessions` (prova viva).
-- **Edges**: `device-enroll` (registra pendente, verify_jwt=true), `device-verify`
-  (decide status + emite `device_sessions`, verify_jwt=true), `master-devices`
-  (superadmin aprova/rejeita/revoga, auth por `master_users.session_token_hash`).
-- **Cliente**: `src/device-identity.js` (UUID por aparelho + fingerprint),
-  `src/lib/device-policy.js` (decisão pura, espelha a edge), helpers
-  `deviceEnroll`/`deviceVerify`/`masterDevices` em `src/supabase.js`.
-- **UI**: `DeviceGateScreen` + portão no `handleLogin` (App.jsx); painel
-  **📱 Aparelhos** no `MasterApp` (aprovação pelo superadmin).
+## O que foi retirado
 
-## Fluxo
+| Camada | Peças |
+| ------ | ----- |
+| Banco | tabelas `member_devices`, `device_sessions`, `device_challenges`, `device_enforcement`; função `private.current_device_ok()`; política restritiva `device_gate` em 12 tabelas |
+| Edges | `device-enroll`, `device-verify`, `device-challenge`, `master-devices` |
+| Cliente | `src/device-identity.js`, `src/webauthn.js`, `src/lib/device-policy.js` (+ testes); helpers `deviceEnroll`/`deviceVerify`/`masterDevices` em `src/supabase.js` |
+| UI | `DeviceGateScreen`, portão no `handleLogin` e na restauração de sessão, `MasterDevicesPanel` e o botão **📱 Aparelhos** do `MasterApp` |
 
-login → `deviceEnroll` (cria pendente) → `deviceVerify`. Se ≠ approved, App
-mostra `DeviceGateScreen` (aguardando/negado) e não carrega o ERP. Superadmin
-aprova no painel Aparelhos → próximo login libera.
+Ordem da remoção no banco (importa): **desligar o kill-switch → derrubar as
+políticas `device_gate` → só então apagar a função e as tabelas.** As políticas
+eram RESTRITIVAS e chamavam `current_device_ok()`; apagar a função antes deixaria
+as 12 tabelas com política quebrada. No dia da remoção o kill-switch estava
+**LIGADO** — isto é, o bloqueio por RLS estava valendo de verdade em produção.
 
-## Terminologia (Fase 4 — aplicada)
+## O que sobrou de propósito
 
-Servidor = admin principal (`isSuperAdmin` / `company_members.is_super_admin = true`);
-Terminais = demais membros. Camada de exibição no `UserManagement` (título "Servidor e
-Terminais", badge por linha, "Novo Terminal") — papéis/permissões não mudam.
+- **Migrações históricas** `20260722*` e `20260730*` continuam no repo (histórico
+  append-only). Elas recriam o recurso inteiro se um dia ele voltar.
+- **`@capacitor/device`** ficou no `package.json` sem uso — remover exige
+  `npx cap sync` no projeto Android; não valia o risco junto desta mudança.
+- **A chave `frost_device_uuid`** pode sobrar no `localStorage`/`Preferences` de
+  aparelhos que já usaram o app. É lixo inerte — nada mais lê.
+- **Terminologia "Servidor e Terminais"** no `UserManagement` (Fase 4) — é só
+  rótulo de exibição, não limita nada, e ficou como estava.
 
-## Fases
+## Se um dia voltar
 
-- ✅ 1 — fundação + portão soft (device_uuid).
-- ✅ 2 — WebAuthn no web (`src/webauthn.js`): passkey de plataforma, `device_challenges`,
-  `device-challenge`, verificação de assinatura ECDSA no `device-verify`. Android nativo
-  (Keystore) fica para depois.
-- ✅ 3 — RLS por aparelho: `current_device_ok()` + política restritiva `device_gate` em
-  12 tabelas, com **kill-switch** `device_enforcement` (começa OFF). device_session TTL 12h;
-  renovada no login e no boot. Toggle no painel Aparelhos (`master-devices` action `enforcement`).
-- ✅ 4 — rename Servidor/Terminais na UI.
-- 🔜 5 — passe offline + endurecimento (root/emulador, rejeitar passkey sincronizada).
-
-> **Ligar o cadeado:** aprovar os aparelhos dos membros ativos → confirmar que
-> `device_sessions` estão sendo criadas → ligar o kill-switch no painel. Se travar,
-> desligar na hora (RLS volta a no-op).
-
-> Migração no rollout: **sem grandfather** — todos caem pendentes; o superadmin
-> aprova cada aparelho.
+O erro de projeto não foi a criptografia (WebAuthn funcionou), foi a **política
+1:1 estrita**: um membro, um aparelho, aprovação manual, sem grandfather no
+rollout. Uma versão futura precisaria de N aparelhos por membro, auto-aprovação
+do primeiro e revogação sob demanda — travar no primeiro aparelho e obrigar o
+superadmin a liberar cada troca não sobrevive ao uso real.

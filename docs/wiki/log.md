@@ -300,3 +300,13 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - velocidade: 52ms → 92ms, faixa variável 38–95 → 68–145. A frase passa de ~3,2s para ~4,8s
 - verificação: happy-dom confirma a estrutura montada e o texto final igual ao fantasma; asserções de regex garantem que o `position:absolute` saiu e o grid entrou. O empilhamento em si é CSS — não dá pra verificar sem browser
 - touched: landing/index.html
+
+## [2026-09-08] remoção | Travamento por aparelho (Servidor/Terminais) sai por inteiro
+- gatilho: usuário — "vamos tirar aquele sistema que limita o usuário a ficar somente em um computador, fiz teste e não serviu bem"
+- estado encontrado em produção: kill-switch `device_enforcement.enabled = **true**` (o bloqueio por RLS estava valendo), 12 políticas restritivas `device_gate`, 16 linhas em `member_devices` (3 aprovadas, 1 pendente)
+- ordem executada: (1) `device_enforcement.enabled = false` → `current_device_ok()` volta a devolver true e as 12 políticas viram no-op na hora, ninguém mais é barrado pelo banco; (2) remoção do cliente e das edges; (3) migração `20260908000000_remove_device_locking.sql` derruba políticas → função → tabelas, **nessa ordem** (política restritiva chama a função; apagar a função antes quebraria as 12 tabelas)
+- pendente: a migração do passo (3) está no repo mas **ainda não foi aplicada** — o `apply_migration` foi barrado pelo classificador. Rodar `supabase db push` (ou colar o SQL no dashboard). Enquanto não roda, o recurso já está inerte pelo kill-switch
+- pendente: as 4 edges seguem **deployadas** no projeto; apagar em Dashboard → Edge Functions (nada mais as chama)
+- removidos: `src/device-identity.js`, `src/webauthn.js`, `src/lib/device-policy.js` (+3 testes), edges `device-enroll`/`device-verify`/`device-challenge`/`master-devices`, `DeviceGateScreen`, `MasterDevicesPanel`, botão 📱 Aparelhos, portão no `handleLogin` e na restauração de sessão, helpers `deviceEnroll`/`deviceVerify`/`masterDevices`
+- verificação: vitest 396/396, `npm run build` OK, lint sem regressão (nenhum unused novo)
+- touched: concepts/device-locking.md (reescrita como registro histórico), index.md

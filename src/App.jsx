@@ -11,7 +11,7 @@ import {
 import { animate } from "animejs";
 import { motion } from "motion/react";
 import gsap from "gsap";
-import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, masterEvolution, adminEvolution, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig, deviceEnroll, deviceVerify, masterDevices } from "./supabase.js";
+import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, masterEvolution, adminEvolution, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig } from "./supabase.js";
 import { isDemoMode, DEMO_COMPANY_ID, markDemoStarted, resetDemoData, buildDemoUser, recordDemoLead } from "./demo.js";
 import { mesesAFechar, montarFechamento, fechamentoTemMovimento } from "./lib/fechamento-mensal.js";
 import { computePaymentState } from "./lib/pagamentos.js";
@@ -3021,31 +3021,6 @@ function DemoBanner({ onReset }) {
   );
 }
 
-// Tela exibida quando o aparelho não está aprovado (Fase 1 do travamento por
-// aparelho). Sem acesso ao ERP. status: 'pending'/'needs_enroll' (aguardando
-// aprovação do superadmin) | 'denied' (aparelho não autorizado — preso a outro).
-function DeviceGateScreen({ status, onLogout }) {
-  const pendente = status === "pending" || status === "needs_enroll";
-  return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900 text-slate-100 p-6">
-      <div className="max-w-md w-full bg-slate-800 rounded-2xl p-8 text-center shadow-xl">
-        <div className="text-5xl mb-4">{pendente ? "⏳" : "🔒"}</div>
-        <h1 className="text-xl font-semibold mb-2">
-          {pendente ? "Aguardando aprovação do aparelho" : "Aparelho não autorizado"}
-        </h1>
-        <p className="text-slate-300 text-sm mb-6">
-          {pendente
-            ? "Este aparelho foi registrado e está aguardando liberação pelo administrador do sistema. Assim que aprovado, você poderá acessar normalmente."
-            : "Seu acesso está vinculado a outro aparelho. Fale com o administrador do sistema para liberar este aparelho."}
-        </p>
-        <button onClick={onLogout} className="px-4 py-2 rounded-lg bg-slate-700 hover:bg-slate-600 text-sm">
-          Sair
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassword }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -4695,139 +4670,6 @@ function AdminWhatsAppConnect({ addToast }) {
   );
 }
 
-// Painel do superadmin: lista aparelhos e permite aprovar/rejeitar/revogar.
-// Só o master controla vínculos de aparelho (decisão de projeto — spec 2026-07-22).
-function MasterDevicesPanel({ master, addToast }) {
-  const [devices, setDevices] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [busyId, setBusyId] = useState(null);
-  const [enforcement, setEnforcement] = useState(null); // kill-switch do RLS (null = carregando)
-  const [showHistory, setShowHistory] = useState(false); // mostrar rejeitados/revogados
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    const res = await masterDevices(master, "list");
-    if (res.ok) setDevices(res.devices || []);
-    else addToast?.(res.error || "Falha ao listar aparelhos", "error");
-    const enf = await masterDevices(master, "enforcement");
-    if (enf.ok) setEnforcement(!!enf.enabled);
-    setLoading(false);
-  }, [master, addToast]);
-
-  useEffect(() => { load(); }, [load]);
-
-  // Liga/desliga o cadeado real (RLS por aparelho). Confirmação obrigatória ao ligar.
-  const toggleEnforcement = useCallback(async () => {
-    const novo = !enforcement;
-    if (novo && !window.confirm("LIGAR o bloqueio por aparelho (RLS)?\n\nApós ligar, quem NÃO tiver aparelho aprovado e provado deixa de acessar QUALQUER dado. Confirme só depois de aprovar os aparelhos dos membros ativos.")) return;
-    const res = await masterDevices(master, "enforcement", { enabled: novo });
-    if (res.ok) { setEnforcement(!!res.enabled); addToast?.(res.enabled ? "Bloqueio por aparelho LIGADO." : "Bloqueio por aparelho DESLIGADO.", "success"); }
-    else addToast?.(res.error || "Falha ao alterar o bloqueio", "error");
-  }, [enforcement, master, addToast]);
-
-  async function act(deviceId, action) {
-    setBusyId(deviceId);
-    const res = await masterDevices(master, action, { deviceId });
-    if (res.ok) { addToast?.("Feito.", "success"); await load(); }
-    else addToast?.(res.error || "Falha na ação", "error");
-    setBusyId(null);
-  }
-
-  const statusPt = { pending: "Pendente", approved: "Aprovado", rejected: "Rejeitado", revoked: "Revogado" };
-  // Por padrão só mostra o que importa (pendente + aprovado); histórico fica oculto.
-  const visibleDevices = showHistory ? devices : devices.filter((d) => d.status === "pending" || d.status === "approved");
-  const temHistorico = devices.some((d) => d.status === "rejected" || d.status === "revoked");
-  // Nome amigável do aparelho a partir do fingerprint (web esconde o modelo real).
-  const deviceLabel = (d) => {
-    const m = d.fingerprint?.model || "";
-    let nome;
-    if (d.platform === "android" || m === "K" || /android/i.test(m)) nome = "Android";
-    else if (/windows/i.test(m)) nome = "Windows";
-    else if (d.platform === "ios" || /iphone|ipad|mac/i.test(m)) nome = "Apple";
-    else nome = d.platform === "web" ? "Navegador" : (m || d.platform || "—");
-    return `${nome} · ${(d.device_uuid || "").slice(0, 6)}`;
-  };
-
-  if (loading) return <div className="p-6 text-slate-300">Carregando aparelhos…</div>;
-
-  return (
-    <div className="p-1 sm:p-2">
-      <div className="flex items-center justify-between mb-3 gap-2 flex-wrap">
-        <p className="text-sm text-gray-400">Aprove o aparelho de cada membro. Só aparelhos aprovados acessam o app.</p>
-        <div className="flex gap-2">
-          {temHistorico && (
-            <button onClick={() => setShowHistory((v) => !v)} className="text-sm px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600">
-              {showHistory ? "Ocultar histórico" : "Mostrar histórico"}
-            </button>
-          )}
-          <button onClick={load} className="text-sm px-3 py-1.5 rounded-lg bg-gray-700 hover:bg-gray-600">Atualizar</button>
-        </div>
-      </div>
-      {enforcement !== null && (
-        <div className={`mb-4 rounded-lg p-3 flex items-center justify-between gap-3 ${enforcement ? "bg-emerald-900/40 border border-emerald-700" : "bg-amber-900/30 border border-amber-700"}`}>
-          <div className="text-sm">
-            <span className="font-semibold">Bloqueio por aparelho (RLS): {enforcement ? "LIGADO 🔒" : "DESLIGADO"}</span>
-            <p className="text-xs text-gray-400 mt-0.5">
-              {enforcement
-                ? "Sem aparelho aprovado e provado, o membro não acessa nenhum dado. Se algo travar, desligue aqui na hora."
-                : "Interruptor de segurança do cadeado. Só ligue depois de aprovar os aparelhos dos membros ativos."}
-            </p>
-          </div>
-          <button onClick={toggleEnforcement}
-            className={`text-sm px-3 py-1.5 rounded-lg whitespace-nowrap font-medium ${enforcement ? "bg-red-600 hover:bg-red-500" : "bg-emerald-600 hover:bg-emerald-500"}`}>
-            {enforcement ? "Desligar" : "Ligar bloqueio"}
-          </button>
-        </div>
-      )}
-      {visibleDevices.length === 0 ? (
-        <div className="text-gray-400 text-sm py-6 text-center">Nenhum aparelho ativo ou pendente.{temHistorico ? " (há histórico oculto — use “Mostrar histórico”)" : ""}</div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="text-gray-400 text-left">
-              <tr>
-                <th className="py-2 pr-3">Empresa</th>
-                <th className="py-2 pr-3">Membro</th>
-                <th className="py-2 pr-3">Papel</th>
-                <th className="py-2 pr-3">Plataforma</th>
-                <th className="py-2 pr-3">Aparelho</th>
-                <th className="py-2 pr-3">Status</th>
-                <th className="py-2 pr-3">Ações</th>
-              </tr>
-            </thead>
-            <tbody className="text-gray-200">
-              {visibleDevices.map((d) => (
-                <tr key={d.id} className="border-t border-gray-700">
-                  <td className="py-2 pr-3">{d.company_nome}</td>
-                  <td className="py-2 pr-3">{d.member_nome}{d.is_super_admin ? " (Servidor)" : ""}</td>
-                  <td className="py-2 pr-3">{d.role || "—"}</td>
-                  <td className="py-2 pr-3">{d.platform}</td>
-                  <td className="py-2 pr-3" title={`${d.fingerprint?.model || ""} · ${d.device_uuid || ""}`}>{deviceLabel(d)}</td>
-                  <td className="py-2 pr-3">{statusPt[d.status] || d.status}</td>
-                  <td className="py-2 pr-3 whitespace-nowrap">
-                    {d.status !== "approved" && (
-                      <button disabled={busyId === d.id} onClick={() => act(d.id, "approve")}
-                        className="px-2 py-1 mr-1 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50">Aprovar</button>
-                    )}
-                    {d.status === "pending" && (
-                      <button disabled={busyId === d.id} onClick={() => act(d.id, "reject")}
-                        className="px-2 py-1 mr-1 rounded bg-amber-600 hover:bg-amber-500 disabled:opacity-50">Rejeitar</button>
-                    )}
-                    {d.status === "approved" && (
-                      <button disabled={busyId === d.id} onClick={() => act(d.id, "revoke")}
-                        className="px-2 py-1 rounded bg-red-600 hover:bg-red-500 disabled:opacity-50">Revogar</button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
-  );
-}
-
 function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   const [companies, setCompanies] = useState([]);
   const [showForm, setShowForm] = useState(false);
@@ -4837,7 +4679,6 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   const [confirmDelete, setConfirmDelete] = useState(null); // empresa a excluir
   const [editingCompany, setEditingCompany] = useState(null); // empresa em edição
   const [showAuditLog, setShowAuditLog] = useState(false);
-  const [showDevices, setShowDevices] = useState(false); // painel de aprovação de aparelhos
   const [waCompany, setWaCompany] = useState(null); // empresa gerenciando conexão WhatsApp
 
   // Form state
@@ -5188,9 +5029,6 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
             <button onClick={() => setShowAuditLog(true)} className="px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition" title="Histórico de ações do Master">
               📜 Auditoria
             </button>
-            <button onClick={() => setShowDevices(true)} className="px-3 py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-sm transition" title="Aprovar aparelhos dos membros">
-              📱 Aparelhos
-            </button>
             <button onClick={() => { resetForm(); setShowForm(true); }} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg text-sm font-medium transition shadow-lg shadow-blue-600/20">
               + Nova Empresa
             </button>
@@ -5370,13 +5208,6 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
       {showAuditLog && (
         <Modal isOpen={true} title="Auditoria — Ações do Master" onClose={() => setShowAuditLog(false)} size="lg">
           <MasterAuditLog onClose={() => setShowAuditLog(false)} />
-        </Modal>
-      )}
-
-      {/* Aparelhos — aprovação de vínculo aparelho↔membro (só o Master controla) */}
-      {showDevices && (
-        <Modal isOpen={true} title="Aparelhos — Aprovação de acesso" onClose={() => setShowDevices(false)} size="lg">
-          <MasterDevicesPanel master={master} addToast={addToast} />
         </Modal>
       )}
     </div>
@@ -17555,9 +17386,6 @@ export default function App() {
                 migrateLegacyConfigOnce(savedUser.companyId || DEFAULT_COMPANY_ID);
                 try { ensureAutoBackup(savedUser.companyId || DEFAULT_COMPANY_ID); } catch { /* ignora */ }
                 setUser(savedUser);
-                // Fase 3: renova a device_session (base do RLS por aparelho) para a
-                // sessão em cache. Fire-and-forget; se o aparelho foi revogado, gateia.
-                deviceVerify().then((chk) => { if (chk?.ok && chk.status === "denied") setDeviceGate("denied"); }).catch(() => {});
                 lastActivityRef.current = Date.now();
                 sessionStorage.setItem("frost_session", JSON.stringify({ ...session, lastActivity: Date.now() }));
               }
@@ -18212,11 +18040,6 @@ export default function App() {
     handleMasterLogin(m);
   }, [handleMasterLogin]);
 
-  // ─── Login Handler — salva sessão e verifica troca de senha obrigatória ───
-  // Portão de aparelho (Fase 1): status quando o aparelho não está aprovado
-  // ('pending' | 'needs_enroll' | 'denied'). Null = liberado / sem bloqueio.
-  const [deviceGate, setDeviceGate] = useState(null);
-
   // Modo Demonstração: inicia a demo (lead best-effort + seed cmp_demo + usuário
   // demo) e permite resetar o estado da demo a qualquer momento.
   const handleDemoStart = useCallback(async (lead) => {
@@ -18241,23 +18064,11 @@ export default function App() {
     addToast("Demo reiniciada com dados de exemplo.", "success");
   }, [loadAllData, addToast]);
 
+  // ─── Login Handler — salva sessão e verifica troca de senha obrigatória ───
   const handleLogin = useCallback(async (u) => {
     if (u.forcePasswordChange) {
       setPendingPasswordChange(u);
       return;
-    }
-    // Portão de aparelho: registra + verifica antes de liberar o ERP. O Master
-    // não passa por aqui. Soft nesta fase — se falhar por rede, libera (não trava
-    // o usuário legítimo offline); o bloqueio duro entra com o RLS (Fase 3).
-    try {
-      await deviceEnroll();
-      const chk = await deviceVerify();
-      if (chk.ok && chk.status !== "approved") {
-        setDeviceGate(chk.status);
-        return;
-      }
-    } catch (e) {
-      console.warn("portão de aparelho falhou (soft, libera):", e.message);
     }
     const sessUser = await startSession(u);
     setUser(sessUser);
@@ -18416,17 +18227,6 @@ export default function App() {
       <>
         <StyleSheet />
         <DemoLeadForm onStart={handleDemoStart} />
-      </>
-    );
-  }
-
-  // Portão de aparelho (Fase 1): aparelho não aprovado → tela de bloqueio,
-  // sem acesso ao ERP. Sair limpa o estado e encerra a sessão.
-  if (deviceGate) {
-    return (
-      <>
-        <StyleSheet />
-        <DeviceGateScreen status={deviceGate} onLogout={() => { setDeviceGate(null); handleLogout(); }} />
       </>
     );
   }
