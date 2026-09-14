@@ -310,3 +310,11 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - removidos: `src/device-identity.js`, `src/webauthn.js`, `src/lib/device-policy.js` (+3 testes), edges `device-enroll`/`device-verify`/`device-challenge`/`master-devices`, `DeviceGateScreen`, `MasterDevicesPanel`, botão 📱 Aparelhos, portão no `handleLogin` e na restauração de sessão, helpers `deviceEnroll`/`deviceVerify`/`masterDevices`
 - verificação: vitest 396/396, `npm run build` OK, lint sem regressão (nenhum unused novo)
 - touched: concepts/device-locking.md (reescrita como registro histórico), index.md
+
+## [2026-09-08] descoberta | `supabase db push` recriaria o travamento por aparelho
+- gatilho: ao aplicar a migração de remoção, `npx supabase db push` parou em "Cannot find project ref"
+- medição no remoto (`supabase_migrations.schema_migrations`): 49 versões registradas, de `20260506094618` a `20260723013715`; `supabase/migrations/` tem 12 arquivos; **zero** batem
+- consequência: `db push` trata as 12 locais como pendentes, recusa por serem anteriores à última remota e sugere `--include-all` — que rodaria `20260722000000_device_locking` e `20260722040000_device_rls_fase3`, **recriando** o cadeado removido no mesmo dia, e o `baseline_schema_base` por cima do schema vivo
+- decisão: SQL aplicado pelo SQL Editor do dashboard; o arquivo em `supabase/migrations/` fica como registro, não como mecanismo. Reparar o histórico (`supabase migration repair`) é trabalho à parte, nunca no meio de outra mudança
+- new pages: concepts/migracoes-supabase.md
+- touched: index.md

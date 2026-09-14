@@ -28,6 +28,7 @@ Sempre lido primeiro em qualquer query. Mantenha sub-200 linhas.
 - [Master Tier](concepts/master-tier.md) — super-admin local-only para criar/bloquear/excluir empresas
 - [Evolution multi-tenant](concepts/evolution-multitenant.md) — instance→company_id, no-op gracioso, infra Evolution/Storage compartilhada
 - [Travamento por Aparelho](concepts/device-locking.md) — ⚠️ REMOVIDO em 2026-09-08; ficou o registro de por que a trava 1:1 membro↔aparelho não sobreviveu ao uso real
+- [Migrações Supabase](concepts/migracoes-supabase.md) — ⚠️ o histórico remoto não bate com os arquivos locais; `db push` recria o que foi removido
 - [Landing — scroll + 3D](concepts/landing-scroll-3d.md) — camadas z, floco atravessando cartão, data-dim, ScrollStack vanilla
 - [Modo Demonstração](concepts/demo-mode.md) — demo interativa da landing (?demo=1), seed local isolado, captura de lead
 - [Fechamento Mensal](modules/dashboard.md#fechamento-mensal) — mês encerrado vira `erp:fechamento:<AAAA-MM>`, consultável no Relatórios
