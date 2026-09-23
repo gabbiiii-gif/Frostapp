@@ -1,7 +1,7 @@
 ---
 title: Ordens de Serviço (ProcessModule)
 type: module
-updated: 2026-08-27
+updated: 2026-09-23
 sources: []
 related:
   - ./cadastro.md
@@ -72,9 +72,15 @@ Botões abrem `generateOrcamentoHTML(os, clients)`, `generateOSHTML(os, clients)
 
 ## Filtros / view
 
-- `viewMode = lista | (outros)` — ver código
+- `viewMode = lista | kanban`
 - `filterStatus`, `filterTecnico`, `filterCliente`, `search`
-- `dateFilter` do header
+- `periodo`: **local ao módulo**, padrão **Tudo**, barra "Período:" visível na linha de filtros.
+  Recorta por `dataAbertura` via `filterByDate`. KPIs, lista e Kanban seguem o mesmo recorte.
+
+> Até 2026-09-23 a lista usava o `dateFilter` global do App (padrão 30 dias), cujo seletor só
+> aparece no Dashboard. OS aberta há mais de 30 dias sumia da lista, dos KPIs e da busca, sem nada
+> na tela indicando o corte. O Financeiro ainda tem o mesmo acoplamento, ver
+> [finance](./finance.md#lacunas).
 
 ## Lacunas
 

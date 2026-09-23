@@ -7998,7 +7998,7 @@ ${_actionBar()}
 
 // ─── PROCESS MODULE (OS) ────────────────────────────────────────────────────
 
-function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadData }) {
+function ProcessModule({ user, addToast, clients, employees, reloadData }) {
   const [orders, setOrders] = useState([]);
   // ─── Cadastros integrados (produtos/estoque/serviços) ──────────────────
   // Carregamos os catálogos do DB para alimentar os pickers da OS:
@@ -8032,6 +8032,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
   const [filterTecnico, setFilterTecnico] = useState("all");
   // Filtro por cliente — permite ver todas as OS de um cliente específico
   const [filterCliente, setFilterCliente] = useState("all");
+  // Período da lista — próprio do módulo e "Tudo" por padrão. A lista herdava o
+  // filtro de 30 dias do Dashboard, cujo seletor só aparece lá: OS aberta há mais
+  // de 30 dias sumia desta tela (e da busca) sem nada indicando o corte.
+  const [periodo, setPeriodo] = useState({ period: "all", startDate: "", endDate: "" });
   const [viewMode, setViewMode] = useState("lista");
   // ─── Modal Produtividade Mensal por Técnico (admin/gerente) ───
   const [showProdutividade, setShowProdutividade] = useState(false);
@@ -8217,7 +8221,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
   }, []);
 
   const filteredOrders = useMemo(() => {
-    let list = filterByDate(orders, "dataAbertura", dateFilter);
+    let list = filterByDate(orders, "dataAbertura", periodo);
 
     // Technician can only see their own
     if (user.role === "tecnico") {
@@ -8237,8 +8241,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
           osTecnicoNomes(os).toLowerCase().includes(s)
       );
     }
-    return list.sort((a, b) => new Date(b.dataAbertura) - new Date(a.dataAbertura));
-  }, [orders, dateFilter, filterStatus, filterTecnico, filterCliente, search, user]);
+    // Cópia antes do sort: com período "Tudo" e sem outro filtro, `list` é o
+    // próprio array do estado `orders`, e sort() ordenaria o estado no lugar.
+    return [...list].sort((a, b) => new Date(b.dataAbertura) - new Date(a.dataAbertura));
+  }, [orders, periodo, filterStatus, filterTecnico, filterCliente, search, user]);
 
   const stats = useMemo(() => ({
     total: filteredOrders.length,
@@ -8777,6 +8783,11 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
             ))}
           </select>
         )}
+        {/* Período por data de abertura — fica à vista para nenhum corte ser invisível */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-gray-400">Período:</span>
+          <DateFilterBar dateFilter={periodo} setDateFilter={setPeriodo} />
+        </div>
         {/* Botão Produtividade — só admin/gerente veem */}
         {(user.role === "admin" || user.role === "gerente") && (
           <button
@@ -18610,7 +18621,7 @@ export default function App() {
               <Dashboard user={user} dateFilter={dateFilter} onNavigate={setActiveModule} />
             )}
             {activeModule === "processos" && (
-              <ProcessModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} reloadData={loadAllData} />
+              <ProcessModule user={user} addToast={addToast} clients={data.clients} employees={data.employees} reloadData={loadAllData} />
             )}
             {activeModule === "agenda" && (
               <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} onNavigate={setActiveModule} />

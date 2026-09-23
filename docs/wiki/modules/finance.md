@@ -1,7 +1,7 @@
 ---
 title: Financeiro
 type: module
-updated: 2026-05-10
+updated: 2026-09-23
 sources: []
 related:
   - ../concepts/db-layer.md
@@ -52,7 +52,7 @@ Acumulador `totals` separa **dinheiro realizado** vs **pipeline** vs **atrasado*
 
 ## Filtros
 
-- `dateFilter` (do header) via `filterByDate(items, "data", dateFilter)`
+- `dateFilter` (do header) via `filterByDate(items, "data", dateFilter)`. ⚠️ O seletor só aparece no Dashboard, ver Lacunas
 - `filterType` (all|receita|despesa)
 - `filterStatus`
 - `filterCategory` (set dinâmico das categorias usadas)
@@ -68,5 +68,14 @@ Acumulador `totals` separa **dinheiro realizado** vs **pipeline** vs **atrasado*
 
 ## Lacunas
 
+- ⚠️ **Período invisível (confirmado em 2026-09-23).** A lista e os totais usam o `dateFilter`
+  global do App (padrão **30 dias**), mas a barra de período só é renderizada no Dashboard.
+  Lançamento com `data` de mais de 30 dias não aparece e também não entra em "A receber" nem em
+  "Atrasado". Na demo, uma receita pendente lançada há 60 dias e vencida há 50 não aparece. Contorno
+  atual: mudar o período no Dashboard, porque o estado é compartilhado na sessão. A tela de OS teve o
+  mesmo problema e ganhou período próprio e visível ([process](./process.md#filtros--view)). Aqui a
+  escolha do padrão (Tudo ou mês corrente) é de produto, porque muda os números exibidos. O
+  "Atrasado" provavelmente deveria ignorar o período, como os cards de estado atual do
+  [Dashboard](./dashboard.md) `[a confirmar com o usuário]`.
 - [a expandir] Relatório imprimível — código entre 4100-4380 aprox
 - [a expandir] Integração com PIX (formaPagamento) — não validada

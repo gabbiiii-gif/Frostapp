@@ -318,3 +318,11 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - decisão: SQL aplicado pelo SQL Editor do dashboard; o arquivo em `supabase/migrations/` fica como registro, não como mecanismo. Reparar o histórico (`supabase migration repair`) é trabalho à parte, nunca no meio de outra mudança
 - new pages: concepts/migracoes-supabase.md
 - touched: index.md
+
+## [2026-09-23] fix | OS com mais de 30 dias sumiam da tela de Ordens de Serviço
+- gatilho: print do usuário, "nas ordens de serviço não consigo visualizar todas". A lista ia de 23/09 a 24/08 e parava, sem paginação
+- causa: `ProcessModule` filtrava com `filterByDate(orders, "dataAbertura", dateFilter)` usando o `dateFilter` global do App (padrão `30dias`). A barra de período só é renderizada no Dashboard, então o corte ficava invisível na tela de OS. A OS mais antiga do print (24/08) é exatamente hoje − 30 dias
+- correção: período local ao módulo (`periodo`, padrão "Tudo"), com a barra "Período:" visível na linha de filtros. A prop `dateFilter` saiu do `ProcessModule`. O sort passou a copiar o array: com "Tudo", `list` era o próprio estado `orders` e o `sort()` o reordenava no lugar
+- verificação: demo + Playwright com 25 OS injetadas (abertas entre 40 e 280 dias atrás). Antes: Total OS 2 de 28, OS antiga não achada na busca. Depois: 28 de 28, paginação "1-10 de 28", a busca acha. 30 dias, 90 dias e Personalizado seguem filtrando; o Dashboard mantém os 30 dias; celular de 390px sem rolagem horizontal. vitest 396/396, build OK, lint idêntico ao da base
+- achado: o Financeiro tem o mesmo corte invisível de 30 dias, inclusive nos totais "A receber" e "Atrasado" (confirmado na demo). Registrado em modules/finance.md e não corrigido: a escolha do padrão é de produto
+- touched: modules/process.md, modules/finance.md
