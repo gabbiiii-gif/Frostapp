@@ -36,7 +36,18 @@ Garante que app aberto antes da integração viva ainda popule transações retr
 
 ## Totais (núcleo do módulo)
 
-Acumulador `totals` separa **dinheiro realizado** vs **pipeline** vs **atrasado**:
+Calculado por `totaisFinanceiro` (`src/lib/pagamentos.js`, coberto por Vitest). Separa **dinheiro
+realizado** vs **pipeline** vs **atrasado**, com dois recortes de tempo (2026-09-23):
+
+- **Realizado** (`receitaPaga`, `despesaPaga`, `saldoRealizado`) e `canceladosCount` seguem o
+  período escolhido na tela.
+- **Pipeline** (`aReceber`, `aPagar`, `*Atrasada`) é estado atual: todo saldo em aberto entra, seja
+  qual for a data do lançamento. Uma conta vencida há 50 dias não deixa de ser dívida por estar fora
+  dos últimos 30. Mesma lógica dos cards de estado atual do [Dashboard](./dashboard.md).
+- Os dois recortes respeitam os demais filtros (tipo, status, categoria, busca).
+- Com período diferente de "Tudo", um item em aberto antigo conta no card do pipeline mas não aparece
+  na tabela. O cabeçalho do pipeline avisa: "em aberto hoje, independe do período".
+
 
 | Campo | Definição |
 |---|---|
@@ -52,7 +63,7 @@ Acumulador `totals` separa **dinheiro realizado** vs **pipeline** vs **atrasado*
 
 ## Filtros
 
-- `dateFilter` (do header) via `filterByDate(items, "data", dateFilter)`. ⚠️ O seletor só aparece no Dashboard, ver Lacunas
+- `periodo`: **local ao módulo**, padrão **Tudo**, barra "Período:" visível na linha de filtros. Recorta por `data` via `filterByDate`
 - `filterType` (all|receita|despesa)
 - `filterStatus`
 - `filterCategory` (set dinâmico das categorias usadas)
@@ -68,14 +79,11 @@ Acumulador `totals` separa **dinheiro realizado** vs **pipeline** vs **atrasado*
 
 ## Lacunas
 
-- ⚠️ **Período invisível (confirmado em 2026-09-23).** A lista e os totais usam o `dateFilter`
-  global do App (padrão **30 dias**), mas a barra de período só é renderizada no Dashboard.
-  Lançamento com `data` de mais de 30 dias não aparece e também não entra em "A receber" nem em
-  "Atrasado". Na demo, uma receita pendente lançada há 60 dias e vencida há 50 não aparece. Contorno
-  atual: mudar o período no Dashboard, porque o estado é compartilhado na sessão. A tela de OS teve o
-  mesmo problema e ganhou período próprio e visível ([process](./process.md#filtros--view)). Aqui a
-  escolha do padrão (Tudo ou mês corrente) é de produto, porque muda os números exibidos. O
-  "Atrasado" provavelmente deveria ignorar o período, como os cards de estado atual do
-  [Dashboard](./dashboard.md) `[a confirmar com o usuário]`.
+> Até 2026-09-23 a lista e **todos** os totais usavam o `dateFilter` global do App (padrão 30 dias),
+> cujo seletor só aparece no Dashboard. Lançamento com mais de 30 dias sumia da tabela e de "A
+> receber"/"Vencidos" sem nada na tela indicando o corte. Na demo, uma receita pendente lançada há 60
+> dias e vencida há 50 não aparecia. A tela de OS tinha o mesmo problema
+> ([process](./process.md#filtros--view)).
+
 - [a expandir] Relatório imprimível — código entre 4100-4380 aprox
 - [a expandir] Integração com PIX (formaPagamento) — não validada

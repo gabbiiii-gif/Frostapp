@@ -79,8 +79,8 @@ Botões abrem `generateOrcamentoHTML(os, clients)`, `generateOSHTML(os, clients)
 
 > Até 2026-09-23 a lista usava o `dateFilter` global do App (padrão 30 dias), cujo seletor só
 > aparece no Dashboard. OS aberta há mais de 30 dias sumia da lista, dos KPIs e da busca, sem nada
-> na tela indicando o corte. O Financeiro ainda tem o mesmo acoplamento, ver
-> [finance](./finance.md#lacunas).
+> na tela indicando o corte. O Financeiro tinha o mesmo acoplamento e foi corrigido junto, ver
+> [finance](./finance.md#totais-núcleo-do-módulo).
 
 ## Lacunas
 

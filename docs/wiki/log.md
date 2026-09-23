@@ -326,3 +326,11 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - verificação: demo + Playwright com 25 OS injetadas (abertas entre 40 e 280 dias atrás). Antes: Total OS 2 de 28, OS antiga não achada na busca. Depois: 28 de 28, paginação "1-10 de 28", a busca acha. 30 dias, 90 dias e Personalizado seguem filtrando; o Dashboard mantém os 30 dias; celular de 390px sem rolagem horizontal. vitest 396/396, build OK, lint idêntico ao da base
 - achado: o Financeiro tem o mesmo corte invisível de 30 dias, inclusive nos totais "A receber" e "Atrasado" (confirmado na demo). Registrado em modules/finance.md e não corrigido: a escolha do padrão é de produto
 - touched: modules/process.md, modules/finance.md
+
+## [2026-09-23] fix | Financeiro: período visível e pipeline independente do período
+- gatilho: usuário, "corrige o financeiro também" (achado registrado no fix anterior)
+- causa: igual ao da tela de OS. Lista e totais filtravam pelo `dateFilter` global (padrão 30 dias), com o seletor só no Dashboard
+- correção: `periodo` local ao módulo (padrão "Tudo") com a barra "Período:" visível. Totais extraídos para `totaisFinanceiro` em `src/lib/pagamentos.js`: realizado e cancelados seguem o período; a receber, a pagar e vencidos consideram todo saldo em aberto. `FinanceModule` deixa de receber `dateFilter`
+- decisão: padrão "Tudo", pela consistência com a tela de OS. "Saldo em Caixa" com "Tudo" passa a ser o saldo acumulado, e não o fluxo dos últimos 30 dias (os números exibidos mudam na primeira abertura)
+- verificação: vitest 400/400 (4 casos novos de `totaisFinanceiro`). Na demo, com uma receita paga e uma vencida lançadas há 60 dias: em "Tudo" as duas aparecem, com pago R$ 500 e vencidos R$ 999; em "30 dias" saem da tabela e do pago, e os vencidos continuam em R$ 999. Celular sem rolagem horizontal; build OK; lint idêntico ao da base
+- touched: modules/finance.md
