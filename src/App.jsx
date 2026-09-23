@@ -14,7 +14,7 @@ import gsap from "gsap";
 import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, masterEvolution, adminEvolution, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig } from "./supabase.js";
 import { isDemoMode, DEMO_COMPANY_ID, markDemoStarted, resetDemoData, buildDemoUser, recordDemoLead } from "./demo.js";
 import { mesesAFechar, montarFechamento, fechamentoTemMovimento } from "./lib/fechamento-mensal.js";
-import { computePaymentState } from "./lib/pagamentos.js";
+import { computePaymentState, totaisFinanceiro } from "./lib/pagamentos.js";
 import Aurora from "./Aurora.jsx";
 import BlurText from "./BlurText.jsx";
 import { PasswordInput } from "./PasswordInput.jsx";
@@ -6055,7 +6055,7 @@ function Dashboard({ user, dateFilter, onNavigate }) {
 //   - A receber  = PENDENTE + EM ANDAMENTO (ainda não pagos, mas esperados)
 //   - Vencidos   = ATRASADO (alerta — ação prioritária)
 //   - Cancelado  = informativo, não entra nas somas
-function FinanceModule({ user, dateFilter, addToast }) {
+function FinanceModule({ user, addToast }) {
   const [transactions, setTransactions] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [modalOpen, setModalOpen] = useState(false);
@@ -6065,6 +6065,10 @@ function FinanceModule({ user, dateFilter, addToast }) {
   const [filterType, setFilterType] = useState("all");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
+  // Período — próprio do módulo, "Tudo" por padrão e visível na linha de filtros.
+  // Antes herdava o filtro de 30 dias do Dashboard, cujo seletor só aparece lá:
+  // lançamento com mais de 30 dias sumia da lista e dos totais sem aviso.
+  const [periodo, setPeriodo] = useState({ period: "all", startDate: "", endDate: "" });
   // Painel de gestão das despesas fixas recorrentes (ativar/desativar/excluir)
   const [showRecorrentes, setShowRecorrentes] = useState(false);
 
@@ -6104,8 +6108,10 @@ function FinanceModule({ user, dateFilter, addToast }) {
   };
   const [form, setForm] = useState(emptyForm);
 
-  const filteredTransactions = useMemo(() => {
-    let list = filterByDate(transactions, "data", dateFilter);
+  // Filtros da tabela SEM o período — base dos totais de pipeline (a receber,
+  // a pagar, vencidos), que valem para qualquer data de lançamento.
+  const semPeriodo = useMemo(() => {
+    let list = transactions;
     if (filterType !== "all") list = list.filter((t) => t.tipo === filterType);
     if (filterStatus !== "all") list = list.filter((t) => t.status === filterStatus);
     if (filterCategory !== "all") list = list.filter((t) => t.categoria === filterCategory);
@@ -6118,60 +6124,27 @@ function FinanceModule({ user, dateFilter, addToast }) {
           (t.numero || "").toLowerCase().includes(s)
       );
     }
-    return list.sort((a, b) => new Date(b.data) - new Date(a.data));
-  }, [transactions, dateFilter, filterType, filterStatus, filterCategory, search]);
+    return list;
+  }, [transactions, filterType, filterStatus, filterCategory, search]);
+
+  // Lista da tabela: filtros + período. Cópia antes do sort para não reordenar
+  // o estado `transactions` no lugar (com "Tudo" e sem filtro é o mesmo array).
+  const filteredTransactions = useMemo(
+    () => [...filterByDate(semPeriodo, "data", periodo)].sort((a, b) => new Date(b.data) - new Date(a.data)),
+    [semPeriodo, periodo]
+  );
 
   // ─── Totais por status — núcleo do módulo ────────────────────────────────
   // Separação explícita entre dinheiro realizado e pipeline:
   // admin/gerente vê claramente quanto já entrou, quanto está para entrar
   // e quanto está atrasado. Cancelado nunca entra em nenhuma soma.
+  // Realizado (pago, saldo em caixa) segue o período; pipeline (a receber, a
+  // pagar, vencidos) é estado atual e considera todo lançamento em aberto.
+  // Regra em totaisFinanceiro (src/lib/pagamentos.js, testada).
   const totals = useMemo(() => {
-    const acc = {
-      // Receitas
-      receitaPaga: 0,
-      receitaPendente: 0,
-      receitaEmAndamento: 0,
-      receitaAtrasada: 0,
-      // Despesas
-      despesaPaga: 0,
-      despesaPendente: 0,
-      despesaEmAndamento: 0,
-      despesaAtrasada: 0,
-      // Contagem de cancelados (apenas informativo)
-      canceladosCount: 0,
-    };
-    for (const t of filteredTransactions) {
-      const isReceita = t.tipo === "receita";
-      // Cancelado e "em andamento" mantêm o comportamento anterior (não têm
-      // pagamentos parciais). O resto usa o estado derivado (parcial/atrasado).
-      if (t.status === "cancelado") { acc.canceladosCount += 1; continue; }
-      if (t.status === "em_andamento") {
-        const v = Number(t.valor) || 0;
-        if (isReceita) acc.receitaEmAndamento += v; else acc.despesaEmAndamento += v;
-        continue;
-      }
-      const { valorPago, saldo, status } = computePaymentState(t);
-      // Realizado = soma dos pagamentos efetivos (inclui parciais).
-      if (isReceita) acc.receitaPaga += valorPago; else acc.despesaPaga += valorPago;
-      // Saldo em aberto vai para pendente ou atrasado (conforme vencimento).
-      if (saldo > 0) {
-        if (status === "atrasado") {
-          if (isReceita) acc.receitaAtrasada += saldo; else acc.despesaAtrasada += saldo;
-        } else {
-          if (isReceita) acc.receitaPendente += saldo; else acc.despesaPendente += saldo;
-        }
-      }
-    }
-    // Saldo realizado (em caixa): receita paga - despesa paga
-    acc.saldoRealizado = acc.receitaPaga - acc.despesaPaga;
-    // A receber (pipeline de entrada): pendente + em andamento
-    acc.aReceber = acc.receitaPendente + acc.receitaEmAndamento;
-    // A pagar (pipeline de saída): pendente + em andamento
-    acc.aPagar = acc.despesaPendente + acc.despesaEmAndamento;
-    // Previsão de saldo: considera tudo que não foi cancelado nem está atrasado
-    acc.saldoPrevisto = (acc.receitaPaga + acc.aReceber) - (acc.despesaPaga + acc.aPagar);
-    return acc;
-  }, [filteredTransactions]);
+    const noPeriodo = new Set(filteredTransactions);
+    return totaisFinanceiro(semPeriodo, (t) => noPeriodo.has(t));
+  }, [semPeriodo, filteredTransactions]);
 
   const allCategories = useMemo(() => {
     const cats = new Set();
@@ -6541,7 +6514,10 @@ function FinanceModule({ user, dateFilter, addToast }) {
 
       {/* Segunda linha: pipeline (ainda não pago) */}
       <div>
-        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Pipeline (a receber / a pagar)</h3>
+        <h3 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">
+          Pipeline (a receber / a pagar)
+          <span className="normal-case tracking-normal font-normal text-gray-500"> · em aberto hoje, independe do período</span>
+        </h3>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div className="bg-gray-800 border border-yellow-500/20 rounded-xl p-4">
             <p className="text-gray-400 text-xs">A Receber</p>
@@ -6618,6 +6594,11 @@ function FinanceModule({ user, dateFilter, addToast }) {
             <option key={c} value={c}>{c}</option>
           ))}
         </select>
+        {/* Período por data de lançamento — à vista, para nenhum corte ser invisível */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-gray-400">Período:</span>
+          <DateFilterBar dateFilter={periodo} setDateFilter={setPeriodo} />
+        </div>
       </div>
 
       {/* Tabela */}
@@ -7998,7 +7979,7 @@ ${_actionBar()}
 
 // ─── PROCESS MODULE (OS) ────────────────────────────────────────────────────
 
-function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadData }) {
+function ProcessModule({ user, addToast, clients, employees, reloadData }) {
   const [orders, setOrders] = useState([]);
   // ─── Cadastros integrados (produtos/estoque/serviços) ──────────────────
   // Carregamos os catálogos do DB para alimentar os pickers da OS:
@@ -8032,6 +8013,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
   const [filterTecnico, setFilterTecnico] = useState("all");
   // Filtro por cliente — permite ver todas as OS de um cliente específico
   const [filterCliente, setFilterCliente] = useState("all");
+  // Período da lista — próprio do módulo e "Tudo" por padrão. A lista herdava o
+  // filtro de 30 dias do Dashboard, cujo seletor só aparece lá: OS aberta há mais
+  // de 30 dias sumia desta tela (e da busca) sem nada indicando o corte.
+  const [periodo, setPeriodo] = useState({ period: "all", startDate: "", endDate: "" });
   const [viewMode, setViewMode] = useState("lista");
   // ─── Modal Produtividade Mensal por Técnico (admin/gerente) ───
   const [showProdutividade, setShowProdutividade] = useState(false);
@@ -8217,7 +8202,7 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
   }, []);
 
   const filteredOrders = useMemo(() => {
-    let list = filterByDate(orders, "dataAbertura", dateFilter);
+    let list = filterByDate(orders, "dataAbertura", periodo);
 
     // Technician can only see their own
     if (user.role === "tecnico") {
@@ -8237,8 +8222,10 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
           osTecnicoNomes(os).toLowerCase().includes(s)
       );
     }
-    return list.sort((a, b) => new Date(b.dataAbertura) - new Date(a.dataAbertura));
-  }, [orders, dateFilter, filterStatus, filterTecnico, filterCliente, search, user]);
+    // Cópia antes do sort: com período "Tudo" e sem outro filtro, `list` é o
+    // próprio array do estado `orders`, e sort() ordenaria o estado no lugar.
+    return [...list].sort((a, b) => new Date(b.dataAbertura) - new Date(a.dataAbertura));
+  }, [orders, periodo, filterStatus, filterTecnico, filterCliente, search, user]);
 
   const stats = useMemo(() => ({
     total: filteredOrders.length,
@@ -8777,6 +8764,11 @@ function ProcessModule({ user, dateFilter, addToast, clients, employees, reloadD
             ))}
           </select>
         )}
+        {/* Período por data de abertura — fica à vista para nenhum corte ser invisível */}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-gray-400">Período:</span>
+          <DateFilterBar dateFilter={periodo} setDateFilter={setPeriodo} />
+        </div>
         {/* Botão Produtividade — só admin/gerente veem */}
         {(user.role === "admin" || user.role === "gerente") && (
           <button
@@ -18610,13 +18602,13 @@ export default function App() {
               <Dashboard user={user} dateFilter={dateFilter} onNavigate={setActiveModule} />
             )}
             {activeModule === "processos" && (
-              <ProcessModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} reloadData={loadAllData} />
+              <ProcessModule user={user} addToast={addToast} clients={data.clients} employees={data.employees} reloadData={loadAllData} />
             )}
             {activeModule === "agenda" && (
               <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} onNavigate={setActiveModule} />
             )}
             {activeModule === "financeiro" && (
-              <FinanceModule user={user} dateFilter={dateFilter} addToast={addToast} />
+              <FinanceModule user={user} addToast={addToast} />
             )}
             {activeModule === "cadastro" && (
               <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
