@@ -98,6 +98,22 @@ export default defineConfig({
   ],
   build: {
     chunkSizeWarningLimit: 1500,
+    rollupOptions: {
+      output: {
+        // Vendors estáveis em chunks próprios: o App.jsx muda a cada deploy e
+        // troca o hash do index-*.js; React e Supabase quase nunca mudam, então
+        // separados eles mantêm o mesmo hash e continuam no cache do navegador
+        // (e do service worker) entre deploys. Só pega o que vem de
+        // node_modules — o resto fica com a divisão automática do Rollup
+        // (inclusive os chunks lazy de gráficos/módulos).
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (/[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react'
+          if (/[\\/]node_modules[\\/]@supabase[\\/]/.test(id)) return 'vendor-supabase'
+          return undefined
+        },
+      },
+    },
   },
   // Configuração do Vitest — happy-dom é mais leve que jsdom e tem WebCrypto
   test: {

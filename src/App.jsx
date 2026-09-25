@@ -1,22 +1,17 @@
 
-import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect, Component } from "react";
-import {
-  LineChart, Line,
-  AreaChart, Area,
-  BarChart, Bar,
-  PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip,
-  ResponsiveContainer
-} from "recharts";
-import { animate } from "animejs";
-import { motion } from "motion/react";
-import gsap from "gsap";
+import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect, Component, lazy, Suspense } from "react";
+// Recharts, motion, gsap e animejs NÃO são importados aqui de propósito: só
+// servem depois do login (Dashboard e módulos), e no import estático iriam
+// para o bundle da tela de login (~550 KB a mais). Os gráficos do Dashboard
+// moram em ./DashboardCharts.jsx e o BlurText (motion) em ./BlurText.jsx,
+// ambos via React.lazy; as animações simples usam Web Animations API, CSS e
+// requestAnimationFrame. Ver src/lib/prefetch.js (pré-carga durante o login).
 import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, masterEvolution, adminEvolution, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig } from "./supabase.js";
 import { isDemoMode, DEMO_COMPANY_ID, markDemoStarted, resetDemoData, buildDemoUser, recordDemoLead } from "./demo.js";
 import { mesesAFechar, montarFechamento, fechamentoTemMovimento } from "./lib/fechamento-mensal.js";
 import { computePaymentState, totaisFinanceiro } from "./lib/pagamentos.js";
 import Aurora from "./Aurora.jsx";
-import BlurText from "./BlurText.jsx";
+// BlurText é carregado sob demanda — ver o wrapper `BlurText` nos helpers do Dashboard.
 import { PasswordInput } from "./PasswordInput.jsx";
 import SignaturePad from "./SignaturePad.jsx";
 import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength, passwordChecklist, splitParcelas, addMonthsKeepDay, monthKey, vencimentoNoMes, mesesAMaterializar, matchDigitos, osTecnicos, osTecnicoNomes, osTemTecnico, camposTecnicos } from "./utils.js";
@@ -27,8 +22,8 @@ import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometr
 // pode importar o App.jsx de volta. O html2pdf é carregado sob demanda
 // (carregarHtml2pdf) para não pesar na abertura do app.
 import { openHTMLDoc, carregarHtml2pdf } from "./lib/doc.js";
-// QR Code para enrollment do 2FA TOTP (escaneado por Google Authenticator/Authy/1Password)
-import QRCode from "qrcode";
+// (O import de "qrcode" que ficava aqui saiu: o QR do 2FA hoje vem pronto do
+// Supabase MFA e nada neste arquivo usava a lib — só pesava no bundle inicial.)
 
 // ─── ErrorBoundary por módulo ────────────────────────────────────────────────
 // Sem isto, qualquer crash em um módulo (Recharts com dado malformado, OS legada
@@ -92,35 +87,63 @@ class ModuleErrorBoundary extends Component {
 // Só opacidade — evita CLS, reflow e layout shift em tabelas densas.
 // Respeita prefers-reduced-motion (a11y). Re-monta via prop `key`, então o
 // módulo antigo simplesmente desmonta (exit implícito, sem bloquear input).
+// Usa a Web Animations API nativa (antes era o animejs, que custava ~31 KB no
+// bundle da tela de login só para este fade). O cubic-bezier abaixo é o
+// easeOutQuad. Sem `fill`: ao terminar, o efeito sai e vale a opacidade
+// natural (1) — nada fica "preso" no estilo do elemento.
 function ModuleSwitcher({ moduleKey, children }) {
   const ref = useRef(null);
   useLayoutEffect(() => {
-    if (!ref.current) return;
+    const el = ref.current;
+    if (!el) return undefined;
     if (typeof window !== "undefined" &&
         window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) {
-      ref.current.style.opacity = "1";
-      return;
+      el.style.opacity = "1";
+      return undefined;
     }
-    animate(ref.current, {
-      opacity: [0, 1],
+    // WebView muito antigo sem WAAPI: só mostra, sem fade.
+    if (typeof el.animate !== "function") return undefined;
+    const anim = el.animate([{ opacity: 0 }, { opacity: 1 }], {
       duration: 200,
-      ease: "outQuad",
+      easing: "cubic-bezier(0.5, 1, 0.89, 1)",
     });
+    // Troca rápida de módulo (ou desmontagem) no meio do fade: cancela.
+    return () => anim.cancel();
   }, [moduleKey]);
   return <div ref={ref} key={moduleKey} className="h-full">{children}</div>;
 }
 import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
 import { FrostIcon } from "./FrostIcons.jsx";
 import BrandSplash from "./BrandSplash.jsx";
-import PosVendaModule from "./modules/PosVendaModule.jsx";
-import LembreteModule from "./modules/LembreteModule.jsx";
+import { prefetchPosLogin } from "./lib/prefetch.js";
+
+// ─── Módulos carregados sob demanda ─────────────────────────────────────────
+// Pós-venda, Lembrete, Ponto e Relatórios viram chunks próprios (React.lazy):
+// ninguém precisa deles na tela de login, e Ponto/Relatórios ainda puxam o
+// Recharts. `comSuspense` embrulha o lazy no próprio <Suspense>, então os
+// pontos de render seguem usando <PontoModule .../> como antes, e o
+// LoadingSkeleton aparece só enquanto o chunk baixa (1ª abertura). Offline o
+// chunk vem do precache do service worker (globPatterns inclui todo **/*.js).
+// Se o download falhar, o erro sobe pro ModuleErrorBoundary do módulo.
+function comSuspense(Lazy) {
+  function ModuloSobDemanda(props) {
+    return (
+      <Suspense fallback={<LoadingSkeleton />}>
+        <Lazy {...props} />
+      </Suspense>
+    );
+  }
+  return ModuloSobDemanda;
+}
+const PosVendaModule = comSuspense(lazy(() => import("./modules/PosVendaModule.jsx")));
+const LembreteModule = comSuspense(lazy(() => import("./modules/LembreteModule.jsx")));
 // ─── Módulos verticais novos (2026-06) ───
 // Ponto Eletrônico: registro de jornada via biometria/facial/PIN + banco de
 // horas + ocorrências/justificativas.
-import PontoModule from "./modules/PontoModule.jsx";
+const PontoModule = comSuspense(lazy(() => import("./modules/PontoModule.jsx")));
 // Relatórios: motor genérico de análise sobre qualquer entidade do sistema.
 // A lógica pura (registry, spec, engine, CSV, HTML) mora em src/lib/relatorios/.
-import RelatoriosModule from "./modules/RelatoriosModule.jsx";
+const RelatoriosModule = comSuspense(lazy(() => import("./modules/RelatoriosModule.jsx")));
 // Permissões de módulo por usuário — regra pura, testada em permissoes.test.js.
 import { hasPermission, montarPermissoesSalvas, modulosNovosDesdeOSave } from "./lib/permissoes.js";
 // Catálogos de seed (serviços + produtos) são carregados sob demanda via dynamic
@@ -3029,6 +3052,9 @@ function aguardarBoot() {
 }
 
 function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassword }) {
+  // Enquanto a pessoa digita, baixa em idle o que o Dashboard usa logo depois
+  // do login (gráficos, BlurText) — saíram do bundle inicial.
+  useEffect(() => { prefetchPosLogin(); }, []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -5472,23 +5498,37 @@ function MasterAuditLog() {
 // (em light vira tom slate suave; em dark fica vidro fosco sobre fundo escuro).
 const GLASS = "dash-card rounded-2xl border border-white/10 bg-white/[0.035] backdrop-blur-xl shadow-xl shadow-black/30";
 
+// Contador animado do valor anterior até `value` em 1,1 s. Antes era um
+// gsap.to (~69 KB no bundle inicial só pra isto); agora é um tween manual com
+// requestAnimationFrame. A curva replica o "power2.out" do GSAP, que lá é a
+// cúbica (Power2 = Cubic): 1 - (1 - t)^3. Escreve direto no textContent (sem
+// setState) pra não re-renderizar o Dashboard a cada quadro.
+const COUNTUP_MS = 1100;
 function CountUp({ value, format, className }) {
   const ref = useRef(null);
   const prev = useRef(0);
   useEffect(() => {
     const node = ref.current;
-    if (!node) return;
-    const obj = { v: prev.current };
-    const ctrl = gsap.to(obj, {
-      v: Number(value) || 0,
-      duration: 1.1,
-      ease: "power2.out",
-      onUpdate: () => {
-        node.textContent = format ? format(obj.v) : Math.round(obj.v).toLocaleString("pt-BR");
-      },
-    });
-    prev.current = Number(value) || 0;
-    return () => ctrl.kill();
+    if (!node) return undefined;
+    const de = prev.current;
+    const ate = Number(value) || 0;
+    const escrever = (v) => {
+      node.textContent = format ? format(v) : Math.round(v).toLocaleString("pt-BR");
+    };
+    let inicio = null;
+    let raf = 0;
+    const passo = (agora) => {
+      if (inicio === null) inicio = agora;
+      const t = Math.min(1, (agora - inicio) / COUNTUP_MS);
+      const k = 1 - (1 - t) ** 3;
+      escrever(de + (ate - de) * k);
+      if (t < 1) raf = requestAnimationFrame(passo);
+    };
+    raf = requestAnimationFrame(passo);
+    // Como no GSAP: a próxima mudança parte do alvo atual, não do quadro
+    // em que a animação estava quando foi interrompida.
+    prev.current = ate;
+    return () => cancelAnimationFrame(raf);
   }, [value, format]);
   return <span ref={ref} className={className}>{format ? format(0) : "0"}</span>;
 }
@@ -5540,17 +5580,77 @@ function ChartBox({ height, className = "", children }) {
   );
 }
 
+// Entrada dos cards: sobe 16px e aparece (450 ms, escalonado por `i`). Antes
+// era um motion.div (framer-motion, ~120 KB no bundle inicial); agora é a
+// animação CSS `.dash-reveal` no fim do src/index.css — só roda na montagem e
+// fica desligada com prefers-reduced-motion.
 function Reveal({ i = 0, className = "", children, onClick }) {
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.45, delay: i * 0.05, ease: [0.22, 1, 0.36, 1] }}
-      className={className}
+    <div
+      className={`dash-reveal ${className}`}
+      style={{ animationDelay: `${i * 50}ms` }}
       onClick={onClick}
     >
       {children}
-    </motion.div>
+    </div>
+  );
+}
+
+// ─── Gráficos e BlurText do Dashboard: sob demanda ─────────────────────────
+// Recharts (~350 KB com d3/redux/immer) e motion (BlurText) só são usados aqui
+// e em módulos que também são lazy. Ficam em chunks próprios que o
+// src/lib/prefetch.js baixa em segundo plano enquanto a pessoa faz login.
+// São cosméticos: se o chunk falhar (offline sem cache, deploy que apagou o
+// hash antigo), o Dashboard segue sem eles em vez de cair no
+// ModuleErrorBoundary inteiro.
+function lazyCosmetico(carregar, reserva) {
+  return lazy(() =>
+    carregar().catch((err) => {
+      console.warn("[Dashboard] chunk sob demanda não carregou:", err);
+      return { default: reserva };
+    })
+  );
+}
+const SemGrafico = () => null;
+const ReceitaSemanalChart = lazyCosmetico(
+  () => import("./DashboardCharts.jsx").then((m) => ({ default: m.ReceitaSemanalChart })),
+  SemGrafico
+);
+const OsPorStatusChart = lazyCosmetico(
+  () => import("./DashboardCharts.jsx").then((m) => ({ default: m.OsPorStatusChart })),
+  SemGrafico
+);
+const OsSemanaisChart = lazyCosmetico(
+  () => import("./DashboardCharts.jsx").then((m) => ({ default: m.OsSemanaisChart })),
+  SemGrafico
+);
+
+// Mesma marcação que o BlurText gera (<p> flex + palavras inline-block
+// separadas por nbsp), pra trocar de um pro outro sem mexer no layout.
+// `visivel={false}` imita o 1º quadro do BlurText (palavras transparentes): é
+// o fallback do Suspense, e evita o nome aparecer, sumir e só então animar.
+// Com `visivel` (padrão) é a reserva caso o chunk do BlurText não carregue.
+const NBSP = String.fromCharCode(0xa0); // espaço não separável, como no BlurText
+function BlurTextEstatico({ text = "", className = "", visivel = true }) {
+  const palavras = text.split(" ");
+  return (
+    <p className={className} style={{ display: "flex", flexWrap: "wrap", justifyContent: "center" }}>
+      {palavras.map((palavra, idx) => (
+        <span key={idx} className="inline-block" style={visivel ? undefined : { opacity: 0 }}>
+          {palavra === " " ? NBSP : palavra}
+          {idx < palavras.length - 1 && NBSP}
+        </span>
+      ))}
+    </p>
+  );
+}
+const BlurTextLazy = lazyCosmetico(() => import("./BlurText.jsx"), BlurTextEstatico);
+// Mesmo nome e mesmas props do componente original: o JSX do Dashboard não muda.
+function BlurText(props) {
+  return (
+    <Suspense fallback={<BlurTextEstatico text={props.text} className={props.className} visivel={false} />}>
+      <BlurTextLazy {...props} />
+    </Suspense>
   );
 }
 
@@ -5824,26 +5924,13 @@ function Dashboard({ user, dateFilter, onNavigate }) {
               </div>
               <span className="text-xs text-gray-300 bg-white/5 border border-white/10 rounded-full px-3 py-1 whitespace-nowrap">{totalOs} OS no total</span>
             </div>
+            {/* Gráfico lazy (./DashboardCharts.jsx): o ChartBox já reserva a
+                altura, então o fallback vazio não mexe no layout. */}
             <ChartBox height={120} className="mt-4 -mx-2">
               {(w, h) => (
-                <AreaChart width={w} height={h} data={receitaSemanal} margin={{ top: 6, right: 8, left: 8, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="recArea" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#06b6d4" stopOpacity={0.5} />
-                      <stop offset="100%" stopColor="#06b6d4" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  {/* Eixo oculto só para nomear o ponto: sem um XAxis com
-                      dataKey, o Recharts rotula o tooltip com o ÍNDICE do array
-                      (0..7) — aparecia "6" e "2" sem significado nenhum. */}
-                  <XAxis dataKey="name" hide />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }}
-                    labelFormatter={(l) => `Receita recebida · ${l}`}
-                    formatter={(v) => [formatCurrency(v), "Total"]}
-                  />
-                  <Area type="monotone" dataKey="valor" stroke="#22d3ee" strokeWidth={2} fill="url(#recArea)" />
-                </AreaChart>
+                <Suspense fallback={null}>
+                  <ReceitaSemanalChart width={w} height={h} data={receitaSemanal} />
+                </Suspense>
               )}
             </ChartBox>
           </div>
@@ -5902,13 +5989,11 @@ function Dashboard({ user, dateFilter, onNavigate }) {
             <div className="flex items-center gap-2">
               <div className="h-[170px] w-[170px] shrink-0">
                 {/* Caixa de tamanho fixo: dimensões explícitas dispensam o
-                    ResponsiveContainer (e o aviso de medida -1 que ele gera). */}
-                <PieChart width={170} height={170}>
-                    <Pie data={osPorStatus} dataKey="value" nameKey="label" cx="50%" cy="50%" innerRadius={48} outerRadius={78} paddingAngle={3} stroke="none">
-                      {osPorStatus.map((e) => <Cell key={e.key} fill={e.color} />)}
-                    </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }} />
-                </PieChart>
+                    ResponsiveContainer (e o aviso de medida -1 que ele gera).
+                    Gráfico lazy; a caixa 170x170 segura o espaço. */}
+                <Suspense fallback={null}>
+                  <OsPorStatusChart data={osPorStatus} />
+                </Suspense>
               </div>
               <div className="flex-1 space-y-1.5">
                 {osPorStatus.map((e) => (
@@ -5932,25 +6017,9 @@ function Dashboard({ user, dateFilter, onNavigate }) {
           </div>
           <ChartBox height={180}>
             {(w, h) => (
-              <BarChart width={w} height={h} data={osSemanais} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
-              <defs>
-                <linearGradient id="barG" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="0%" stopColor="#3b82f6" />
-                  <stop offset="100%" stopColor="#06b6d4" />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="rgba(120,140,170,0.12)" vertical={false} />
-              <XAxis dataKey="name" stroke="rgba(120,140,170,0.6)" fontSize={11} tickLine={false} axisLine={false} />
-              <YAxis stroke="rgba(120,140,170,0.6)" fontSize={11} allowDecimals={false} tickLine={false} axisLine={false} width={28} />
-              {/* O eixo mostra S1..S8 (cabe na largura); o tooltip abre o
-                  intervalo de datas real do bloco. */}
-              <Tooltip
-                cursor={{ fill: "rgba(120,140,170,0.08)" }}
-                contentStyle={{ backgroundColor: "#0b1220", border: "1px solid #1f2a44", borderRadius: 10, color: "#fff" }}
-                labelFormatter={(l, p) => p?.[0]?.payload?.periodo || l}
-              />
-              <Bar dataKey="concluidas" name="Concluídas" fill="url(#barG)" radius={[6, 6, 0, 0]} maxBarSize={26} />
-              </BarChart>
+              <Suspense fallback={null}>
+                <OsSemanaisChart width={w} height={h} data={osSemanais} />
+              </Suspense>
             )}
           </ChartBox>
         </Reveal>
