@@ -22,12 +22,11 @@ import SignaturePad from "./SignaturePad.jsx";
 import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength, passwordChecklist, splitParcelas, addMonthsKeepDay, monthKey, vencimentoNoMes, mesesAMaterializar, matchDigitos, osTecnicos, osTecnicoNomes, osTemTecnico, camposTecnicos } from "./utils.js";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
-// Geração de PDF client-side dos documentos de OS/orçamento para envio via WhatsApp
-import html2pdf from "html2pdf.js";
 // Abertura de documento imprimível + geração de PDF client-side. Moram em
 // src/lib/doc.js porque src/modules/ (Relatórios) também precisa deles e não
-// pode importar o App.jsx de volta.
-import { openHTMLDoc } from "./lib/doc.js";
+// pode importar o App.jsx de volta. O html2pdf é carregado sob demanda
+// (carregarHtml2pdf) para não pesar na abertura do app.
+import { openHTMLDoc, carregarHtml2pdf } from "./lib/doc.js";
 // QR Code para enrollment do 2FA TOTP (escaneado por Google Authenticator/Authy/1Password)
 import QRCode from "qrcode";
 
@@ -8537,6 +8536,7 @@ function ProcessModule({ user, addToast, clients, employees, reloadData }) {
       document.body.appendChild(container);
       let pdfBlob;
       try {
+        const html2pdf = await carregarHtml2pdf();
         pdfBlob = await html2pdf().set({
           margin: 8,
           filename: `${tipo}-${os.numero || os.id}.pdf`,
@@ -17205,7 +17205,6 @@ export default function App() {
   const [toasts, setToasts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [splashVisible, setSplashVisible] = useState(true);
-  const [splashFading, setSplashFading] = useState(false);
   const [data, setData] = useState({
     clients: [], employees: [], services: [], schedule: [],
     finance: [], inventory: [], config: {},
@@ -17247,22 +17246,34 @@ export default function App() {
     });
   }, []);
 
-  // ─── Init com Splash de 3 segundos + restauração de sessão ───
+  // ─── Splash: sai assim que o init termina (mín. 1,5s, máx. 3s) ───
+  // Antes era um timer fixo de 3s + 0,6s de fade em TODA abertura, mesmo com o
+  // app pronto bem antes — era a maior parte da "demora pra entrar". O mínimo
+  // de 1,5s deixa o floco da logo terminar de desenhar; o teto de 3s garante que
+  // o splash nunca fica preso se o init falhar ou a rede estiver lenta.
+  const [splashMinDone, setSplashMinDone] = useState(false);
+  const [splashMaxDone, setSplashMaxDone] = useState(false);
   useEffect(() => {
-    // Splash de 3s com fade-out
-    const t1 = setTimeout(() => {
-      setSplashFading(true);
-      const t2 = setTimeout(() => setSplashVisible(false), 600);
-      return () => clearTimeout(t2);
-    }, 3000);
+    const tMin = setTimeout(() => setSplashMinDone(true), 1500);
+    const tMax = setTimeout(() => setSplashMaxDone(true), 3000);
+    return () => { clearTimeout(tMin); clearTimeout(tMax); };
+  }, []);
+  const splashFading = splashMaxDone || (splashMinDone && !loading);
+  useEffect(() => {
+    if (!splashFading) return;
+    const t = setTimeout(() => setSplashVisible(false), 600);
+    return () => clearTimeout(t);
+  }, [splashFading]);
 
+  // ─── Init + restauração de sessão ───
+  useEffect(() => {
     // Real init — restaura sessão Supabase (se houver), só então hidrata.
     // RLS bloqueia leitura sem auth, então sem session hydrate é no-op (e isso é OK).
     // Modo Demonstração: boot isolado — pula o fluxo Supabase real. O seed e a
     // injeção do usuário demo ocorrem após o formulário de lead (handleDemoStart).
     if (isDemoMode()) {
       setLoading(false);
-      return () => clearTimeout(t1);
+      return;
     }
 
     ensureMemberLoaded().then(() => flushOutbox()).then(() => hydrateFromSupabase()).then(async (hydrated) => {
@@ -17291,7 +17302,6 @@ export default function App() {
         if (!DB.get("erp:catalogSeeded_v1")) DB.set("erp:catalogSeeded_v1", true);
       }
       loadAllData();
-      setLoading(false);
       // Master mode: verifica se já existe master cadastrado
       if (masterMode) {
         // Phase 1 lockdown: nao podemos mais listar masters anonimamente.
@@ -17391,12 +17401,16 @@ export default function App() {
         }
       } catch { sessionStorage.removeItem("frost_session"); }
       // Upload inicial só roda quando NÃO existe nada no Supabase (evita escrita massiva a cada load)
+      // Só agora o init acabou (sessão já restaurada) — libera o splash. Com o
+      // setLoading antes da restauração, a tela de login piscaria antes do app.
+      setLoading(false);
+    }).catch((err) => {
+      console.error("[init] falha no boot:", err);
+      setLoading(false);
     });
 
     // (Realtime foi movido para useEffect próprio que depende de `user`,
     //  porque o canal precisa do company_id que só existe pós-login.)
-
-    return () => { clearTimeout(t1); };
   }, []);
 
   // Realtime: re-assina quando o usuário muda (login estabelece scope de company)

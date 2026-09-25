@@ -3,7 +3,19 @@
 // import circular — o App.jsx importa os módulos, então os módulos não podem
 // importar o App.jsx de volta.
 
-import html2pdf from "html2pdf.js";
+// html2pdf (+ html2canvas + jsPDF) pesa ~970 KB — era 38% do bundle inicial e
+// atrasava a abertura do app no celular. Carrega só na primeira geração de PDF
+// (vira um chunk próprio, servido de 'self', então a CSP continua valendo).
+let _html2pdfPromise = null;
+export function carregarHtml2pdf() {
+  if (!_html2pdfPromise) {
+    _html2pdfPromise = import("html2pdf.js").then((m) => m.default).catch((err) => {
+      _html2pdfPromise = null; // falha de rede: deixa tentar de novo no próximo clique
+      throw err;
+    });
+  }
+  return _html2pdfPromise;
+}
 
 // Opções compartilhadas de renderização: A4 retrato, escala 2 para o texto não
 // sair borrado, useCORS para a logo hospedada no Storage entrar no PDF.
@@ -36,6 +48,7 @@ async function _comContainer(html, fn) {
 // Gera e baixa um PDF a partir do HTML completo de um documento. Roda no
 // contexto do app (html2pdf empacotado = permitido pela CSP 'self').
 export async function gerarPDFDeHTML(html, filename) {
+  const html2pdf = await carregarHtml2pdf();
   await _comContainer(html, (alvo) => (
     html2pdf().set(_opcoesPDF(filename || "documento")).from(alvo).save()
   ));
@@ -45,6 +58,7 @@ export async function gerarPDFDeHTML(html, filename) {
 // "data:application/pdf;base64,"). É o formato que a Evolution API espera no
 // campo `media` do sendMedia.
 export async function htmlParaPDFBase64(html) {
+  const html2pdf = await carregarHtml2pdf();
   const dataUri = await _comContainer(html, (alvo) => (
     html2pdf().set(_opcoesPDF(null)).from(alvo).output("datauristring")
   ));
