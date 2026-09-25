@@ -27,12 +27,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **React 19** with JSX (no TypeScript)
 - **Vite 6** as bundler with `@vitejs/plugin-react` and **`vite-plugin-pwa`** (the app is installable as a PWA)
 - **Tailwind CSS 4** via `@tailwindcss/vite` plugin (imported in `src/index.css`)
-- **Recharts** for charts/graphs in the Dashboard and Finance reports
+- **Recharts** for charts/graphs — the Dashboard charts live in `src/DashboardCharts.jsx` (lazy-loaded), plus Relatórios and Ponto
 - **Supabase** (`@supabase/supabase-js`) — cloud sync + Realtime + Storage backend via `src/supabase.js`
-- **Motion** (`motion`) — animation library used in `src/BlurText.jsx`
-- **anime.js** (`animejs`) — used by `src/AnimatedLogo.jsx` and `src/AnimatedSnowflake.jsx`
-- **OGL** (`ogl`) — WebGL library used in `src/Aurora.jsx` for the login background
-- **qrcode** — generates QR codes (TOTP/2FA enrollment, calendar feed, etc.)
+- **Motion** (`motion`) — animation library used only in `src/BlurText.jsx` (lazy-loaded)
+- **OGL** (`ogl`) — WebGL library used in `src/AuroraGL.jsx` (lazy-loaded by `src/Aurora.jsx`) for the login/dashboard background
 - **Vitest** + `@testing-library/react` + `happy-dom` — unit tests for pure utils (`src/utils.test.js`)
 - No router library — navigation is state-driven within a single component (`activeModule` useState)
 
@@ -44,7 +42,7 @@ FrostERP is an effectively-single-file React app. The vast majority of the UI li
 - `src/utils.js` — pure utilities (`genId`, `genSecureToken`, `sha256Hex`, `formatCurrency`, …). Covered by `src/utils.test.js`.
 - `src/supabase.js` — cloud sync layer (see [Supabase Sync Layer](#supabase-sync-layer-srcsupabasejs)).
 - `src/main.jsx` — Vite entry point.
-- `src/Aurora.jsx`, `src/BlurText.jsx`, `src/AnimatedLogo.jsx`, `src/AnimatedSnowflake.jsx`, `src/FrostIcons.jsx` — visual/animation components.
+- `src/Aurora.jsx` (+ `src/AuroraGL.jsx`), `src/BlurText.jsx`, `src/BrandSplash.jsx`, `src/AnimatedSnowflake.jsx`, `src/FrostIcons.jsx` — visual/animation components.
 - `src/equipment-catalog.json`, `src/products-seed.json`, `src/services-seed.json` — seed data for first-run demo.
 - `api/calendar.js` — Vercel serverless function that exposes the user's agenda as an iCal feed (consumed by Google Calendar / Outlook via the Calendar Feed token).
 
@@ -475,15 +473,18 @@ The app syncs its `window.storage` key-value data to a Supabase table `kv_store`
 
 ## Animation & Visual Components
 
-- `src/Aurora.jsx` — WebGL aurora background rendered via OGL, shown on the login screen
-- `src/BlurText.jsx` — Text reveal animation using Motion, used for decorative text
-- `src/AnimatedLogo.jsx`, `src/AnimatedSnowflake.jsx` — anime.js-driven brand visuals
+> **Orçamento de performance da abertura** (ver `docs/wiki/decisions/010-performance-abertura.md`): nenhuma animação infinita; só `opacity`/`transform` em contêiner HTML; tudo respeita `prefers-reduced-motion`. Libs pesadas usadas só depois do login entram por `import()`/`React.lazy`, nunca por import estático no `App.jsx`.
+
+- `src/Aurora.jsx` — wrapper leve: gradiente CSS estático na hora; o WebGL (`src/AuroraGL.jsx`, OGL) só entra em idle, com GPU real, a ~30 fps, e desacelera até parar em ~12 s
+- `src/BlurText.jsx` — Text reveal animation using Motion (lazy-loaded), used for decorative text
+- `src/AnimatedSnowflake.jsx` — floco da marca: desenho estático (`FlocoSVG`) + uma entrada curta no contêiner
+- `src/BrandSplash.jsx` — splash estático; o mesmo markup está inline no `index.html` para pintar antes do JS (mude os dois juntos)
 - `src/FrostIcons.jsx` — icon set used by the sidebar (`iconName` field on `navItems`)
 
 ## Working with This Codebase
 
 - The app is effectively single-file. Any change to `App.jsx` requires careful attention to the section table above — and that table drifts on every edit, so **grep the function name** rather than trusting line numbers blindly.
-- Font: DM Sans, loaded from Google Fonts in `index.html`.
+- Font: DM Sans, auto-hospedada em `public/fonts/` (`@font-face` em `src/index.css`) — sem Google Fonts.
 - The `StyleSheet` component injects global CSS including `@media print` rules and animations — check there for styling that isn't Tailwind.
 - The `DataTable` component is reused across all modules and supports sorting, filtering, pagination, and inline actions.
 - The app is a **PWA** (`vite-plugin-pwa`); test the installable / offline behavior when touching service-worker-adjacent code.

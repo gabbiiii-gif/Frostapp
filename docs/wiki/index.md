@@ -49,6 +49,7 @@ Sempre lido primeiro em qualquer query. Mantenha sub-200 linhas.
 - [007 IA OS aprovação humana](decisions/007-ia-os-aprovacao-humana.md) — proposta + gate humano; OS escrita pelo app via DB layer, não n8n/Edge
 - [008 Pós-Venda pg_cron](decisions/008-pos-venda-pg-cron-vs-vercel-cron.md) — Vercel Hobby limita cron a 1x/dia; agendar no Supabase pg_cron
 - [009 Hardening segurança](decisions/009-hardening-seguranca-2026-05-19.md) — pentest interno: master takeover anon, backup público, storage anon — fechados
+- [010 Performance da abertura](decisions/010-performance-abertura.md) — PageSpeed 59–72: sem animação infinita, login na hora, code-splitting pós-login, fonte própria
 
 ## Fontes
 

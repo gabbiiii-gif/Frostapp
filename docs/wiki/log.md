@@ -334,3 +334,7 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - decisão: padrão "Tudo", pela consistência com a tela de OS. "Saldo em Caixa" com "Tudo" passa a ser o saldo acumulado, e não o fluxo dos últimos 30 dias (os números exibidos mudam na primeira abertura)
 - verificação: vitest 400/400 (4 casos novos de `totaisFinanceiro`). Na demo, com uma receita paga e uma vencida lançadas há 60 dias: em "Tudo" as duas aparecem, com pago R$ 500 e vencidos R$ 999; em "30 dias" saem da tabela e do pago, e os vencidos continuam em R$ 999. Celular sem rolagem horizontal; build OK; lint idêntico ao da base
 - touched: modules/finance.md
+
+## [2026-09-24] decisão | Performance da abertura (PageSpeed 59–72)
+- touched: decisions/010-performance-abertura.md, index.md
+- decisions: nenhuma animação infinita; Aurora com orçamento (GPU real, idle, 30 fps, para em ~12 s); login sem splash quando não há sessão (submit espera o boot); code-splitting do pós-login sem quebrar o App.jsx; DM Sans auto-hospedada
