@@ -2,8 +2,10 @@
 <html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
-    <!-- Viewport otimizado para mobile: sem zoom automático em inputs -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <!-- Viewport sem trava de zoom (acessibilidade: o usuário precisa poder ampliar).
+         O zoom automático do iOS ao focar campo é evitado via CSS: campos com 16px
+         em telas de toque (ver src/index.css). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- CSP aplicado via servidor em produção; em dev o Vite precisa de ws: e eval para HMR -->
     <title>FrostERP — Sistema de Gestão para Refrigeração</title>
 
@@ -48,12 +50,76 @@
     <script src="/favicon-swap.js?v=8" defer></script>
     <!-- Manifest PWA: injetado automaticamente pelo vite-plugin-pwa no build -->
 
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&display=swap" rel="stylesheet" />
+    <!-- Fonte DM Sans: auto-hospedada em /fonts (ver @font-face em src/index.css).
+         Sem Google Fonts = sem CSS externo bloqueando a renderização. -->
+
+    <!-- Splash de marca pintado ANTES do JS (FCP/LCP rápidos). O React substitui o
+         conteúdo de #root no primeiro render. O mesmo markup existe em
+         src/BrandSplash.jsx (usado enquanto a sessão é restaurada) — se mudar um,
+         mude o outro. Wordmark em texto HTML com fonte do sistema: aparece no
+         primeiro paint, sem depender de fonte web nem de animação. Só o floco
+         entra com opacity/transform (compostos pela GPU), uma vez. -->
+    <style>
+      .fr-splash {
+        position: fixed; inset: 0; z-index: 0;
+        display: flex; flex-direction: column; align-items: center; justify-content: center;
+        padding: 16px; box-sizing: border-box;
+        background: linear-gradient(135deg, #0b1120 0%, #0f172a 40%, #0c1425 100%);
+        font-family: 'Gill Sans', 'Optima', 'Segoe UI', system-ui, -apple-system, sans-serif;
+      }
+      .fr-splash-floco {
+        display: block; width: min(46vmin, 240px); height: auto; aspect-ratio: 1 / 1;
+        filter: drop-shadow(0 8px 24px rgba(96, 165, 250, 0.45));
+        animation: fr-splash-entrada 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+      }
+      .fr-splash--estatico .fr-splash-floco { animation: none; }
+      @keyframes fr-splash-entrada {
+        from { opacity: 0; transform: scale(0.85) rotate(-30deg); }
+        to   { opacity: 1; transform: none; }
+      }
+      .fr-splash-word {
+        margin: 18px 0 0; line-height: 1;
+        font-size: clamp(40px, 11vmin, 72px); font-weight: 400;
+        letter-spacing: 0.11em; padding-left: 0.11em; /* compensa o espaçamento após a última letra */
+        color: #1b8fe8;
+      }
+      .fr-splash-word span { font-weight: 300; color: #5aaee8; }
+      .fr-splash-rule {
+        width: min(300px, 60vw); height: 0; margin: 14px 0 12px;
+        border: 0; border-top: 1px solid rgba(27, 143, 232, 0.35);
+      }
+      .fr-splash-tag {
+        margin: 0; padding-left: 5px;
+        font: 12px 'Courier New', monospace; letter-spacing: 5px;
+        color: rgba(27, 143, 232, 0.75);
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .fr-splash-floco { animation: none; }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <div class="fr-splash" role="status" aria-label="Carregando o FrostERP">
+        <svg class="fr-splash-floco" width="100%" height="100%" viewBox="0 0 400 400" role="img" aria-label="FrostERP">
+          <g stroke="#1B8FE8" stroke-linecap="round" fill="none">
+            <line x1="200" y1="200" x2="200" y2="40" stroke-width="4" /><line x1="200" y1="110" x2="172" y2="82" stroke-width="2.5" /><line x1="200" y1="110" x2="228" y2="82" stroke-width="2.5" /><line x1="200" y1="76" x2="182" y2="58" stroke-width="1.8" /><line x1="200" y1="76" x2="218" y2="58" stroke-width="1.8" />
+            <line x1="200" y1="200" x2="339" y2="120" stroke-width="4" /><line x1="270" y1="160" x2="270" y2="128" stroke-width="2.5" /><line x1="270" y1="160" x2="298" y2="176" stroke-width="2.5" /><line x1="296" y1="146" x2="296" y2="120" stroke-width="1.8" /><line x1="296" y1="146" x2="318" y2="158" stroke-width="1.8" />
+            <line x1="200" y1="200" x2="339" y2="280" stroke-width="4" /><line x1="270" y1="240" x2="298" y2="224" stroke-width="2.5" /><line x1="270" y1="240" x2="270" y2="272" stroke-width="2.5" /><line x1="296" y1="254" x2="318" y2="242" stroke-width="1.8" /><line x1="296" y1="254" x2="296" y2="280" stroke-width="1.8" />
+            <line x1="200" y1="200" x2="200" y2="360" stroke-width="4" /><line x1="200" y1="290" x2="228" y2="318" stroke-width="2.5" /><line x1="200" y1="290" x2="172" y2="318" stroke-width="2.5" /><line x1="200" y1="324" x2="218" y2="342" stroke-width="1.8" /><line x1="200" y1="324" x2="182" y2="342" stroke-width="1.8" />
+            <line x1="200" y1="200" x2="61" y2="280" stroke-width="4" /><line x1="130" y1="240" x2="130" y2="272" stroke-width="2.5" /><line x1="130" y1="240" x2="102" y2="224" stroke-width="2.5" /><line x1="104" y1="254" x2="104" y2="280" stroke-width="1.8" /><line x1="104" y1="254" x2="82" y2="242" stroke-width="1.8" />
+            <line x1="200" y1="200" x2="61" y2="120" stroke-width="4" /><line x1="130" y1="160" x2="102" y2="176" stroke-width="2.5" /><line x1="130" y1="160" x2="130" y2="128" stroke-width="2.5" /><line x1="104" y1="146" x2="82" y2="158" stroke-width="1.8" /><line x1="104" y1="146" x2="104" y2="120" stroke-width="1.8" />
+          </g>
+          <g fill="#6CB4F0"><circle cx="200" cy="38" r="5" /><circle cx="341" cy="118" r="5" /><circle cx="341" cy="282" r="5" /><circle cx="200" cy="362" r="5" /><circle cx="59" cy="282" r="5" /><circle cx="59" cy="118" r="5" /></g>
+          <g fill="#2272CC"><polygon points="200,80 194,90 200,100 206,90" /><polygon points="272,122 266,132 272,142 278,132" /><polygon points="272,258 266,268 272,278 278,268" /><polygon points="200,300 194,310 200,320 206,310" /><polygon points="128,258 122,268 128,278 134,268" /><polygon points="128,122 122,132 128,142 134,132" /></g>
+          <polygon points="200,170 222,182 222,210 200,222 178,210 178,182" fill="#0A2A6E" stroke="#6CB4F0" stroke-width="1.5" />
+          <circle cx="200" cy="196" r="18" fill="#1B8FE8" /><circle cx="200" cy="196" r="9" fill="#E0F4FF" /><circle cx="200" cy="196" r="10" fill="none" stroke="#6CB4F0" stroke-width="1" opacity="0.75" />
+        </svg>
+        <h1 class="fr-splash-word">FROST<span>ERP</span></h1>
+        <hr class="fr-splash-rule" />
+        <p class="fr-splash-tag">REFRIGERAÇÕES</p>
+      </div>
+    </div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

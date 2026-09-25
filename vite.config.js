@@ -13,7 +13,7 @@ function cspPlugin() {
         // OBS: frame-ancestors NÃO é incluído aqui — esse diretivo é ignorado em <meta>
         // pelo browser. A proteção contra clickjacking é feita pelo header X-Frame-Options:
         // DENY (ou Content-Security-Policy: frame-ancestors 'none') configurado no vercel.json.
-        const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; manifest-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://fonts.googleapis.com https://fonts.gstatic.com; img-src 'self' data: blob: https://api.qrserver.com https://*.supabase.co https://*.tile.openstreetmap.org; media-src 'self' blob: https://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self';" />`;
+        const csp = `<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; worker-src 'self' blob:; manifest-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self' https://*.supabase.co wss://*.supabase.co; img-src 'self' data: blob: https://api.qrserver.com https://*.supabase.co https://*.tile.openstreetmap.org; media-src 'self' blob: https://*.supabase.co; object-src 'none'; base-uri 'self'; form-action 'self';" />`;
         return html.replace('<!-- CSP aplicado via servidor em produção; em dev o Vite precisa de ws: e eval para HMR -->', csp);
       }
       return html;
@@ -33,6 +33,9 @@ export default defineConfig({
     // permitir Web Push (Fase 5 do sistema de notificações).
     VitePWA({
       registerType: 'autoUpdate',
+      // registerSW.js com defer: o script de registro do SW não bloqueia mais a
+      // renderização (o PageSpeed media ~680 ms de bloqueio no mobile).
+      injectRegister: 'script-defer',
       strategies: 'injectManifest',
       srcDir: 'src',
       filename: 'sw.js',
@@ -82,6 +85,9 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
         // Aumenta limite — o App.jsx bundled passa de 2MB em dev
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // Itálico e latin-ext da DM Sans quase nunca são usados em pt-BR: ficam
+        // fora do precache (o navegador baixa sob demanda, se precisar).
+        globIgnores: ['**/node_modules/**/*', 'fonts/*-italic.woff2', 'fonts/*-latin-ext-*.woff2'],
       },
       devOptions: {
         // Permite testar service worker em dev mode também

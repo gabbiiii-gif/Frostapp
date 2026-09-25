@@ -111,7 +111,7 @@ function ModuleSwitcher({ moduleKey, children }) {
 }
 import AnimatedSnowflake from "./AnimatedSnowflake.jsx";
 import { FrostIcon } from "./FrostIcons.jsx";
-import AnimatedLogo from "./AnimatedLogo.jsx";
+import BrandSplash from "./BrandSplash.jsx";
 import PosVendaModule from "./modules/PosVendaModule.jsx";
 import LembreteModule from "./modules/LembreteModule.jsx";
 // ─── Módulos verticais novos (2026-06) ───
@@ -1823,8 +1823,7 @@ async function seedDatabase() {
 function StyleSheet() {
   return (
     <style>{`
-      @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&display=swap');
-
+      /* DM Sans é auto-hospedada (@font-face em src/index.css) — sem Google Fonts. */
       * { font-family: 'DM Sans', sans-serif; }
 
       @media print {
@@ -3020,6 +3019,15 @@ function DemoBanner({ onReset }) {
   );
 }
 
+// Boot do App (hydrate, seeds, migrações, restauração de sessão). O login
+// aparece antes de o boot terminar (sem splash); o submit espera por esta
+// promessa antes de autenticar, pra que o hydrate do login não rode em
+// paralelo com o do boot nem com o seedDatabase. O App reatribui no init.
+let _bootPromise = Promise.resolve();
+function aguardarBoot() {
+  return _bootPromise.catch(() => {});
+}
+
 function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassword }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -3100,6 +3108,9 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
 
     setLoading(true);
     try {
+      // O login aparece antes do boot terminar — espera o init (normalmente já
+      // concluído enquanto o usuário digitava) pra não hidratar em paralelo.
+      await aguardarBoot();
       // ─── PORTÃO Supabase Auth (item 1 da auditoria) ────────────────────
       // Antes de validar local, autentica no Supabase. Isso:
       //  - estabelece JWT server-validated (item 3),
@@ -17204,7 +17215,6 @@ export default function App() {
   }, [theme]);
   const [toasts, setToasts] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [splashVisible, setSplashVisible] = useState(true);
   const [data, setData] = useState({
     clients: [], employees: [], services: [], schedule: [],
     finance: [], inventory: [], config: {},
@@ -17246,24 +17256,28 @@ export default function App() {
     });
   }, []);
 
-  // ─── Splash: sai assim que o init termina (mín. 1,5s, máx. 3s) ───
-  // Antes era um timer fixo de 3s + 0,6s de fade em TODA abertura, mesmo com o
-  // app pronto bem antes — era a maior parte da "demora pra entrar". O mínimo
-  // de 1,5s deixa o floco da logo terminar de desenhar; o teto de 3s garante que
-  // o splash nunca fica preso se o init falhar ou a rede estiver lenta.
-  const [splashMinDone, setSplashMinDone] = useState(false);
-  const [splashMaxDone, setSplashMaxDone] = useState(false);
+  // ─── Splash: só quando o init decide o que mostrar ───
+  // Sem sessão pra restaurar, o login aparece NA HORA e o init (hydrate, seeds,
+  // migrações) roda por trás — o handleSubmit do LoginScreen espera o boot
+  // terminar antes de autenticar (ver aguardarBoot), então não há corrida.
+  // O splash (logo estático, idêntico ao placeholder do index.html) só segura a
+  // tela quando o resultado do init muda a primeira tela: sessão salva a
+  // restaurar, modo master ou app local sem Supabase (FirstUserSetup). Teto de
+  // 3s pra nunca prender o usuário se a rede estiver lenta.
+  const [precisaSplash] = useState(() => {
+    if (!supabase) return true;
+    try {
+      if (new URLSearchParams(window.location.search).get("master") === "1") return true;
+      return !!(sessionStorage.getItem("frost_session") || sessionStorage.getItem("frost_master_session"));
+    } catch { return false; }
+  });
+  const [splashTetoAtingido, setSplashTetoAtingido] = useState(false);
   useEffect(() => {
-    const tMin = setTimeout(() => setSplashMinDone(true), 1500);
-    const tMax = setTimeout(() => setSplashMaxDone(true), 3000);
-    return () => { clearTimeout(tMin); clearTimeout(tMax); };
-  }, []);
-  const splashFading = splashMaxDone || (splashMinDone && !loading);
-  useEffect(() => {
-    if (!splashFading) return;
-    const t = setTimeout(() => setSplashVisible(false), 600);
+    if (!precisaSplash) return undefined;
+    const t = setTimeout(() => setSplashTetoAtingido(true), 3000);
     return () => clearTimeout(t);
-  }, [splashFading]);
+  }, [precisaSplash]);
+  const splashVisible = precisaSplash && loading && !splashTetoAtingido;
 
   // ─── Init + restauração de sessão ───
   useEffect(() => {
@@ -17276,7 +17290,7 @@ export default function App() {
       return;
     }
 
-    ensureMemberLoaded().then(() => flushOutbox()).then(() => hydrateFromSupabase()).then(async (hydrated) => {
+    _bootPromise = ensureMemberLoaded().then(() => flushOutbox()).then(() => hydrateFromSupabase()).then(async (hydrated) => {
       // Inicialização: popula dados demo se for o primeiro acesso (sem usuários)
       await seedDatabase();
       // Multi-tenant: garante company padrão e tagga registros legados
@@ -18124,22 +18138,8 @@ export default function App() {
 
   // ─── Render ───
   if (splashVisible) {
-    return (
-      <div
-        className="min-h-screen flex items-center justify-center overflow-hidden"
-        style={{
-          background: "linear-gradient(135deg, #0b1120 0%, #0f172a 40%, #0c1425 100%)",
-          opacity: splashFading ? 0 : 1,
-          transition: "opacity 0.6s ease-out",
-        }}
-      >
-        {/* Splash: logo animada completa (frosterp_logo_animated) ocupa ~95% da tela */}
-        <AnimatedLogo
-          className="drop-shadow-[0_8px_24px_rgba(96,165,250,0.45)]"
-          style={{ width: "95vmin", height: "auto" }}
-        />
-      </div>
-    );
+    // Logo estático, idêntico ao placeholder do index.html (sem "pulo" na troca).
+    return <BrandSplash />;
   }
 
   // ─── Master mode: fluxos paralelos ao login da empresa ──────────────────
