@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Página não encontrada — FrostERP</title>
+    <meta name="robots" content="noindex" />
+    <meta name="theme-color" content="#0f172a" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg?v=7" />
+    <link rel="icon" type="image/png" href="/favicon-96x96.png?v=7" sizes="96x96" />
+    <link rel="shortcut icon" href="/favicon.ico?v=7" />
+    <!--
+      Página 404 do FrostERP. A Vercel serve este arquivo (public/404.html →
+      dist/404.html) para qualquer endereço que não existe, mantendo o status 404.
+      Autocontida de propósito: CSS inline, fonte do sistema, sem JS. Carrega
+      na hora e não depende do bundle do app nem do CSP do index.html.
+      O floco e o wordmark são os mesmos do splash (index.html / BrandSplash.jsx).
+    -->
+    <style>
+      :root {
+        --fundo: #0f172a;
+        --fundo-2: #0b1120;
+        --texto: #e2e8f0;
+        --texto-suave: #94a3b8;
+        --marca: #1b8fe8;
+        --marca-clara: #5aaee8;
+        --botao: #2563eb;
+        --botao-hover: #1d4ed8;
+        --borda: rgba(148, 163, 184, 0.18);
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          --fundo: #f8fafc;
+          --fundo-2: #eef2f7;
+          --texto: #0f172a;
+          --texto-suave: #475569;
+          --marca: #1570c2;
+          --marca-clara: #2f86d1;
+          --botao: #1d4ed8;
+          --botao-hover: #1e40af;
+          --borda: rgba(15, 23, 42, 0.12);
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; }
+      body {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 32px 16px;
+        background: linear-gradient(135deg, var(--fundo-2) 0%, var(--fundo) 55%);
+        color: var(--texto);
+        font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+        line-height: 1.5;
+        text-align: center;
+      }
+      main { width: 100%; max-width: 440px; }
+      .floco {
+        display: block;
+        width: 112px;
+        height: 112px;
+        margin: 0 auto 20px;
+        filter: drop-shadow(0 6px 18px rgba(96, 165, 250, 0.35));
+      }
+      .marca {
+        margin: 0 0 28px;
+        font-family: 'Gill Sans', 'Optima', 'Segoe UI', system-ui, sans-serif;
+        font-size: 20px;
+        letter-spacing: 0.2em;
+        padding-left: 0.2em; /* compensa o espaçamento após a última letra */
+        color: var(--marca);
+      }
+      .marca span { font-weight: 300; color: var(--marca-clara); }
+      .codigo {
+        margin: 0;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        color: var(--texto-suave);
+      }
+      h1 {
+        margin: 6px 0 12px;
+        font-size: clamp(26px, 7vw, 34px);
+        line-height: 1.2;
+      }
+      p.explicacao { margin: 0 0 28px; color: var(--texto-suave); font-size: 16px; }
+      a.botao {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 48px;
+        padding: 12px 28px;
+        border-radius: 10px;
+        background: var(--botao);
+        color: #fff;
+        font-size: 16px;
+        font-weight: 600;
+        text-decoration: none;
+        transition: background-color 0.15s ease;
+      }
+      a.botao:hover { background: var(--botao-hover); }
+      a.botao:focus-visible { outline: 3px solid var(--marca-clara); outline-offset: 3px; }
+      .rodape {
+        margin: 32px 0 0;
+        padding-top: 20px;
+        border-top: 1px solid var(--borda);
+        font-size: 14px;
+        color: var(--texto-suave);
+      }
+      @media (prefers-reduced-motion: no-preference) {
+        .floco { animation: entrada 0.6s cubic-bezier(0.22, 1, 0.36, 1) both; }
+        @keyframes entrada {
+          from { opacity: 0; transform: scale(0.85) rotate(-30deg); }
+          to   { opacity: 1; transform: none; }
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <svg class="floco" viewBox="0 0 400 400" aria-hidden="true" focusable="false">
+        <g stroke="#1B8FE8" stroke-linecap="round" fill="none">
+          <line x1="200" y1="200" x2="200" y2="40" stroke-width="4" /><line x1="200" y1="110" x2="172" y2="82" stroke-width="2.5" /><line x1="200" y1="110" x2="228" y2="82" stroke-width="2.5" /><line x1="200" y1="76" x2="182" y2="58" stroke-width="1.8" /><line x1="200" y1="76" x2="218" y2="58" stroke-width="1.8" />
+          <line x1="200" y1="200" x2="339" y2="120" stroke-width="4" /><line x1="270" y1="160" x2="270" y2="128" stroke-width="2.5" /><line x1="270" y1="160" x2="298" y2="176" stroke-width="2.5" /><line x1="296" y1="146" x2="296" y2="120" stroke-width="1.8" /><line x1="296" y1="146" x2="318" y2="158" stroke-width="1.8" />
+          <line x1="200" y1="200" x2="339" y2="280" stroke-width="4" /><line x1="270" y1="240" x2="298" y2="224" stroke-width="2.5" /><line x1="270" y1="240" x2="270" y2="272" stroke-width="2.5" /><line x1="296" y1="254" x2="318" y2="242" stroke-width="1.8" /><line x1="296" y1="254" x2="296" y2="280" stroke-width="1.8" />
+          <line x1="200" y1="200" x2="200" y2="360" stroke-width="4" /><line x1="200" y1="290" x2="228" y2="318" stroke-width="2.5" /><line x1="200" y1="290" x2="172" y2="318" stroke-width="2.5" /><line x1="200" y1="324" x2="218" y2="342" stroke-width="1.8" /><line x1="200" y1="324" x2="182" y2="342" stroke-width="1.8" />
+          <line x1="200" y1="200" x2="61" y2="280" stroke-width="4" /><line x1="130" y1="240" x2="130" y2="272" stroke-width="2.5" /><line x1="130" y1="240" x2="102" y2="224" stroke-width="2.5" /><line x1="104" y1="254" x2="104" y2="280" stroke-width="1.8" /><line x1="104" y1="254" x2="82" y2="242" stroke-width="1.8" />
+          <line x1="200" y1="200" x2="61" y2="120" stroke-width="4" /><line x1="130" y1="160" x2="102" y2="176" stroke-width="2.5" /><line x1="130" y1="160" x2="130" y2="128" stroke-width="2.5" /><line x1="104" y1="146" x2="82" y2="158" stroke-width="1.8" /><line x1="104" y1="146" x2="104" y2="120" stroke-width="1.8" />
+        </g>
+        <g fill="#6CB4F0"><circle cx="200" cy="38" r="5" /><circle cx="341" cy="118" r="5" /><circle cx="341" cy="282" r="5" /><circle cx="200" cy="362" r="5" /><circle cx="59" cy="282" r="5" /><circle cx="59" cy="118" r="5" /></g>
+        <g fill="#2272CC"><polygon points="200,80 194,90 200,100 206,90" /><polygon points="272,122 266,132 272,142 278,132" /><polygon points="272,258 266,268 272,278 278,268" /><polygon points="200,300 194,310 200,320 206,310" /><polygon points="128,258 122,268 128,278 134,268" /><polygon points="128,122 122,132 128,142 134,132" /></g>
+        <polygon points="200,170 222,182 222,210 200,222 178,210 178,182" fill="#0A2A6E" stroke="#6CB4F0" stroke-width="1.5" />
+        <circle cx="200" cy="196" r="18" fill="#1B8FE8" /><circle cx="200" cy="196" r="9" fill="#E0F4FF" /><circle cx="200" cy="196" r="10" fill="none" stroke="#6CB4F0" stroke-width="1" opacity="0.75" />
+      </svg>
+      <p class="marca" aria-label="FrostERP">FROST<span>ERP</span></p>
+
+      <p class="codigo">ERRO 404</p>
+      <h1>Página não encontrada</h1>
+      <p class="explicacao">
+        O endereço que você abriu não existe ou mudou de lugar.
+        Seus dados continuam salvos: é só voltar ao início.
+      </p>
+      <a class="botao" href="/">Voltar ao início</a>
+
+      <p class="rodape">Chegou aqui por um link do próprio FrostERP? Avise o administrador da sua empresa.</p>
+    </main>
+  </body>
+</html>
