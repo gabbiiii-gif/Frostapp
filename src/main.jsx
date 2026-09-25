@@ -73,3 +73,31 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     </ErrorBoundary>
   </React.StrictMode>,
 )
+
+// ─── Splash estático do index.html (#splash-inicial) ─────────────────────────
+// Ele é pintado antes do JS e fica ATRÁS do app (z-index -1): o React já montou
+// por cima. Só pode sair depois que o navegador registrou a pintura dele. Se
+// sair antes, o Chrome descarta o wordmark como candidato a LCP (elemento
+// removido antes da confirmação da pintura) e o LCP vira um texto do login
+// ~1 s depois. O evento "first-contentful-paint" só chega depois dessa
+// confirmação. Então: remove no FCP e, por segurança, em no máximo 3 s
+// (navegadores sem Paint Timing, aba em segundo plano).
+function removerSplashInicial() {
+  document.getElementById('splash-inicial')?.remove()
+}
+setTimeout(removerSplashInicial, 3000)
+try {
+  if (performance.getEntriesByName('first-contentful-paint').length) {
+    requestAnimationFrame(removerSplashInicial)
+  } else {
+    const obs = new PerformanceObserver((lista) => {
+      if (lista.getEntriesByName('first-contentful-paint').length) {
+        obs.disconnect()
+        requestAnimationFrame(removerSplashInicial)
+      }
+    })
+    obs.observe({ type: 'paint', buffered: true })
+  }
+} catch {
+  // Sem PerformanceObserver: fica o timer de 3 s acima.
+}

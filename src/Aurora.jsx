@@ -13,7 +13,10 @@
 //   - `prefers-reduced-motion` não é `reduce`;
 //   - `navigator.connection.saveData` não está ligado;
 //   - há WebGL2 acelerado por hardware (sem SwiftShader/llvmpipe/renderer de software);
-//   - o primeiro paint já aconteceu (requestIdleCallback, com fallback setTimeout).
+//   - a página já assentou: evento `load` + ~3 s + período ocioso (ver
+//     quandoPaginaAssentar). O teste de GPU cria um contexto WebGL de verdade,
+//     ~95 ms com GPU e ~320 ms com renderização por software. Rodando cedo, ele
+//     virava uma tarefa longa dentro da janela de carregamento (TBT/LCP).
 import { Component, lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 
 // Se o chunk falhar (offline, deploy novo com hash trocado), fica só o gradiente.
@@ -25,19 +28,48 @@ const CORES_PADRAO = ['#5227FF', '#7cff67', '#5227FF'];
 const DURACAO_FADE = '1s';
 const RE_RENDERER_SOFTWARE = /swiftshader|llvmpipe|software|basic render/i;
 
-// ─── Detecção de GPU (uma vez por carregamento, cache em nível de módulo) ───
-// null = ainda não testado; true/false = resultado.
+// ─── Detecção de GPU ───────────────────────────────────────────────────────
+// Cache em memória (por carregamento) e no localStorage por 7 dias: o teste
+// cria um contexto WebGL de verdade, e sem GPU isso custa ~320 ms de CPU —
+// não vale repetir a cada abertura do app. null = ainda não testado.
 let gpuRapidaCache = null;
+const CHAVE_CACHE_GPU = "frost:aurora-gpu";
+const VALIDADE_CACHE_GPU_MS = 7 * 24 * 60 * 60 * 1000;
+
+function lerCacheGpu() {
+  try {
+    const salvo = JSON.parse(localStorage.getItem(CHAVE_CACHE_GPU) || "null");
+    if (salvo && typeof salvo.ok === "boolean" && Date.now() - salvo.ts < VALIDADE_CACHE_GPU_MS) return salvo.ok;
+  } catch {
+    // localStorage indisponível/corrompido: testa de novo
+  }
+  return null;
+}
+
+function salvarCacheGpu(ok) {
+  try {
+    localStorage.setItem(CHAVE_CACHE_GPU, JSON.stringify({ ok, ts: Date.now() }));
+  } catch {
+    // sem localStorage: fica só o cache em memória
+  }
+}
 
 function temGpuRapida() {
   if (gpuRapidaCache !== null) return gpuRapidaCache;
+  const salvo = lerCacheGpu();
+  if (salvo !== null) {
+    gpuRapidaCache = salvo;
+    return salvo;
+  }
   gpuRapidaCache = false;
   try {
     const canvas = document.createElement('canvas');
     canvas.width = 1;
     canvas.height = 1;
-    // failIfMajorPerformanceCaveat: o navegador devolve null quando o contexto
-    // seria renderizado por software (ex.: SwiftShader no Lighthouse/headless).
+    // failIfMajorPerformanceCaveat: ALGUNS navegadores devolvem null quando o
+    // contexto seria renderizado por software. Não é garantido: o Chrome com
+    // SwiftShader (Lighthouse/headless) devolve o contexto mesmo assim, e quem
+    // filtra ali é a regex do nome do renderer, logo abaixo.
     const opcoes = { failIfMajorPerformanceCaveat: true };
     const gl2 = canvas.getContext('webgl2', opcoes);
     // O fallback "webgl" só serve pra ler o renderer: o shader da aurora é
@@ -59,7 +91,48 @@ function temGpuRapida() {
   } catch {
     gpuRapidaCache = false;
   }
+  salvarCacheGpu(gpuRapidaCache);
   return gpuRapidaCache;
+}
+
+// Agenda `fn` para quando a página já assentou: depois do `load`, mais
+// ESPERA_POS_LOAD_MS, e então num período ocioso (requestIdleCallback; o
+// Safari/iOS não tem, então vai direto). A aurora é decorativa: o gradiente
+// já está na tela, e o WebGL não pode disputar CPU com o carregamento
+// (download do bundle, hydrate, pintura do login). Devolve a função de cancelar.
+const ESPERA_POS_LOAD_MS = 3000;
+function quandoPaginaAssentar(fn) {
+  let cancelado = false;
+  let timer = 0;
+  let idle = 0;
+  const executar = () => {
+    if (cancelado) return;
+    if (typeof window.requestIdleCallback === 'function') {
+      idle = window.requestIdleCallback(() => { if (!cancelado) fn(); }, { timeout: 2000 });
+    } else {
+      fn();
+    }
+  };
+  const aposLoad = () => {
+    // Se o `load` já foi há mais de ESPERA_POS_LOAD_MS (ex.: hero do Dashboard,
+    // montado bem depois do login), só espera o que falta.
+    let restante = ESPERA_POS_LOAD_MS;
+    try {
+      const fimLoad = performance.getEntriesByType('navigation')[0]?.loadEventEnd;
+      if (fimLoad > 0) restante = Math.max(0, fimLoad + ESPERA_POS_LOAD_MS - performance.now());
+    } catch {
+      // sem Navigation Timing: usa a espera cheia
+    }
+    timer = window.setTimeout(executar, restante);
+  };
+  if (document.readyState === 'complete') aposLoad();
+  else window.addEventListener('load', aposLoad, { once: true });
+  return () => {
+    cancelado = true;
+    window.removeEventListener('load', aposLoad);
+    window.clearTimeout(timer);
+    if (idle) window.cancelIdleCallback?.(idle);
+  };
 }
 
 // Checagens baratas de preferência do usuário (sem tocar em WebGL).
@@ -147,26 +220,13 @@ export default function Aurora({ colorStops = CORES_PADRAO, amplitude = 1.0, ble
   const [usarGL, setUsarGL] = useState(false);
   const [glPronto, setGlPronto] = useState(false);
 
-  // Decide se vale ligar o WebGL — só depois do primeiro paint, em tempo ocioso,
-  // pra não competir com o LCP/TBT do login.
+  // Decide se vale ligar o WebGL — só depois que a página assentou (ver
+  // quandoPaginaAssentar), pra não competir com o carregamento do login.
   useEffect(() => {
     if (!preferenciasPermitemAnimar()) return undefined;
-    let cancelado = false;
-    const liberar = () => {
-      if (!cancelado && temGpuRapida()) setUsarGL(true);
-    };
-    if (typeof window.requestIdleCallback === 'function') {
-      const id = window.requestIdleCallback(liberar, { timeout: 1500 });
-      return () => {
-        cancelado = true;
-        window.cancelIdleCallback?.(id);
-      };
-    }
-    const id = window.setTimeout(liberar, 300);
-    return () => {
-      cancelado = true;
-      window.clearTimeout(id);
-    };
+    return quandoPaginaAssentar(() => {
+      if (temGpuRapida()) setUsarGL(true);
+    });
   }, []);
 
   const aoFicarPronto = useCallback(() => setGlPronto(true), []);
@@ -189,7 +249,11 @@ export default function Aurora({ colorStops = CORES_PADRAO, amplitude = 1.0, ble
           ...estiloCamada,
           ...fundoEstatico,
           opacity: glPronto ? 0 : 1,
-          transition: `opacity ${DURACAO_FADE} ease`,
+          // O gradiente só sai depois que o canvas terminou de aparecer por cima
+          // (delay = DURACAO_FADE). Com os dois fades ao mesmo tempo, as duas
+          // camadas ficavam semitransparentes juntas e a aurora escurecia por ~1 s.
+          // Se o GL falhar, o gradiente volta na hora (sem transição).
+          transition: glPronto ? `opacity 0.6s ease ${DURACAO_FADE}` : 'none',
         }}
       />
       {usarGL && (

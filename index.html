@@ -53,8 +53,11 @@
     <!-- Fonte DM Sans: auto-hospedada em /fonts (ver @font-face em src/index.css).
          Sem Google Fonts = sem CSS externo bloqueando a renderização. -->
 
-    <!-- Splash de marca pintado ANTES do JS (FCP/LCP rápidos). O React substitui o
-         conteúdo de #root no primeiro render. O mesmo markup existe em
+    <!-- Splash de marca pintado ANTES do JS (FCP/LCP rápidos). Fica FORA do #root,
+         atrás do app (z-index -1): o React monta por cima na hora, e o src/main.jsx
+         remove o splash assim que o navegador registra a pintura dele. Se o React
+         trocasse o splash antes disso, o Chrome descartaria o wordmark como
+         candidato a LCP e o LCP viraria um texto do login ~1 s depois. O mesmo markup existe em
          src/BrandSplash.jsx (usado enquanto a sessão é restaurada) — se mudar um,
          mude o outro. Wordmark em texto HTML com fonte do sistema: aparece no
          primeiro paint, sem depender de fonte web nem de animação. Só o floco
@@ -96,30 +99,30 @@
       @media (prefers-reduced-motion: reduce) {
         .fr-splash-floco { animation: none; }
       }
+      #splash-inicial { z-index: -1; }
     </style>
   </head>
   <body>
-    <div id="root">
-      <div class="fr-splash" role="status" aria-label="Carregando o FrostERP">
-        <svg class="fr-splash-floco" width="100%" height="100%" viewBox="0 0 400 400" role="img" aria-label="FrostERP">
-          <g stroke="#1B8FE8" stroke-linecap="round" fill="none">
-            <line x1="200" y1="200" x2="200" y2="40" stroke-width="4" /><line x1="200" y1="110" x2="172" y2="82" stroke-width="2.5" /><line x1="200" y1="110" x2="228" y2="82" stroke-width="2.5" /><line x1="200" y1="76" x2="182" y2="58" stroke-width="1.8" /><line x1="200" y1="76" x2="218" y2="58" stroke-width="1.8" />
-            <line x1="200" y1="200" x2="339" y2="120" stroke-width="4" /><line x1="270" y1="160" x2="270" y2="128" stroke-width="2.5" /><line x1="270" y1="160" x2="298" y2="176" stroke-width="2.5" /><line x1="296" y1="146" x2="296" y2="120" stroke-width="1.8" /><line x1="296" y1="146" x2="318" y2="158" stroke-width="1.8" />
-            <line x1="200" y1="200" x2="339" y2="280" stroke-width="4" /><line x1="270" y1="240" x2="298" y2="224" stroke-width="2.5" /><line x1="270" y1="240" x2="270" y2="272" stroke-width="2.5" /><line x1="296" y1="254" x2="318" y2="242" stroke-width="1.8" /><line x1="296" y1="254" x2="296" y2="280" stroke-width="1.8" />
-            <line x1="200" y1="200" x2="200" y2="360" stroke-width="4" /><line x1="200" y1="290" x2="228" y2="318" stroke-width="2.5" /><line x1="200" y1="290" x2="172" y2="318" stroke-width="2.5" /><line x1="200" y1="324" x2="218" y2="342" stroke-width="1.8" /><line x1="200" y1="324" x2="182" y2="342" stroke-width="1.8" />
-            <line x1="200" y1="200" x2="61" y2="280" stroke-width="4" /><line x1="130" y1="240" x2="130" y2="272" stroke-width="2.5" /><line x1="130" y1="240" x2="102" y2="224" stroke-width="2.5" /><line x1="104" y1="254" x2="104" y2="280" stroke-width="1.8" /><line x1="104" y1="254" x2="82" y2="242" stroke-width="1.8" />
-            <line x1="200" y1="200" x2="61" y2="120" stroke-width="4" /><line x1="130" y1="160" x2="102" y2="176" stroke-width="2.5" /><line x1="130" y1="160" x2="130" y2="128" stroke-width="2.5" /><line x1="104" y1="146" x2="82" y2="158" stroke-width="1.8" /><line x1="104" y1="146" x2="104" y2="120" stroke-width="1.8" />
-          </g>
-          <g fill="#6CB4F0"><circle cx="200" cy="38" r="5" /><circle cx="341" cy="118" r="5" /><circle cx="341" cy="282" r="5" /><circle cx="200" cy="362" r="5" /><circle cx="59" cy="282" r="5" /><circle cx="59" cy="118" r="5" /></g>
-          <g fill="#2272CC"><polygon points="200,80 194,90 200,100 206,90" /><polygon points="272,122 266,132 272,142 278,132" /><polygon points="272,258 266,268 272,278 278,268" /><polygon points="200,300 194,310 200,320 206,310" /><polygon points="128,258 122,268 128,278 134,268" /><polygon points="128,122 122,132 128,142 134,132" /></g>
-          <polygon points="200,170 222,182 222,210 200,222 178,210 178,182" fill="#0A2A6E" stroke="#6CB4F0" stroke-width="1.5" />
-          <circle cx="200" cy="196" r="18" fill="#1B8FE8" /><circle cx="200" cy="196" r="9" fill="#E0F4FF" /><circle cx="200" cy="196" r="10" fill="none" stroke="#6CB4F0" stroke-width="1" opacity="0.75" />
-        </svg>
-        <h1 class="fr-splash-word">FROST<span>ERP</span></h1>
-        <hr class="fr-splash-rule" />
-        <p class="fr-splash-tag">REFRIGERAÇÕES</p>
-      </div>
+    <div id="splash-inicial" class="fr-splash" role="status" aria-label="Carregando o FrostERP">
+      <svg class="fr-splash-floco" width="100%" height="100%" viewBox="0 0 400 400" role="img" aria-label="FrostERP">
+        <g stroke="#1B8FE8" stroke-linecap="round" fill="none">
+          <line x1="200" y1="200" x2="200" y2="40" stroke-width="4" /><line x1="200" y1="110" x2="172" y2="82" stroke-width="2.5" /><line x1="200" y1="110" x2="228" y2="82" stroke-width="2.5" /><line x1="200" y1="76" x2="182" y2="58" stroke-width="1.8" /><line x1="200" y1="76" x2="218" y2="58" stroke-width="1.8" />
+          <line x1="200" y1="200" x2="339" y2="120" stroke-width="4" /><line x1="270" y1="160" x2="270" y2="128" stroke-width="2.5" /><line x1="270" y1="160" x2="298" y2="176" stroke-width="2.5" /><line x1="296" y1="146" x2="296" y2="120" stroke-width="1.8" /><line x1="296" y1="146" x2="318" y2="158" stroke-width="1.8" />
+          <line x1="200" y1="200" x2="339" y2="280" stroke-width="4" /><line x1="270" y1="240" x2="298" y2="224" stroke-width="2.5" /><line x1="270" y1="240" x2="270" y2="272" stroke-width="2.5" /><line x1="296" y1="254" x2="318" y2="242" stroke-width="1.8" /><line x1="296" y1="254" x2="296" y2="280" stroke-width="1.8" />
+          <line x1="200" y1="200" x2="200" y2="360" stroke-width="4" /><line x1="200" y1="290" x2="228" y2="318" stroke-width="2.5" /><line x1="200" y1="290" x2="172" y2="318" stroke-width="2.5" /><line x1="200" y1="324" x2="218" y2="342" stroke-width="1.8" /><line x1="200" y1="324" x2="182" y2="342" stroke-width="1.8" />
+          <line x1="200" y1="200" x2="61" y2="280" stroke-width="4" /><line x1="130" y1="240" x2="130" y2="272" stroke-width="2.5" /><line x1="130" y1="240" x2="102" y2="224" stroke-width="2.5" /><line x1="104" y1="254" x2="104" y2="280" stroke-width="1.8" /><line x1="104" y1="254" x2="82" y2="242" stroke-width="1.8" />
+          <line x1="200" y1="200" x2="61" y2="120" stroke-width="4" /><line x1="130" y1="160" x2="102" y2="176" stroke-width="2.5" /><line x1="130" y1="160" x2="130" y2="128" stroke-width="2.5" /><line x1="104" y1="146" x2="82" y2="158" stroke-width="1.8" /><line x1="104" y1="146" x2="104" y2="120" stroke-width="1.8" />
+        </g>
+        <g fill="#6CB4F0"><circle cx="200" cy="38" r="5" /><circle cx="341" cy="118" r="5" /><circle cx="341" cy="282" r="5" /><circle cx="200" cy="362" r="5" /><circle cx="59" cy="282" r="5" /><circle cx="59" cy="118" r="5" /></g>
+        <g fill="#2272CC"><polygon points="200,80 194,90 200,100 206,90" /><polygon points="272,122 266,132 272,142 278,132" /><polygon points="272,258 266,268 272,278 278,268" /><polygon points="200,300 194,310 200,320 206,310" /><polygon points="128,258 122,268 128,278 134,268" /><polygon points="128,122 122,132 128,142 134,132" /></g>
+        <polygon points="200,170 222,182 222,210 200,222 178,210 178,182" fill="#0A2A6E" stroke="#6CB4F0" stroke-width="1.5" />
+        <circle cx="200" cy="196" r="18" fill="#1B8FE8" /><circle cx="200" cy="196" r="9" fill="#E0F4FF" /><circle cx="200" cy="196" r="10" fill="none" stroke="#6CB4F0" stroke-width="1" opacity="0.75" />
+      </svg>
+      <h1 class="fr-splash-word">FROST<span>ERP</span></h1>
+      <hr class="fr-splash-rule" />
+      <p class="fr-splash-tag">REFRIGERAÇÕES</p>
     </div>
+    <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

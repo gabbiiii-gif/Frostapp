@@ -189,7 +189,15 @@ const _LABEL_TO_TYPE_KEY = (() => {
 
 // Mapa: tipoKey → [{ marca, modelo, capacidade, unidade, voltagem, descricao, label }]
 // `label` é o texto exibido no select (ex: "Elgin HVFI09B2IA — 9.000 BTUs · 220V").
-const EQUIPMENT_CATALOG_BY_KEY = (() => {
+// Montado sob demanda (1ª abertura do seletor de equipamento da OS) e memorizado:
+// como IIFE no topo do módulo, a normalização + ordenação com localeCompare
+// rodava na abertura do app, antes da tela de login (~30 ms num celular médio).
+let _catalogoEquipamentosPorTipo = null;
+function catalogoEquipamentosPorTipo() {
+  if (!_catalogoEquipamentosPorTipo) _catalogoEquipamentosPorTipo = montarCatalogoEquipamentos();
+  return _catalogoEquipamentosPorTipo;
+}
+function montarCatalogoEquipamentos() {
   const out = {};
   for (const item of (EQUIPMENT_CATALOG_RAW || [])) {
     if (item.ativo === false) continue;
@@ -217,7 +225,7 @@ const EQUIPMENT_CATALOG_BY_KEY = (() => {
     });
   }
   return out;
-})();
+}
 
 // ─── DB LAYER ───────────────────────────────────────────────────────────────────
 
@@ -3055,6 +3063,29 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
   // Enquanto a pessoa digita, baixa em idle o que o Dashboard usa logo depois
   // do login (gráficos, BlurText) — saíram do bundle inicial.
   useEffect(() => { prefetchPosLogin(); }, []);
+  // Foco no email logo DEPOIS da primeira pintura, em vez de autoFocus. O
+  // autoFocus foca durante o commit do React, antes de existir layout: o
+  // navegador calcula estilo+layout da tela inteira na hora, numa tarefa longa
+  // (~100 ms num celular médio; 417 ms de CPU no perfil com CPU 4x).
+  // Em tela de toque não foca: o navegador do celular não abre o teclado por
+  // foco programático, então seria só custo (estilo/layout) sem benefício.
+  const emailInputRef = useRef(null);
+  useEffect(() => {
+    try {
+      if (window.matchMedia?.("(pointer: coarse)").matches) return undefined;
+    } catch {
+      // matchMedia indisponível: segue e foca
+    }
+    let timer = 0;
+    const raf = requestAnimationFrame(() => {
+      timer = setTimeout(() => {
+        // Não rouba o foco se a pessoa já tocou em outro campo.
+        const ativo = document.activeElement;
+        if (!ativo || ativo === document.body) emailInputRef.current?.focus({ preventScroll: true });
+      }, 0);
+    });
+    return () => { cancelAnimationFrame(raf); clearTimeout(timer); };
+  }, []);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -3839,7 +3870,7 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
                 onChange={(e) => { setEmail(e.target.value); setError(""); }}
                 placeholder="seu@email.com.br"
                 className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition"
-                autoFocus
+                ref={emailInputRef}
               />
             </div>
 
@@ -9229,7 +9260,7 @@ function ProcessModule({ user, addToast, clients, employees, reloadData }) {
                         <label className="block text-xs text-gray-400 mb-1">Modelo Cadastrado</label>
                         <Combobox
                           value={(() => {
-                            const list = EQUIPMENT_CATALOG_BY_KEY[s.equipamentoTipo || "central"] || [];
+                            const list = catalogoEquipamentosPorTipo()[s.equipamentoTipo || "central"] || [];
                             const match = list.find((it) =>
                               (`${it.marca} ${it.modelo}`.trim() === (s.equipamentoModelo || "").trim()) &&
                               (String(it.capacidade) === String(s.equipamentoCapacidade || ""))
@@ -9245,7 +9276,7 @@ function ProcessModule({ user, addToast, clients, employees, reloadData }) {
                             const modeloFull = `${marca}${marca && modelo ? " " : ""}${modelo}`.trim();
                             updateServico(idx, { equipamentoModelo: modeloFull, equipamentoCapacidade: capacidade || "" });
                           }}
-                          options={(EQUIPMENT_CATALOG_BY_KEY[s.equipamentoTipo || "central"] || []).map((it) => ({
+                          options={(catalogoEquipamentosPorTipo()[s.equipamentoTipo || "central"] || []).map((it) => ({
                             value: `${it.marca}|${it.modelo}|${it.capacidade}`,
                             label: it.label,
                             searchText: `${it.marca} ${it.modelo} ${it.capacidade} ${it.voltagem} ${it.descricao || ""}`,
