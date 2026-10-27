@@ -356,3 +356,10 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - publicado: main avançada para 9258f2a (correções de velocidade) — Vercel
 - migração BR: só roteiro (decisions/013-migracao-sao-paulo.md); org no plano Free (sem backup, 2 projetos ativos)
 - pendências: deploy das Edge Functions alteradas, fase 2 da PK, plano Pro, backup manual, atualização imediata do PWA
+
+## [2026-10-27] decisão | Abertura de marca só na 1ª abertura do dia
+- pedido: "não tem abertura no app?" — com o app instalado o logo ficava ~0,2 s
+- escolhido (opção 2 de 3): 1,2 s de logo na 1ª abertura do dia por aparelho; demais aberturas diretas
+- código: src/lib/abertura.js (+ teste), src/main.jsx, index.html (classes fr-abertura / fr-saindo)
+- medido: 1ª do dia 1,21 s de logo / tela livre 1,73 s; 2ª do dia 0,33 s; demo sem abertura
+- touched: decisions/010-performance-abertura.md

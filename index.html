@@ -100,6 +100,14 @@
         .fr-splash-floco { animation: none; }
       }
       #splash-inicial { z-index: -1; }
+      /* Abertura do dia (src/lib/abertura.js + src/main.jsx): o MESMO splash, só
+         que POR CIMA do app por ~1,2 s, saindo com fade. Nas outras aberturas do
+         dia ele fica atrás (z-index -1) e sai no primeiro paint. */
+      #splash-inicial.fr-abertura { z-index: 2147483000; transition: opacity 0.35s ease; }
+      #splash-inicial.fr-abertura.fr-saindo { opacity: 0; }
+      @media (prefers-reduced-motion: reduce) {
+        #splash-inicial.fr-abertura { transition: none; }
+      }
     </style>
   </head>
   <body>

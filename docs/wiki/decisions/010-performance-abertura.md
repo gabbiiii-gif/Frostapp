@@ -8,6 +8,8 @@ related:
   - 001-single-file-app.md
   - ../concepts/supabase-sync.md
 code_refs:
+  - src/lib/abertura.js
+  - src/main.jsx
   - index.html
   - src/BrandSplash.jsx
   - src/AnimatedSnowflake.jsx
@@ -93,6 +95,23 @@ comparação da mesma rodada.
 | JS+CSS iniciais (gzip) | 526 KB | 271 KB |
 
 SEO continua 66 pelo `noindex` (intencional).
+
+## Abertura de marca 1x por dia (2026-10-27)
+
+Pedido do Gabriel: com o app instalado o logo ficava só ~0,2 s na tela e "parecia não ter abertura".
+Opção escolhida entre três (manter / 1x por dia / em toda entrada): **1,2 s de logo só na primeira
+abertura do dia em cada aparelho**; nas demais o app segue direto (0,3 s com o app instalado).
+
+- Regra em `src/lib/abertura.js` (com teste): chave `frost:abertura-dia` no `localStorage` com o dia local
+  (AAAA-MM-DD). Sem storage gravável não mostra — senão apareceria em toda entrada.
+- `src/main.jsx` decide **antes** do render: na abertura do dia o `#splash-inicial` ganha a classe
+  `fr-abertura` (sobe para cima do app, `index.html`), fica 1,2 s contados do FCP e sai com fade de 0,35 s
+  (`fr-saindo`); teto de 4 s. O React monta o login por baixo, sem piscar. O wordmark segue como LCP.
+- Demo (`?demo=1`) fica de fora: não grava nada no localStorage do visitante. `prefers-reduced-motion`: sem fade.
+- Medido (perfil celular do Lighthouse: CPU 4×, 4G lento): app instalado, 1ª do dia → logo 1,21 s, tela livre
+  em 1,73 s; 2ª do dia → 0,33 s; 1ª vez no aparelho → logo 1,36 s, tela livre em 2,51 s (antes 2,07 s).
+- O PageSpeed sempre simula a 1ª visita, então vai ver a abertura: o custo ali é ~0,4 s (o fade), porque
+  na carga fria o JS já leva mais que 1,2 s.
 
 ## Continuação
 
