@@ -363,3 +363,10 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - código: src/lib/abertura.js (+ teste), src/main.jsx, index.html (classes fr-abertura / fr-saindo)
 - medido: 1ª do dia 1,21 s de logo / tela livre 1,73 s; 2ª do dia 0,33 s; demo sem abertura
 - touched: decisions/010-performance-abertura.md
+
+## [2026-10-27] ingest | Handoff Claude Design "FrostERP Mobile"
+- source: handoff do Claude Design (FrostERP Mobile.dc.html + chat com o Gabriel)
+- escopo decidido: casca + telas principais (Início, OS lista/detalhe, Agenda, Cadastros, Estoque, Financeiro, Notificações, Configurações) + 5 formulários; IA, Pós-Venda, Lembrete, Folha e Relatórios ficam com a tela do desktop dentro da casca (fase 2); desktop sem mudança visual
+- código: src/mobile/ (chunk lazy próprio), renderModulo e API_MOBILE no App.jsx, useEhCelular, ErroMobile + layout clássico
+- verificado: 440 testes (21 novos em src/mobile/dados.test.js), build, prints a 390px (claro/escuro, todos os fluxos), print 1366px pixel a pixel igual ao anterior, botão voltar
+- touched: modules/mobile.md (nova), index.md

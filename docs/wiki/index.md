@@ -12,6 +12,7 @@ Sempre lido primeiro em qualquer query. Mantenha sub-200 linhas.
 - [Agenda](modules/schedule.md) — calendário unificado (próprios + OS), iCal feed
 - [Cadastros](modules/cadastro.md) — multi-tab: clientes, funcionários, fornecedores, produtos, estoque, serviços
 - [Configurações](modules/settings.md) — admin-only; orquestra UserManagement, CalendarFeed, AuditPanel, AutoBackup, dados da empresa, PIX
+- [FrostERP Mobile](modules/mobile.md) — casca do ERP no celular (< 768px): barra inferior com bolha, menu, telas e formulários próprios; desktop intacto
 - [App do Técnico](modules/tecnico-mobile.md) — shell dedicado para `role=tecnico`; fluxo chegada→descrição+fotos→finalizar
 - [Pós-Venda](modules/pos-venda.md) — mensagens automáticas pós-OS via WhatsApp; dispatcher cron + Edge Function
 - [IA / Atendimento](modules/ia-atendimento.md) — agente WhatsApp, chat Realtime, aba Propostas de OS (aprovação humana)

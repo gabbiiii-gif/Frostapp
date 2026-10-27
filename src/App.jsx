@@ -144,6 +144,11 @@ const PontoModule = comSuspense(lazy(() => import("./modules/PontoModule.jsx")))
 // Relatórios: motor genérico de análise sobre qualquer entidade do sistema.
 // A lógica pura (registry, spec, engine, CSV, HTML) mora em src/lib/relatorios/.
 const RelatoriosModule = comSuspense(lazy(() => import("./modules/RelatoriosModule.jsx")));
+// FrostERP Mobile: casca do ERP no celular (< 768px), em chunk próprio — o
+// desktop nunca baixa. useEhCelular é minúsculo e decide qual layout mostrar.
+const MobileApp = lazy(() => import("./mobile/MobileApp.jsx"));
+import { useEhCelular } from "./mobile/useEhCelular.js";
+import ErroMobile from "./mobile/ErroMobile.jsx";
 // Permissões de módulo por usuário — regra pura, testada em permissoes.test.js.
 import { hasPermission, montarPermissoesSalvas, modulosNovosDesdeOSave } from "./lib/permissoes.js";
 // Catálogos de seed (serviços + produtos) são carregados sob demanda via dynamic
@@ -17352,6 +17357,26 @@ function TecnicoOSDetail({ os, user, onClose, onUpdated, addToast }) {
 
 // ─── MAIN APP COMPONENT ──────────────────────────────────────────────────────
 
+// ─── Funções de domínio que a casca mobile reaproveita ──────────────────────
+// Ficam neste arquivo (DB, numeração, integração OS→Financeiro, pós-venda);
+// o MobileApp recebe por prop em vez de reimplementar. Nível de módulo para a
+// referência ser estável entre renders.
+const API_MOBILE = {
+  getNextNumber,
+  syncOSToFinance,
+  scheduleOSPosVenda,
+  // Mesmo preparo que o FinanceModule faz ao abrir: receita de toda OS
+  // finalizada (idempotente, só grava o que mudou) e despesas fixas do mês.
+  prepararFinanceiro() {
+    const financeAll = DB.list("erp:finance:");
+    DB.list("erp:os:")
+      .filter((o) => ["finalizado", "concluido"].includes(o.status))
+      .forEach((o) => syncOSToFinance(o, financeAll));
+    materializeRecurringExpenses();
+  },
+  pedirNotificacoes: requestNotifPermission,
+};
+
 export default function App() {
   const [user, setUser] = useState(null);
   const [activeModule, setActiveModule] = useState("dashboard");
@@ -17370,6 +17395,18 @@ export default function App() {
     document.body.setAttribute("data-theme", theme);
     DB.set("erp:theme", theme);
   }, [theme]);
+  // Celular (< 768px) usa a casca mobile; desktop/tablet deitado seguem iguais.
+  // "Layout clássico" é a válvula de escape: quem preferir (ou se a casca nova
+  // quebrar) volta para o layout antigo no celular. Fica salvo no aparelho.
+  const larguraCelular = useEhCelular();
+  const [layoutClassico, setLayoutClassico] = useState(() => {
+    try { return localStorage.getItem("frost_layout_classico") === "1"; } catch { return false; }
+  });
+  const mudarLayoutClassico = useCallback((ligado) => {
+    try { localStorage.setItem("frost_layout_classico", ligado ? "1" : "0"); } catch { /* sem storage: vale só nesta sessão */ }
+    setLayoutClassico(ligado);
+  }, []);
+  const ehCelular = larguraCelular && !layoutClassico;
   const [toasts, setToasts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({
@@ -18445,6 +18482,116 @@ export default function App() {
     );
   }
 
+  // ─── Conteúdo de cada módulo ───
+  // Usado pelo layout do desktop (dentro do ModuleSwitcher) e pela casca mobile
+  // (módulos sem tela própria no celular e o "modo completo"). Mesmo JSX que
+  // ficava inline no <main>, só extraído para os dois layouts compartilharem.
+  const renderModulo = (modulo) => (
+    <>
+      {modulo === "dashboard" && (
+        <Dashboard user={user} dateFilter={dateFilter} onNavigate={setActiveModule} />
+      )}
+      {modulo === "processos" && (
+        <ProcessModule user={user} addToast={addToast} clients={data.clients} employees={data.employees} reloadData={loadAllData} />
+      )}
+      {modulo === "agenda" && (
+        <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} onNavigate={setActiveModule} />
+      )}
+      {modulo === "financeiro" && (
+        <FinanceModule user={user} addToast={addToast} />
+      )}
+      {modulo === "cadastro" && (
+        <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
+      )}
+      {modulo === "ia" && (
+        <IAAtendimentoModule user={user} addToast={addToast} />
+      )}
+      {/* Pós-venda, Lembrete e Relatórios usam a API do Claude. Ficam
+          fora da demo pra não queimar token com visitante. */}
+      {modulo === "pos-venda" && (
+        isDemoMode() ? (
+          <DemoModuloIndisponivel
+            icone="↻"
+            titulo="Pós-venda"
+            motivo="O pós-venda gera as mensagens com inteligência artificial e envia por WhatsApp para clientes reais, por isso fica fora da demonstração. Fale com a equipe para ver o módulo ao vivo."
+          />
+        ) : (
+          <PosVendaModule supabase={supabase} />
+        )
+      )}
+      {modulo === "lembrete" && (
+        isDemoMode() ? (
+          <DemoModuloIndisponivel
+            icone="🔔"
+            titulo="Lembretes"
+            motivo="Os lembretes e o resumo do dono são escritos por inteligência artificial e disparados por WhatsApp, por isso ficam fora da demonstração. Fale com a equipe para ver o módulo ao vivo."
+          />
+        ) : (
+          <LembreteModule db={DB} addToast={addToast} companyId={getActiveCompanyId()} />
+        )
+      )}
+      {modulo === "folha" && (
+        <FolhaModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} />
+      )}
+      {modulo === "ponto" && (
+        <PontoModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} db={DB} />
+      )}
+      {modulo === "relatorios" && (
+        isDemoMode() ? (
+          <DemoModuloIndisponivel
+            icone="📊"
+            titulo="Relatórios"
+            motivo="O relatório entende a pergunta em português usando inteligência artificial, por isso fica fora da demonstração. Fale com a equipe para ver o módulo ao vivo."
+          />
+        ) : (
+          <RelatoriosModule user={user} db={DB} addToast={addToast} companyId={getActiveCompanyId()} />
+        )
+      )}
+      {modulo === "config" && (
+        <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} theme={theme} setTheme={setTheme} />
+      )}
+    </>
+  );
+
+  // ─── Celular: casca mobile (src/mobile/) no lugar de sidebar + header ───
+  if (ehCelular) {
+    return (
+      <>
+        <StyleSheet />
+        {sessionLost && (
+          <div className="fixed top-0 inset-x-0 z-[70] bg-red-600 text-white text-sm px-4 py-2 flex items-center justify-center gap-3 shadow-lg">
+            <span>⚠️ Sessão expirada — <strong>não está sincronizando</strong>.</span>
+            <button onClick={handleLogout} className="px-3 py-1 rounded-md bg-white text-red-700 font-semibold text-xs">Entrar</button>
+          </div>
+        )}
+        <ErroMobile onClassico={() => mudarLayoutClassico(true)}>
+        <Suspense fallback={<div className="fixed inset-0" style={{ background: theme === "light" ? "#f1f5f9" : "#0f172a" }} />}>
+          <MobileApp
+            user={user}
+            data={data}
+            db={DB}
+            addToast={addToast}
+            reloadData={loadAllData}
+            theme={theme}
+            setTheme={setTheme}
+            navItems={navItems}
+            notifications={notificationsWithAI}
+            dismissNotif={dismissNotif}
+            pendingProposals={pendingProposals}
+            aiPendingCount={aiPendingCount}
+            onLogout={handleLogout}
+            renderModulo={(m) => <ModuleErrorBoundary moduleKey={m}>{renderModulo(m)}</ModuleErrorBoundary>}
+            api={API_MOBILE}
+            demo={isDemoMode() ? { onReset: handleDemoReset } : null}
+            onLayoutClassico={() => mudarLayoutClassico(true)}
+          />
+        </Suspense>
+        </ErroMobile>
+        <ToastContainer toasts={toasts} removeToast={removeToast} />
+      </>
+    );
+  }
+
   return (
     <div className="flex h-screen bg-gray-900 text-gray-100 font-['DM_Sans'] fade-in">
       <StyleSheet />
@@ -18597,6 +18744,17 @@ export default function App() {
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
+
+            {/* Celular no layout clássico: atalho de volta para a casca mobile nova.
+                Só aparece em tela < 768px com o clássico ligado (nunca no desktop). */}
+            {larguraCelular && layoutClassico && (
+              <button
+                onClick={() => mudarLayoutClassico(false)}
+                className="md:hidden px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-semibold"
+              >
+                Novo layout
+              </button>
+            )}
 
             {/* Breadcrumb — trunca em telas menores para não quebrar o header */}
             <div className="hidden md:flex items-center gap-2 text-sm min-w-0 flex-shrink-0">
@@ -18784,68 +18942,7 @@ export default function App() {
         <main className="flex-1 overflow-y-auto overflow-x-hidden p-4 md:p-6">
          <ModuleErrorBoundary moduleKey={activeModule}>
           <ModuleSwitcher moduleKey={activeModule}>
-            {activeModule === "dashboard" && (
-              <Dashboard user={user} dateFilter={dateFilter} onNavigate={setActiveModule} />
-            )}
-            {activeModule === "processos" && (
-              <ProcessModule user={user} addToast={addToast} clients={data.clients} employees={data.employees} reloadData={loadAllData} />
-            )}
-            {activeModule === "agenda" && (
-              <ScheduleModule user={user} dateFilter={dateFilter} addToast={addToast} clients={data.clients} employees={data.employees} onNavigate={setActiveModule} />
-            )}
-            {activeModule === "financeiro" && (
-              <FinanceModule user={user} addToast={addToast} />
-            )}
-            {activeModule === "cadastro" && (
-              <CadastroModule user={user} addToast={addToast} reloadData={loadAllData} />
-            )}
-            {activeModule === "ia" && (
-              <IAAtendimentoModule user={user} addToast={addToast} />
-            )}
-            {/* Pós-venda, Lembrete e Relatórios usam a API do Claude. Ficam
-                fora da demo pra não queimar token com visitante. */}
-            {activeModule === "pos-venda" && (
-              isDemoMode() ? (
-                <DemoModuloIndisponivel
-                  icone="↻"
-                  titulo="Pós-venda"
-                  motivo="O pós-venda gera as mensagens com inteligência artificial e envia por WhatsApp para clientes reais, por isso fica fora da demonstração. Fale com a equipe para ver o módulo ao vivo."
-                />
-              ) : (
-                <PosVendaModule supabase={supabase} />
-              )
-            )}
-            {activeModule === "lembrete" && (
-              isDemoMode() ? (
-                <DemoModuloIndisponivel
-                  icone="🔔"
-                  titulo="Lembretes"
-                  motivo="Os lembretes e o resumo do dono são escritos por inteligência artificial e disparados por WhatsApp, por isso ficam fora da demonstração. Fale com a equipe para ver o módulo ao vivo."
-                />
-              ) : (
-                <LembreteModule db={DB} addToast={addToast} companyId={getActiveCompanyId()} />
-              )
-            )}
-            {activeModule === "folha" && (
-              <FolhaModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} />
-            )}
-            {activeModule === "ponto" && (
-              <PontoModule user={user} addToast={addToast} employees={data.employees} reloadData={loadAllData} db={DB} />
-            )}
-            {activeModule === "relatorios" && (
-              isDemoMode() ? (
-                <DemoModuloIndisponivel
-                  icone="📊"
-                  titulo="Relatórios"
-                  motivo="O relatório entende a pergunta em português usando inteligência artificial, por isso fica fora da demonstração. Fale com a equipe para ver o módulo ao vivo."
-                />
-              ) : (
-                <RelatoriosModule user={user} db={DB} addToast={addToast} companyId={getActiveCompanyId()} />
-              )
-            )}
-            {activeModule === "config" && (
-              <SettingsModule user={user} addToast={addToast} reloadData={loadAllData} theme={theme} setTheme={setTheme} />
-            )}
+            {renderModulo(activeModule)}
           </ModuleSwitcher>
          </ModuleErrorBoundary>
         </main>
