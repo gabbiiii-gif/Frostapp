@@ -51,6 +51,8 @@ Sempre lido primeiro em qualquer query. Mantenha sub-200 linhas.
 - [009 Hardening segurança](decisions/009-hardening-seguranca-2026-05-19.md) — pentest interno: master takeover anon, backup público, storage anon — fechados
 - [010 Performance da abertura](decisions/010-performance-abertura.md) — PageSpeed 59–72: sem animação infinita, login na hora, code-splitting pós-login, fonte própria
 - [011 Carga pós-login](decisions/011-carga-pos-login.md) — login de ~18 s no banco: RLS por linha no kv_store, hydrate duplo, auditoria inchada pelo backfill do Financeiro
+- [012 Multiempresa](decisions/012-multiempresa.md) — um banco para todas as empresas; chave (empresa, chave) em 3 fases; checklist antes da 2ª empresa
+- [013 Migração para São Paulo](decisions/013-migracao-sao-paulo.md) — roteiro (planejado): Pro, backup, dump/restore, Storage, funções, segredos, cron, Vercel, Evolution
 
 ## Fontes
 

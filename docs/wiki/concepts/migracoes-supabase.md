@@ -55,6 +55,7 @@ Ou seja: o comando "normal" de aplicar migrações desfaz remoções deliberadas
 | Data | Arquivo | Como | Versão no remoto |
 |---|---|---|---|
 | 2026-10-27 | `20261027134633_kv_store_rls_initplan.sql` | MCP `apply_migration` | `20261027134633` (o arquivo foi nomeado com a mesma versão — é a primeira que bate dos dois lados) |
+| 2026-10-27 | `20261027142316_kv_store_unique_empresa_chave.sql` (fase 0 do multiempresa) | MCP `apply_migration` | `20261027142316` — a fase 2 (troca da PK) está comentada no arquivo, **não aplicada** |
 
 A de 2026-09-08 (`20260908000000_remove_device_locking.sql`) foi pelo SQL Editor e **não** aparece em
 `schema_migrations` (última versão remota antes da de outubro: `20260723013715`).

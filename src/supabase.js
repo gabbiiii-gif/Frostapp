@@ -911,6 +911,24 @@ export async function hydrateFromSupabase({ limparLocal = true } = {}) {
   }
 }
 
+// ─── Upsert no kv_store: conflito por (empresa, chave) ──────────────────────
+// Cada empresa tem a própria versão de chaves sem id — erp:seeded,
+// erp:fechamento:<AAAA-MM>, erp:theme… Com o conflito só por `key`, essas chaves
+// ficavam presas à primeira empresa que as gravou e a 2ª não conseguia gravá-las
+// (decisão 012). O banco tem o índice único (company_id, key) desde 2026-10-27.
+// Se um dia o app falar com um banco sem esse índice (projeto novo montado à
+// mão, por exemplo), o PostgREST responde 42P10 e o app volta para o conflito
+// por `key` até recarregar — gravar continua funcionando.
+let _kvConflito = 'company_id,key';
+export async function upsertKv(rows) {
+  const r = await supabase.from('kv_store').upsert(rows, { onConflict: _kvConflito });
+  if (r.error?.code === '42P10' && _kvConflito !== 'key') {
+    _kvConflito = 'key';
+    return supabase.from('kv_store').upsert(rows, { onConflict: 'key' });
+  }
+  return r;
+}
+
 // ─── Upload em massa (usado em backup/restore) ───────────────────────────────
 export async function uploadAllToSupabase() {
   if (!supabase) return;
@@ -936,7 +954,7 @@ export async function uploadAllToSupabase() {
     if (rows.length === 0) return;
     for (let i = 0; i < rows.length; i += 500) {
       const batch = rows.slice(i, i + 500);
-      const { error } = await supabase.from('kv_store').upsert(batch, { onConflict: 'key' });
+      const { error } = await upsertKv(batch);
       if (error) console.warn('Upload batch error:', error.message);
     }
     console.log(`Uploaded ${rows.length} keys to Supabase`);
@@ -1003,7 +1021,7 @@ export async function flushOutbox() {
         if (error && !isPermissionError(error)) remaining.push(e);
       } else {
         const safeValue = sanitizeForSync(e.key, e.value);
-        const { error } = await supabase.from('kv_store').upsert({ key: e.key, value: safeValue, company_id: companyId, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+        const { error } = await upsertKv({ key: e.key, value: safeValue, company_id: companyId, updated_at: new Date().toISOString() });
         if (error && !isPermissionError(error)) remaining.push(e);
       }
     } catch { remaining.push(e); }
@@ -1033,9 +1051,7 @@ export function syncToSupabase(key, value) {
     return;
   }
   const safeValue = sanitizeForSync(key, value);
-  supabase
-    .from('kv_store')
-    .upsert({ key, value: safeValue, company_id: companyId, updated_at: new Date().toISOString() }, { onConflict: 'key' })
+  upsertKv({ key, value: safeValue, company_id: companyId, updated_at: new Date().toISOString() })
     .then(({ error }) => {
       if (error) {
         console.warn('Sync error:', key, error.message);

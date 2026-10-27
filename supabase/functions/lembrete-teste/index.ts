@@ -26,8 +26,9 @@ function tipoCliente(c: Record<string, unknown>): "pj" | "pf" {
 }
 function fmtData(iso: string): string { const d = new Date(iso); return isNaN(d.getTime()) ? "—" : d.toLocaleDateString("pt-BR", { timeZone: TZ }); }
 async function kvList(sb: SupabaseClient, companyId: string, suffix: string) {
-  const scoped = await sb.from("kv_store").select("value").like("key", `${companyId}:${suffix}%`).limit(5000);
-  if (scoped.data && scoped.data.length) return scoped.data.map((r: { value: unknown }) => r.value as Record<string, unknown>);
+  // Só o formato real das chaves (erp:..., escopado pela coluna company_id). A
+  // tentativa anterior com "<company_id>:erp:..." nunca achava nada e custava
+  // uma varredura da tabela inteira a cada execução (decisão 011).
   const bare = await sb.from("kv_store").select("value").eq("company_id", companyId).like("key", `${suffix}%`).limit(5000);
   return (bare.data || []).map((r: { value: unknown }) => r.value as Record<string, unknown>);
 }

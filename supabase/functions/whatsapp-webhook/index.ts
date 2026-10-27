@@ -937,18 +937,19 @@ function aniversarioMesAtual(dataNasc: string): boolean {
   return m >= 1 && m <= 12 && m === brasiliaNow().getUTCMonth() + 1;
 }
 
-// Lista registros do kv_store por sufixo de chave, tolerando os dois formatos:
-// escopado (`<company_id>:erp:...`) e legado sem prefixo (`erp:...`). Os dados
-// atuais são legados (bare); o fallback garante que funcione em ambos.
+// Lista registros do kv_store DA EMPRESA por prefixo de chave. O filtro por
+// company_id é obrigatório: esta função roda com service_role (ignora a RLS) e,
+// sem ele, get_customer/get_recent_os enxergavam clientes e OS de TODAS as
+// empresas — com 2+ empresas, a IA de uma reconheceria pelo telefone o cliente
+// da outra (decisão 012). O formato "<company_id>:erp:..." que a versão
+// anterior tentava primeiro nunca existiu no banco.
 async function kvList(
-  supabase: SupabaseClient, companyId: string, suffix: string,
+  supabase: SupabaseClient, companyId: string, prefix: string,
 ): Promise<Array<{ key: string; value: unknown }>> {
-  const scoped = await supabase
-    .from("kv_store").select("key, value").like("key", `${companyId}:${suffix}%`).limit(2000);
-  if (scoped.data && scoped.data.length) return scoped.data as Array<{ key: string; value: unknown }>;
-  const bare = await supabase
-    .from("kv_store").select("key, value").like("key", `${suffix}%`).limit(2000);
-  return (bare.data || []) as Array<{ key: string; value: unknown }>;
+  const { data } = await supabase
+    .from("kv_store").select("key, value")
+    .eq("company_id", companyId).like("key", `${prefix}%`).limit(2000);
+  return (data || []) as Array<{ key: string; value: unknown }>;
 }
 
 function dentroDoHorario(bh: any): boolean {

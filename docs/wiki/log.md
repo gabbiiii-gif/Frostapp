@@ -346,3 +346,13 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - código: recAtualizadoPelaOS (backfill só grava o que mudou), hydrateRecenteDe + hydrate de fundo pós-login, guarda _tocadas contra foto velha, hydrate sem sessão não roda, Realtime ignora erp:audit:, poda da auditoria local (200), _afterAuth em 1 consulta, fatores 2FA da sessão
 - touched: decisions/011-carga-pos-login.md (nova), decisions/010-performance-abertura.md, concepts/supabase-sync.md, concepts/db-layer.md, concepts/migracoes-supabase.md, modules/finance.md, index.md
 - pendências: limpar auditorias antigas (decisão do dono), região sa-east-1, kvList do lembrete-dispatch, outras políticas com auth.uid() por linha, remover papel cliente_escola (CHECK primeiro)
+
+## [2026-10-27] decisão | Multiempresa e migração para São Paulo
+- pergunta: "vou ter que fazer um banco para cada empresa?" → não; um banco com company_id + RLS (decisions/012-multiempresa.md)
+- verificado com ROLLBACK: empresa 2 de teste lê 0 linhas da empresa 1 e não sobrescreve nada; mas não grava 9 chaves "globais" (seeded, credentialsCleared, catalogSeeded, fechamento:<mês>, theme, pushSent, notifDismissed, calendarFeedToken)
+- achados: purgeAllUsers apagaria os erp:user da empresa 2 a cada abertura; IA do WhatsApp (service role) lia clientes/OS de todas as empresas
+- aplicado em produção: índice único (company_id, key) — fase 0 (20261027142316)
+- código: upsertKv com on_conflict company_id,key (+ volta para key em 42P10), purgeAllUsers só sem Supabase, kvList do webhook filtrando company_id, master-companies por company_id,key
+- publicado: main avançada para 9258f2a (correções de velocidade) — Vercel
+- migração BR: só roteiro (decisions/013-migracao-sao-paulo.md); org no plano Free (sem backup, 2 projetos ativos)
+- pendências: deploy das Edge Functions alteradas, fase 2 da PK, plano Pro, backup manual, atualização imediata do PWA

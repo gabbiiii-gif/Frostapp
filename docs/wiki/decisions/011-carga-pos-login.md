@@ -105,9 +105,9 @@ Log de borda do Supabase, 2026-10-27 13:28 UTC, um Android 10, um único login:
   migração de infraestrutura, com janela de manutenção. Fica como recomendação.
 - **Páginas do hydrate em paralelo:** economizaria ~1 ida e volta (~200 ms); paginação por offset em
   paralelo tem o mesmo risco de pular/duplicar linha do sequencial, e o ganho ficou pequeno depois da RLS.
-- **`lembrete-dispatch`/`lembrete-teste`:** o `kvList` tenta primeiro `like 'cmp_<id>:erp:client:%'`
-  (formato de chave que não existe) e só então o formato certo. Funciona, mas desperdiça uma varredura
-  por execução (0,4–1,1 s a cada 15 min). Corrigir exige redeploy das funções.
+- **`lembrete-dispatch`/`lembrete-teste`:** o `kvList` tentava primeiro `like 'cmp_<id>:erp:client:%'`
+  (formato de chave que não existe) e só então o formato certo — uma varredura desperdiçada por execução
+  (0,4–1,1 s a cada 15 min). Corrigido no código no mesmo dia ([[012-multiempresa]]); falta o redeploy.
 - **Outras políticas com `auth.uid()` por linha** (`ai_conversations`, `ai_messages`, `ai_os_proposals`,
   `push_subscriptions`, `pos_venda_*`): tabelas pequenas hoje; o advisor `auth_rls_initplan` lista todas.
 - **Papel `cliente_escola`:** o produto não usa mais, mas o CHECK de `company_members.role` ainda aceita.

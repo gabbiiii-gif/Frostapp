@@ -291,7 +291,7 @@ Deno.serve(async (req: Request) => {
     const { error: kvErr } = await admin.from("kv_store").upsert([
       { key: `erp:company:${companyId}`, value: companyValue, company_id: companyId, updated_at: nowIso },
       { key: `erp:user:${userValue.id}`, value: userValue, company_id: companyId, updated_at: nowIso },
-    ], { onConflict: "key" });
+    ], { onConflict: "company_id,key" });
     if (kvErr) {
       console.error("master-companies kv upsert:", kvErr.message);
       // Não faz rollback do auth/member — o login já funciona; kv é hidratável.
@@ -329,7 +329,7 @@ Deno.serve(async (req: Request) => {
     // kv_store: objeto rico completo (o cliente manda o objeto final).
     const { error: kvErr } = await admin.from("kv_store").upsert(
       { key: `erp:company:${companyId}`, value: company, company_id: companyId, updated_at: new Date().toISOString() },
-      { onConflict: "key" },
+      { onConflict: "company_id,key" },
     );
     if (kvErr) console.error("master-companies update kv:", kvErr.message);
     return json({ ok: true });

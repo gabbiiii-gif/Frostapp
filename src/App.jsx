@@ -1721,7 +1721,11 @@ async function seedProductCatalog() {
 async function seedDatabase() {
   // Migração única: ao detectar versão antiga, limpa TODOS os usuários demo
   // para forçar o cadastro do primeiro super admin pelo próprio cliente.
-  if (!DB.get("erp:credentialsCleared_v1")) {
+  // Só no app local puro: com Supabase o usuário mora em company_members/auth,
+  // e a flag era uma chave sem id de empresa — a 2ª empresa nunca conseguia
+  // gravá-la e apagaria os próprios erp:user:* (no aparelho e no Supabase) a
+  // cada abertura do app (decisão 012).
+  if (!supabase && !DB.get("erp:credentialsCleared_v1")) {
     purgeAllUsers();
     DB.set("erp:credentialsCleared_v1", true);
   }

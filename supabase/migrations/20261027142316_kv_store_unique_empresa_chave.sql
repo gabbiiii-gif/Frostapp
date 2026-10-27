@@ -1,0 +1,57 @@
+-- ============================================================================
+-- Multiempresa — fase 0: índice único (company_id, key) no kv_store
+-- ----------------------------------------------------------------------------
+-- POR QUÊ
+--   A chave primária do kv_store é só `key`. Chaves "globais" (sem id próprio)
+--   ficam presas à PRIMEIRA empresa que as gravou: erp:seeded,
+--   erp:credentialsCleared_v1, erp:catalogSeeded_v1, erp:theme, erp:pushSent,
+--   erp:notifDismissed, erp:calendarFeedToken e erp:fechamento:<AAAA-MM>.
+--   Testado em 2026-10-27 numa transação desfeita (ROLLBACK): uma 2ª empresa
+--   NÃO enxerga nem sobrescreve nada da 1ª (a RLS isola), mas também não consegue
+--   gravar essas chaves ("violates row-level security policy") — fechamento
+--   mensal, flags de seed e preferências dela falhariam em silêncio.
+--   Ver docs/wiki/decisions/012-multiempresa.md.
+--
+-- AS 3 FASES
+--   0 (este arquivo, aditivo): índice único (company_id, key). Não muda nada
+--     para quem usa on_conflict=key: a PK antiga continua valendo.
+--   1 (app): upserts passam a usar on_conflict=company_id,key (src/supabase.js
+--     e a edge function master-companies).
+--   2 (depois que TODOS os aparelhos estiverem na versão nova do app): a PK
+--     passa a ser (company_id, key) — bloco comentado no fim deste arquivo.
+--     Antes da fase 2 a 2ª empresa ainda esbarra na PK antiga: NÃO cadastre
+--     outra empresa antes dela.
+--
+-- COMO APLICAR
+--   SQL Editor ou MCP (nunca `supabase db push` — ver
+--   docs/wiki/concepts/migracoes-supabase.md). Leva menos de 1 s (27 mil linhas).
+--   APLICADA (fase 0) em produção em 2026-10-27 via MCP, registrada como
+--   20261027142316 / kv_store_unique_empresa_chave. Conferido com ROLLBACK:
+--   upsert on conflict (company_id, key) insere e atualiza pela RLS do admin.
+-- ============================================================================
+
+create unique index if not exists kv_store_company_id_key_key
+  on public.kv_store (company_id, key);
+
+-- Sem "add constraint … using index": o PostgREST aceita on_conflict apontando
+-- para qualquer índice único com exatamente essas colunas.
+
+-- ─── FASE 2 (rodar só depois que todos os aparelhos usarem o app novo) ───────
+-- Conferir antes: nenhum upsert com on_conflict=key nos logs de borda das últimas
+-- 48 h (request.url like '%kv_store?on_conflict=key%').
+--
+-- begin;
+-- set local lock_timeout = '5s';
+-- alter table public.kv_store drop constraint kv_store_pkey;
+-- alter table public.kv_store add constraint kv_store_pkey
+--   primary key using index kv_store_company_id_key_key;
+-- commit;
+--
+-- REVERSÃO da fase 2 (só funciona enquanto nenhuma chave existir em 2 empresas):
+-- begin;
+-- alter table public.kv_store drop constraint kv_store_pkey;
+-- alter table public.kv_store add constraint kv_store_pkey primary key (key);
+-- create unique index kv_store_company_id_key_key on public.kv_store (company_id, key);
+-- commit;
+--
+-- REVERSÃO da fase 0: drop index if exists public.kv_store_company_id_key_key;
