@@ -338,3 +338,11 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 ## [2026-09-24] decisão | Performance da abertura (PageSpeed 59–72)
 - touched: decisions/010-performance-abertura.md, index.md
 - decisions: nenhuma animação infinita; Aurora com orçamento (GPU real, idle, 30 fps, para em ~12 s); login sem splash quando não há sessão (submit espera o boot); code-splitting do pós-login sem quebrar o App.jsx; DM Sans auto-hospedada
+
+## [2026-10-27] decisão | Carga pós-login (cliente: "demora para entrar na interface")
+- evidência: edge_logs 2026-10-27 13:28 UTC (Android 10) — 4 páginas de hydrate de 3,9–4,9 s num login; EXPLAIN como admin: 3.109 ms/página
+- causas: RLS do kv_store chamando funções SECURITY DEFINER por linha (27 mil linhas); 26 mil auditorias geradas pelo backfill do Financeiro (regravava ~70 RECs por abertura); login hidratando 2× em sequência; Realtime gravando auditoria no localStorage de todo admin/gerente; projeto em us-east-2
+- aplicado em produção: migração 20261027134633_kv_store_rls_initplan (MCP), equivalência testada com ROLLBACK em 8 papéis; página do hydrate 3.109 ms → 15,6 ms
+- código: recAtualizadoPelaOS (backfill só grava o que mudou), hydrateRecenteDe + hydrate de fundo pós-login, guarda _tocadas contra foto velha, hydrate sem sessão não roda, Realtime ignora erp:audit:, poda da auditoria local (200), _afterAuth em 1 consulta, fatores 2FA da sessão
+- touched: decisions/011-carga-pos-login.md (nova), decisions/010-performance-abertura.md, concepts/supabase-sync.md, concepts/db-layer.md, concepts/migracoes-supabase.md, modules/finance.md, index.md
+- pendências: limpar auditorias antigas (decisão do dono), região sa-east-1, kvList do lembrete-dispatch, outras políticas com auth.uid() por linha, remover papel cliente_escola (CHECK primeiro)

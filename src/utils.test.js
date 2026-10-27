@@ -29,6 +29,7 @@ import {
   osTecnicoNomes,
   osTemTecnico,
   camposTecnicos,
+  recAtualizadoPelaOS,
 } from './utils.js';
 
 describe('genId', () => {
@@ -588,5 +589,38 @@ describe("equipe de técnicos da OS", () => {
     expect(r.tecnicoId).toBe("");
     expect(r.tecnicoNome).toBe("—");
     expect(r.tecnicos).toEqual([]);
+  });
+});
+
+describe('recAtualizadoPelaOS (backfill OS → Financeiro)', () => {
+  const alvo = { descricao: 'OS OS-099 — ALAN ACADEMIA — Manutenção', categoria: 'Manutenção', valor: 1000, data: '2026-09-23T03:03:33.525Z' };
+  const recEmDia = { id: 'f1', status: 'pendente', ...alvo, updatedAt: '2026-09-23T03:04:00.000Z' };
+
+  it('REC já em dia → null (não regrava a cada abertura do Financeiro)', () => {
+    expect(recAtualizadoPelaOS(recEmDia, alvo)).toBeNull();
+  });
+
+  it('valor da OS mudou em REC pendente → devolve o REC com o valor novo', () => {
+    const r = recAtualizadoPelaOS(recEmDia, { ...alvo, valor: 1200 });
+    expect(r.valor).toBe(1200);
+    expect(r.id).toBe('f1');
+    expect(r.updatedAt).toBe(recEmDia.updatedAt); // quem grava é que carimba o updatedAt
+  });
+
+  it('REC pago mantém valor e data, mas a descrição acompanha a OS', () => {
+    const pago = { ...recEmDia, status: 'pago', valor: 950, data: '2026-09-30T00:00:00.000Z' };
+    expect(recAtualizadoPelaOS(pago, { ...alvo, valor: 1200 })).toBeNull();
+    const r = recAtualizadoPelaOS(pago, { ...alvo, descricao: 'OS OS-099 — Alan Academia' });
+    expect(r.descricao).toBe('OS OS-099 — Alan Academia');
+    expect(r.valor).toBe(950);
+    expect(r.data).toBe('2026-09-30T00:00:00.000Z');
+  });
+
+  it('OS sem data de conclusão mantém a data gravada (não vira "agora")', () => {
+    expect(recAtualizadoPelaOS(recEmDia, { ...alvo, data: null })).toBeNull();
+  });
+
+  it('sem REC → null', () => {
+    expect(recAtualizadoPelaOS(null, alvo)).toBeNull();
   });
 });

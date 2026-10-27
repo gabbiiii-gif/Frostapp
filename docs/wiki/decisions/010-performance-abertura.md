@@ -1,9 +1,10 @@
 ---
 title: 010 — Performance da abertura (login) — PageSpeed 2026-09-24
 type: decision
-updated: 2026-09-25
+updated: 2026-10-27
 sources: []
 related:
+  - 011-carga-pos-login.md
   - 001-single-file-app.md
   - ../concepts/supabase-sync.md
 code_refs:
@@ -92,6 +93,12 @@ comparação da mesma rodada.
 | JS+CSS iniciais (gzip) | 526 KB | 271 KB |
 
 SEO continua 66 pelo `noindex` (intencional).
+
+## Continuação
+
+Em 2026-10-27 a mesma reclamação voltou ("demora para entrar na interface") e o tempo estava **depois** do
+login, no banco: RLS do `kv_store` avaliada por linha, hydrate feito duas vezes e 26 mil linhas de auditoria
+geradas pelo backfill do Financeiro. Ver [[011-carga-pos-login]].
 
 ## O que ficou de fora (e por quê)
 

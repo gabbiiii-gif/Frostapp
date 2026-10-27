@@ -50,6 +50,7 @@ Sempre lido primeiro em qualquer query. Mantenha sub-200 linhas.
 - [008 Pós-Venda pg_cron](decisions/008-pos-venda-pg-cron-vs-vercel-cron.md) — Vercel Hobby limita cron a 1x/dia; agendar no Supabase pg_cron
 - [009 Hardening segurança](decisions/009-hardening-seguranca-2026-05-19.md) — pentest interno: master takeover anon, backup público, storage anon — fechados
 - [010 Performance da abertura](decisions/010-performance-abertura.md) — PageSpeed 59–72: sem animação infinita, login na hora, code-splitting pós-login, fonte própria
+- [011 Carga pós-login](decisions/011-carga-pos-login.md) — login de ~18 s no banco: RLS por linha no kv_store, hydrate duplo, auditoria inchada pelo backfill do Financeiro
 
 ## Fontes
 

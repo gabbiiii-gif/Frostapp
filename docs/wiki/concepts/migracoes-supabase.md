@@ -1,7 +1,7 @@
 ---
 title: Migrações Supabase — o histórico remoto NÃO bate com os arquivos locais
 type: concept
-updated: 2026-09-08
+updated: 2026-10-27
 related:
   - ./supabase-sync.md
   - ./device-locking.md
@@ -49,6 +49,15 @@ Ou seja: o comando "normal" de aplicar migrações desfaz remoções deliberadas
 3. Se um dia quisermos `db push` de volta, o caminho é `supabase migration repair`
    para casar as 49 versões remotas com os arquivos — trabalho à parte, nunca no
    meio de outra mudança.
+
+### Registro: migrações aplicadas depois desta página
+
+| Data | Arquivo | Como | Versão no remoto |
+|---|---|---|---|
+| 2026-10-27 | `20261027134633_kv_store_rls_initplan.sql` | MCP `apply_migration` | `20261027134633` (o arquivo foi nomeado com a mesma versão — é a primeira que bate dos dois lados) |
+
+A de 2026-09-08 (`20260908000000_remove_device_locking.sql`) foi pelo SQL Editor e **não** aparece em
+`schema_migrations` (última versão remota antes da de outubro: `20260723013715`).
 
 > O comentário "COMO APLICAR: supabase db push" dentro de migrações antigas
 > (ex.: `20260730000000_move_current_device_ok_to_private.sql`) é anterior a essa

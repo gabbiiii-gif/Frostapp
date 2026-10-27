@@ -1,9 +1,10 @@
 ---
 title: DB Layer (window.storage + multi-tenant + audit)
 type: concept
-updated: 2026-05-10
+updated: 2026-10-27
 sources: []
 related:
+  - ../decisions/011-carga-pos-login.md
   - ./supabase-sync.md
   - ./role-permissions.md
   - ../modules/settings.md
@@ -104,7 +105,14 @@ Skipa silenciosamente: `erp:audit:*` (evita loop), `master:*` (master não loga)
   - `erp:finance:` → `<tipo> R$<valor> — <descricao>`
 - Entry: `{id, ts, action, entity, entityId, summary, userId, userNome, companyId}`
 - Salva em `erp:audit:<id>` + sync Supabase
-- Lido pelo [`CompanyAuditPanel`](../modules/settings.md) (admin only)
+- Lido pelo [`CompanyAuditPanel`](../modules/settings.md) (admin only): busca as 500 mais recentes do
+  Supabase ao abrir (`fetchAuditLog`) e junta com as locais.
+- **Não mora no aparelho (desde 2026-10-27):** o hydrate não baixa auditoria, o Realtime ignora
+  `erp:audit:*` e o boot poda a cópia local para as 200 mais recentes (`podarAuditoriaLocal`; sem Supabase
+  não poda). Antes, todo admin/gerente acumulava a auditoria de todos os aparelhos — milhares de chaves que
+  deixavam cada `DB.list` mais lento e enchiam a cota do localStorage. Ver [[../decisions/011-carga-pos-login]].
+- **Volume é sintoma:** cada `DB.set` de entidade auditada gera uma linha. Rotina que regrava registro sem
+  mudança (como fazia o backfill do Financeiro) enche o `kv_store` de auditoria — confira antes de gravar.
 
 **Não bypassar `DB.set/delete`** ao mexer em entidades auditadas — write direto em `window.storage` não produz audit.
 

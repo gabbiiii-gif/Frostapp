@@ -1,12 +1,13 @@
 ---
 title: Supabase Sync (auth, kv_store, RLS, Realtime, Storage)
 type: concept
-updated: 2026-05-10
+updated: 2026-10-27
 sources: []
 related:
   - ./db-layer.md
   - ../modules/tecnico-mobile.md
   - ../modules/settings.md
+  - ../decisions/011-carga-pos-login.md
 code_refs:
   - src/supabase.js
   - src/App.jsx#ensureAutoBackup
@@ -81,12 +82,25 @@ RLS exige `company_id` em toda mutação.
 
 `.delete().eq('key', key).eq('company_id', companyId)` — duplo eq evita deletar key de outra empresa por engano.
 
-### `hydrateFromSupabase()` — chamada no login
+### `hydrateFromSupabase({ limparLocal = true })` — boot, login e fundo pós-login
 
 Supabase é **fonte de verdade**:
-1. SELECT * WHERE company_id = atual
-2. Lista keys `erp:*` locais que **não estão** no remoto → remove (exceto sensitive, `erp:seeded`, `erp:lastBackup`)
-3. Sobrescreve local com remoto (skipa sensitive — não apaga password do device)
+1. Sem sessão Supabase → `false`, sem tocar no local (a RLS devolveria zero linhas sem erro e o passo 3
+   apagaria o cache inteiro — [[../decisions/011-carga-pos-login]]).
+2. `SELECT key, value WHERE company_id = atual`, sem `erp:audit:*` e sem `erp:autoBackup:*`, paginado de
+   1000 em 1000 (o PostgREST corta em 1000).
+3. Só se a paginação completou **e** `limparLocal`: remove keys `erp:*` locais que **não estão** no remoto
+   (exceto sensitive, auditoria, `erp:seeded`, `erp:lastBackup`, chaves na outbox e chaves alteradas depois
+   que a consulta saiu).
+4. Sobrescreve local com remoto (skipa sensitive — não apaga password do device; preserva os segredos de
+   `erp:user:*`; skipa chave alterada depois que a consulta saiu — `_tocadas`).
+
+**Quem chama:** o boot (sempre, com a sessão guardada no aparelho); o login, **só** se o boot não hidratou
+com o mesmo usuário/empresa/papel nos últimos 5 min (`hydrateRecenteDe`); e o hydrate de fundo 1 s depois
+do Dashboard abrir, quando o login aproveitou o do boot (`limparLocal: false`).
+
+**Custo:** com a RLS por linha (até 2026-10-27) cada página levava ~3 s no banco e 4–5 s no celular; com
+InitPlan, ~15 ms. Ver [[../decisions/011-carga-pos-login]].
 
 ### `uploadAllToSupabase()` — usado em backup/restore
 
@@ -155,18 +169,37 @@ Não estão no repo (vivem no projeto Supabase). Mudar contrato → atualizar am
 
 ## Order of ops no boot
 
+Conferido no código em 2026-10-27 (init do `App`):
+
 ```
-ensureMemberLoaded → setCurrentMember → setActiveCompanyId/User
-  → ensureCompanyMigration → migrateLegacyConfigOnce
-  → hydrateFromSupabase   ← Supabase é source of truth
-  → ensureAutoBackup      ← cria snapshot semanal se devido
-  → subscribeToChanges    ← Realtime liga
+podarAuditoriaLocal          ← tira do aparelho a auditoria acumulada (fica no Supabase)
+  → ensureMemberLoaded       ← membro em cache ou sessão Supabase guardada
+  → flushOutbox
+  → hydrateFromSupabase      ← Supabase é source of truth
+  → seedDatabase → ensureCompanyMigration → ensureFechamentoMensal → ensureFinanceiroModuleEnabled
+  → catálogo (só se o hydrate rodou de fato) → loadAllData
+  → restauração da sessão (frost_session, 30 min) → migrateLegacyConfigOnce + ensureAutoBackup
+login (handleSubmit): aguardarBoot → signInWithFallback → hydrate (ou aproveita o do boot) → MFA → onLogin
+subscribeToChanges           ← só depois que há `user` (efeito no App)
 ```
+
+## RLS do `kv_store`
+
+Políticas por empresa (`company_id`) + regra de prefixo por papel (admin/gerente tudo; técnico/atendente
+sem financeiro/segredos/auditoria; `ponto` só ponto; `cliente_escola` só escola). Desde 2026-10-27 as
+funções de empresa/papel/master entram como `(select …)` (InitPlan, uma vez por consulta) e a regra de
+prefixo vem inline na política. Nunca volte a chamar função `SECURITY DEFINER` por linha numa política
+dessa tabela — ver [[../decisions/011-carga-pos-login]] e `supabase/migrations/20261027134633_kv_store_rls_initplan.sql`.
 
 ## Padrões / armadilhas
 
 - **Fire-and-forget**: `syncToSupabase` não bloqueia. Falha → log warn + dado fica só local; próximo `uploadAllToSupabase` recupera.
 - **Race entre Realtime e write local**: Realtime sobrescreve local com `setItem`. Se write local acabou de acontecer e o eco volta via Realtime → no-op (mesmo valor).
+- **Race entre hydrate e Realtime/write local**: o hydrate traz uma foto tirada quando a consulta saiu.
+  Chave alterada depois disso (evento Realtime, `syncToSupabase`, `deleteFromSupabase`) não é sobrescrita
+  nem apagada pela resposta — `_tocadas` em `src/supabase.js`, testado em `src/supabase.hydrate.test.js`.
+- **Realtime ignora `erp:audit:*`**: antes gravava toda auditoria de todos os aparelhos no localStorage de
+  cada admin/gerente, sem limpeza.
 - **Escopo do channel = companyId**: troca de empresa → unsub + nova `subscribeToChanges`.
 - **`isSensitive` é por chave inteira; `sanitizeForSync` é por campo dentro do valor.** Não confundir.
 

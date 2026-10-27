@@ -198,18 +198,34 @@ export async function signInWithFallback(email, password) {
   }
 }
 
-async function _afterAuth(session) {
-  // Carrega vínculo company_members do usuário autenticado
+const MEMBER_COLS = 'user_id, company_id, role, is_super_admin, legacy_user_id, custom_permissions, status, nome, avatar, first_login_otp_done';
+
+// Membro + flags de segurança da empresa (Fase 2.4/2.5) numa ida só ao
+// servidor: o embed `companies(...)` segue a FK company_members.company_id.
+// O projeto Supabase fica em us-east-2 e os clientes no Brasil — cada consulta
+// sequencial no login custa ~200–450 ms. Se o embed falhar (schema diferente),
+// cai no formato antigo: membro primeiro e flags depois, não-bloqueantes.
+async function _carregarMembro(userId) {
+  const embed = await supabase
+    .from('company_members')
+    .select(`${MEMBER_COLS}, companies(require_first_login_otp, require_mfa)`)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (!embed.error) {
+    const member = embed.data;
+    if (member) {
+      member.company_require_first_login_otp = !!member.companies?.require_first_login_otp;
+      member.company_require_mfa = !!member.companies?.require_mfa;
+      delete member.companies;
+    }
+    return { member, error: null };
+  }
   const { data: member, error } = await supabase
     .from('company_members')
-    .select('user_id, company_id, role, is_super_admin, legacy_user_id, custom_permissions, status, nome, avatar, first_login_otp_done')
-    .eq('user_id', session.user.id)
+    .select(MEMBER_COLS)
+    .eq('user_id', userId)
     .maybeSingle();
-  if (error || !member) {
-    return { ok: false, error: 'Usuário sem vínculo com empresa. Contate o administrador.' };
-  }
-  // Fase 2.4/2.5: carrega flags da empresa pra LoginScreen decidir se
-  // intercepta o login. Falha aqui é não-bloqueante (default false).
+  if (error || !member) return { member: null, error };
   try {
     const { data: company } = await supabase
       .from('companies')
@@ -221,6 +237,16 @@ async function _afterAuth(session) {
   } catch {
     member.company_require_first_login_otp = false;
     member.company_require_mfa = false;
+  }
+  return { member, error: null };
+}
+
+async function _afterAuth(session) {
+  // Carrega vínculo company_members do usuário autenticado (+ flags da
+  // empresa pra LoginScreen decidir se intercepta o login — Fase 2.4/2.5).
+  const { member, error } = await _carregarMembro(session.user.id);
+  if (error || !member) {
+    return { ok: false, error: 'Usuário sem vínculo com empresa. Contate o administrador.' };
   }
   // Fase 2.3: convidado que acabou de aceitar (definir senha + login) entra com
   // status='pendente'. Como autenticou com sucesso, promove para 'ativo'.
@@ -551,6 +577,16 @@ export async function listMfaFactors() {
   }
 }
 
+// Mesmo formato de listMfaFactors(), mas lido da sessão que o login ACABOU de
+// receber do servidor — sem a ida a /auth/v1/user (~450 ms daqui até o
+// us-east-2). O usuário devolvido pelo signInWithPassword já traz `factors`
+// (é a mesma fonte que o supabase-js usa em mfa.getAuthenticatorAssuranceLevel);
+// o GoTrue omite o campo quando a lista está vazia. Só serve logo após o login.
+export function fatoresMfaDaSessao(session) {
+  const all = Array.isArray(session?.user?.factors) ? session.user.factors : [];
+  return { ok: true, factors: all, totp: all.filter((f) => f.factor_type === 'totp' && f.status === 'verified') };
+}
+
 // Inicia enrollment de novo factor TOTP. Retorna { factorId, qr, secret, uri }.
 // Após scanear QR, o caller precisa chamar challengeMfa + verifyMfa pra
 // confirmar e ativar o factor.
@@ -722,6 +758,29 @@ export async function ensureMemberLoaded() {
   return result.ok ? result.member : null;
 }
 
+// ─── Último hydrate completo: quem, de qual empresa, com qual papel ─────────
+// O boot hidrata com a sessão Supabase guardada no aparelho enquanto a pessoa
+// digita a senha. Se o login for do MESMO usuário, da mesma empresa e com o
+// mesmo papel, a RLS devolveria exatamente as mesmas linhas — baixar tudo de
+// novo só atrasava a entrada (o login fazia 2 hydrates completos em sequência).
+let _ultimoHydrate = null;
+export function hydrateRecenteDe(userId, companyId, role, maxIdadeMs = 5 * 60 * 1000) {
+  const h = _ultimoHydrate;
+  return !!(h && userId && h.userId === userId && h.companyId === companyId
+    && h.role === (role || null) && Date.now() - h.em < maxIdadeMs);
+}
+
+// ─── Chaves alteradas durante um hydrate ─────────────────────────────────────
+// O hydrate traz uma FOTO do servidor tirada no início da consulta. Se, até a
+// resposta chegar, a chave mudou — evento Realtime de outro aparelho ou
+// gravação local (DB.set/DB.delete passam por syncToSupabase/deleteFromSupabase)
+// —, a foto está mais velha que o local e não pode sobrescrevê-lo nem apagá-lo.
+// Importa no hydrate de fundo pós-login, que roda com o Realtime já ligado.
+const _tocadas = new Map(); // key → Date.now() da última alteração
+function _marcarTocada(key) {
+  if (key) _tocadas.set(key, Date.now());
+}
+
 // ─── Hydrate: Supabase é a fonte de verdade ──────────────────────────────────
 // Só é eficaz após login (RLS bloqueia anon).
 //
@@ -733,11 +792,27 @@ export async function ensureMemberLoaded() {
 // sessão/companyId + pelo menos uma página lida). O init usa esse retorno como
 // gate: sem hydrate real, NÃO semear catálogo (cache local vazio duplicaria o
 // catálogo remoto a cada boot sem sessão).
-export async function hydrateFromSupabase() {
+//
+// limparLocal=false: só traz/atualiza, sem apagar do local o que não veio.
+// Usado no hydrate de fundo pós-login — o do boot, minutos antes, já limpou, e
+// uma gravação local ainda a caminho do servidor não pode sumir por isso.
+export async function hydrateFromSupabase({ limparLocal = true } = {}) {
   if (isDemoMode()) return false; // demo: nunca lê do Supabase real
   if (!supabase) return false;
   const companyId = getCompanyId();
   if (!companyId) return false; // sem auth → nada a sincronizar
+  // Sem sessão Supabase a RLS devolve ZERO linhas, sem erro — e o cleanup
+  // abaixo leria isso como "o servidor não tem nada" e apagaria o cache local
+  // inteiro (membro em cache, sessão perdida/expirada). Ler a sessão não custa
+  // rede a mais: a consulta abaixo leria o mesmo token de qualquer jeito.
+  let authUserId = null;
+  try {
+    const { data } = await supabase.auth.getSession();
+    authUserId = data?.session?.user?.id || null;
+  } catch { /* trata como sem sessão */ }
+  if (!authUserId) return false;
+  const inicio = Date.now();
+  const mudouDepois = (key) => (_tocadas.get(key) || 0) >= inicio;
   try {
     // ─── Pagina via .range() em batches de 1000 até esgotar ─────────────────
     const PAGE = 1000;
@@ -756,6 +831,9 @@ export async function hydrateFromSupabase() {
         // que busca sob demanda via fetchAuditLog(). Excluir aqui derruba
         // drasticamente o payload de carregamento.
         .not('key', 'like', 'erp:audit:%')
+        // Backups automáticos nunca são gravados no local (isSensitive) — baixar
+        // era só peso (~35 KB cada, com a empresa inteira dentro).
+        .not('key', 'like', 'erp:autoBackup:%')
         .order('key', { ascending: true })
         .range(from, from + PAGE - 1);
       if (error) { pageError = error; break; }
@@ -777,7 +855,7 @@ export async function hydrateFromSupabase() {
     // Apaga local apenas se tivemos certeza que pegamos TUDO remoto.
     // Senão poderíamos apagar local de keys que existem remoto mas não vieram.
     const keysToRemove = [];
-    if (completou) {
+    if (completou && limparLocal) {
       for (let i = 0; i < window.storage.length; i++) {
         const key = window.storage.key(i);
         if (!key || !key.startsWith('erp:')) continue;
@@ -785,6 +863,8 @@ export async function hydrateFromSupabase() {
         // Audit não vem mais no hydrate (excluída acima); não apagar o que está local.
         if (key.startsWith('erp:audit:')) continue;
         if (key === 'erp:seeded' || key === 'erp:lastBackup') continue;
+        // Criada/alterada depois que a consulta saiu: a foto não sabe dela.
+        if (mudouDepois(key)) continue;
         // Não apaga chave ainda pendente de envio (feita offline) — senão um
         // registro de ponto criado sem rede seria perdido antes de sincronizar.
         if (!remoteKeys.has(key) && !outboxHasKey(key)) keysToRemove.push(key);
@@ -798,6 +878,9 @@ export async function hydrateFromSupabase() {
       // que uma versao stripada do servidor apague o password do device).
       allRows.forEach((row) => {
         if (isSensitive(row.key)) return;
+        // Mudou (Realtime ou gravação local) depois que a consulta saiu: o
+        // local é mais novo que a foto do servidor.
+        if (mudouDepois(row.key)) return;
         let value = row.value;
         // erp:user:* sobe SEM segredos (sanitizeForSync remove password,
         // sessionTokenHash, 2FA). Ao hidratar, preserva esses campos da cópia
@@ -816,6 +899,9 @@ export async function hydrateFromSupabase() {
         }
         window.storage.setItem(row.key, JSON.stringify(value));
       });
+    }
+    if (completou) {
+      _ultimoHydrate = { userId: authUserId, companyId, role: getCurrentMember()?.role || null, em: Date.now() };
     }
     console.log(`Sync completo: ${allRows.length} chaves do Supabase em ${pagesFetched} página(s), ${keysToRemove.length} removidas localmente${completou ? '' : ' [INCOMPLETO — cleanup pulado por segurança]'}`);
     return true;
@@ -932,6 +1018,7 @@ if (typeof window !== 'undefined') {
 }
 
 export function syncToSupabase(key, value) {
+  _marcarTocada(key); // o DB.set já gravou no local — um hydrate em curso não pode sobrescrever
   if (!supabase) return;
   if (isDemoMode()) return; // demo: nunca escreve no Supabase real
   if (isSensitive(key)) return;
@@ -960,6 +1047,7 @@ export function syncToSupabase(key, value) {
 
 // ─── Delete unitário (chamado por DB.delete) ─────────────────────────────────
 export function deleteFromSupabase(key) {
+  _marcarTocada(key); // idem: a exclusão local é mais nova que qualquer foto em trânsito
   if (!supabase) return;
   if (isDemoMode()) return; // demo: nunca deleta no Supabase real
   if (!canWriteKey(key)) return; // role sem permissão de gravar essa chave → no-op
@@ -1437,13 +1525,22 @@ export function subscribeToChanges(onDataChanged) {
       { event: '*', schema: 'public', table: 'kv_store', filter: `company_id=eq.${companyId}` },
       (payload) => {
         const { eventType, new: newRow, old: oldRow } = payload;
+        // Auditoria não entra no aparelho: o painel busca do Supabase ao abrir
+        // (fetchAuditLog). Gravar cada linha que chegava pelo Realtime fazia
+        // TODO admin/gerente acumular a auditoria de todos os aparelhos no
+        // localStorage, sem limpeza — milhares de chaves deixando cada DB.list
+        // mais lento e empurrando o storage para o limite de cota.
+        const chave = newRow?.key || oldRow?.key || '';
+        if (chave.startsWith('erp:audit:')) return;
         if (eventType === 'INSERT' || eventType === 'UPDATE') {
           if (newRow && newRow.key) {
+            _marcarTocada(newRow.key);
             window.storage.setItem(newRow.key, JSON.stringify(newRow.value));
             if (onDataChanged) onDataChanged({ eventType, key: newRow.key });
           }
         } else if (eventType === 'DELETE') {
           if (oldRow && oldRow.key) {
+            _marcarTocada(oldRow.key);
             window.storage.removeItem(oldRow.key);
             if (onDataChanged) onDataChanged({ eventType, key: oldRow.key });
           }

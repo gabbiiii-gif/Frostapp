@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, useLayoutEffect, Com
 // moram em ./DashboardCharts.jsx e o BlurText (motion) em ./BlurText.jsx,
 // ambos via React.lazy; as animações simples usam Web Animations API, CSS e
 // requestAnimationFrame. Ver src/lib/prefetch.js (pré-carga durante o login).
-import { supabase, hydrateFromSupabase, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, masterEvolution, adminEvolution, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig } from "./supabase.js";
+import { supabase, hydrateFromSupabase, hydrateRecenteDe, fatoresMfaDaSessao, flushOutbox, outboxSize, onOutboxChange, uploadAllToSupabase, syncToSupabase, deleteFromSupabase, subscribeToChanges, uploadFotoOS, deleteFotoOS, uploadAssinaturaOS, signInWithFallback, signOutSupabase, ensureMemberLoaded, getCurrentMember, upsertMasterRemote, masterCountRemote, lookupMasterByEmail, listMastersAuthenticated, masterLoginViaEdge, masterCreateCompany, masterListCompanies, masterUpdateCompany, masterDeleteCompany, masterEvolution, adminEvolution, adminCreateUser, passwordReasonToPtBr, requestPasswordReset, updatePasswordWithRecoveryToken, isRecoveryUrl, isInviteUrl, clearRecoveryUrl, consumeAuthHashSession, sendFirstLoginOTP, verifyFirstLoginOTP, listMfaFactors, enrollMfaTotp, challengeMfa, verifyMfaChallenge, challengeAndVerifyMfa, unenrollMfa, adminRemoveUserMfa, notifyOsCreated, fetchAuditLog, getLembreteConfig, saveLembreteConfig } from "./supabase.js";
 import { isDemoMode, DEMO_COMPANY_ID, markDemoStarted, resetDemoData, buildDemoUser, recordDemoLead } from "./demo.js";
 import { mesesAFechar, montarFechamento, fechamentoTemMovimento } from "./lib/fechamento-mensal.js";
 import { computePaymentState, totaisFinanceiro } from "./lib/pagamentos.js";
@@ -14,7 +14,7 @@ import Aurora from "./Aurora.jsx";
 // BlurText é carregado sob demanda — ver o wrapper `BlurText` nos helpers do Dashboard.
 import { PasswordInput } from "./PasswordInput.jsx";
 import SignaturePad from "./SignaturePad.jsx";
-import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength, passwordChecklist, splitParcelas, addMonthsKeepDay, monthKey, vencimentoNoMes, mesesAMaterializar, matchDigitos, osTecnicos, osTecnicoNomes, osTemTecnico, camposTecnicos } from "./utils.js";
+import { validateOSProposal, buildOSWhatsAppResumo, isModuleEnabledForCompany, calcDescontoOS, validatePasswordStrength, passwordChecklist, splitParcelas, addMonthsKeepDay, monthKey, vencimentoNoMes, mesesAMaterializar, matchDigitos, osTecnicos, osTecnicoNomes, osTemTecnico, camposTecnicos, recAtualizadoPelaOS } from "./utils.js";
 // Biometria: APK pode logar com Touch ID / Face ID / digital
 import { isNative, isBiometricAvailable, isBiometricEnabled, authenticateBiometric, enableBiometricLogin, getBiometricCreds, disableBiometricLogin, requestNotifPermission, showNotification, scheduleNotification, cancelNotification, sendWhatsAppMessage, sendWhatsAppMedia, subscribeWebPush, unsubscribeWebPush, sendServerPush } from "./platform.js";
 // Abertura de documento imprimível + geração de PDF client-side. Moram em
@@ -549,6 +549,37 @@ function recordAudit(action, key, value, prevValue) {
   } catch { /* não-crítico */ }
 }
 
+// ─── Auditoria local: só as entradas mais recentes ──────────────────────────
+// Com Supabase, o painel de Auditoria busca do servidor (fetchAuditLog) e o
+// local só complementa com o que acabou de ser criado neste aparelho. Antes,
+// todo registro ficava no localStorage para sempre (e os de outros aparelhos
+// chegavam pelo Realtime): milhares de chaves deixando cada DB.list mais lento
+// e enchendo a cota. Mantém as `manter` mais novas — a chave embute o Date.now()
+// (aud_<ms>_xxx), então ordenar a chave é ordenar no tempo. O que ainda não
+// subiu está na outbox com o valor junto: podar não perde envio. Sem Supabase
+// (app local puro) o storage é a única cópia — não poda.
+function podarAuditoriaLocal(manter = 200) {
+  if (!supabase) return;
+  try {
+    const chaves = [];
+    for (let i = 0; i < window.storage.length; i++) {
+      const k = window.storage.key(i);
+      if (k && k.startsWith("erp:audit:")) chaves.push(k);
+    }
+    if (chaves.length <= manter) return;
+    chaves.sort();
+    const excesso = chaves.slice(0, chaves.length - manter);
+    // Em lotes: na primeira vez podem ser milhares — não trava a tela de login.
+    const lote = () => {
+      excesso.splice(0, 1000).forEach((k) => {
+        try { window.storage.removeItem(k); } catch { /* ignora */ }
+      });
+      if (excesso.length) setTimeout(lote, 0);
+    };
+    lote();
+  } catch { /* poda é otimização — nunca bloqueia o boot */ }
+}
+
 const DB = {
   get(key) {
     try {
@@ -735,7 +766,9 @@ function ensureCompanyMigration() {
     const keysToFix = [];
     for (let i = 0; i < len; i++) {
       const key = window.storage.key(i);
-      if (key && isScopedKey(key)) keysToFix.push(key);
+      // Auditoria nasce sempre com companyId (recordAudit exige empresa ativa):
+      // pular evita um JSON.parse por entrada a cada boot.
+      if (key && isScopedKey(key) && !key.startsWith("erp:audit:")) keysToFix.push(key);
     }
     keysToFix.forEach((k) => {
       const val = DB.get(k);
@@ -1098,13 +1131,15 @@ function getNextNumber(prefix, items, dbPrefix = null) {
 // "REC" e status "pendente".
 //
 // Chamado em: changeStatus('finalizado'), aprovação do admin no review,
-// e na edição de OS já finalizada (para refletir mudança de valor).
-function syncOSToFinance(os) {
+// na edição de OS já finalizada (para refletir mudança de valor) e no backfill
+// do Financeiro — que passa `financeAll` já lido, pra não varrer o storage
+// inteiro uma vez por OS.
+function syncOSToFinance(os, financeAll = null) {
   if (!os || !os.id) return;
   const valor = Number(os.valor) || 0;
   if (valor <= 0) return; // sem valor, nada a registrar no Financeiro
 
-  const all = DB.list("erp:finance:");
+  const all = financeAll || DB.list("erp:finance:");
   // Todos os lançamentos já ligados a esta OS. Em condição normal é 0 ou 1,
   // mas race entre eventos (changeStatus + aprovação admin + edição) ou cache
   // local stale (logo após hydrate / multi-device) podia criar 2+ REC para a
@@ -1132,22 +1167,18 @@ function syncOSToFinance(os) {
       DB.delete("erp:finance:" + matches[i].id);
     }
     // Mantém status — admin pode ter marcado como "pago" manualmente.
-    // Estratégia balanceada:
+    // Estratégia balanceada (regras em recAtualizadoPelaOS, src/utils.js):
     // - descricao + categoria: sempre re-sincronizadas (informativas; refletem
-    //   reclassificação de tipo da OS e correção de clienteNome). Backfill
-    //   continua idempotente self-healing.
+    //   reclassificação de tipo da OS e correção de clienteNome).
     // - valor + data: preservados se REC pago — admin pode ter ajustado
     //   juros/desconto/data-de-pagamento manualmente. Em pendente, atualiza.
-    const isPago = primary.status === "pago";
-    const updated = {
-      ...primary,
-      descricao,
-      categoria,
-      valor: isPago ? primary.valor : valor,
-      data: isPago ? primary.data : dataIso,
-      updatedAt: new Date().toISOString(),
-    };
-    DB.set("erp:finance:" + updated.id, updated);
+    // Só grava quando algo mudou: o backfill roda em toda abertura do
+    // Financeiro e regravar RECs idênticos gerava upsert + auditoria + evento
+    // Realtime por lançamento (26 mil linhas de auditoria até out/2026).
+    const updated = recAtualizadoPelaOS(primary, { descricao, categoria, valor, data: os.dataConclusao || null });
+    if (updated) {
+      DB.set("erp:finance:" + updated.id, { ...updated, updatedAt: new Date().toISOString() });
+    }
     return;
   }
 
@@ -3059,6 +3090,12 @@ function aguardarBoot() {
   return _bootPromise.catch(() => {});
 }
 
+// Login que aproveitou o hydrate do boot (mesmo usuário, minutos antes): em vez
+// de baixar tudo de novo antes de entrar, a sincronização roda em segundo plano
+// logo depois que o Dashboard abre (efeito do Realtime no App). Cobre o que
+// mudou no servidor enquanto a pessoa digitava a senha.
+let _hydrateAposLogin = false;
+
 function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassword }) {
   // Enquanto a pessoa digita, baixa em idle o que o Dashboard usa logo depois
   // do login (gráficos, BlurText) — saíram do bundle inicial.
@@ -3236,8 +3273,19 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
         setLoading(false);
         return;
       }
-      // Após auth, sincroniza dados da empresa (RLS agora deixa)
-      await hydrateFromSupabase();
+      // Após auth, sincroniza dados da empresa (RLS agora deixa). Se o boot
+      // acabou de hidratar com ESTE mesmo usuário (sessão guardada no aparelho),
+      // mesma empresa e mesmo papel, o cache local já é o que a RLS devolveria:
+      // entra direto e completa em segundo plano. Antes o login fazia os dois
+      // hydrates em sequência (log de 2026-10-27: ~18 s num Android). Usuário
+      // diferente ou hydrate do boot velho/falho → espera o hydrate completo,
+      // que também re-escopa o cache para o papel de quem entrou.
+      _hydrateAposLogin = false;
+      if (hydrateRecenteDe(authResp.session?.user?.id, authResp.member?.company_id, authResp.member?.role)) {
+        _hydrateAposLogin = true;
+      } else {
+        await hydrateFromSupabase();
+      }
 
       const users = DB.list("erp:user:");
       let found = null;
@@ -3333,8 +3381,9 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
           setLoading(false);
           return;
         }
-        // Fase 2.5: MFA via Supabase built-in.
-        const factorsRes = await listMfaFactors();
+        // Fase 2.5: MFA via Supabase built-in. Os fatores vêm da sessão que o
+        // login acabou de receber — sem a ida a /auth/v1/user (~450 ms).
+        const factorsRes = authResp.session?.user ? fatoresMfaDaSessao(authResp.session) : await listMfaFactors();
         const verifiedTotp = (factorsRes.totp || []).find((f) => f.status === "verified");
         const requireMfa = !!memberState?.company_require_mfa;
         const hadLegacy = !!(found.twoFactorEnabled || found.twoFactorSecret);
@@ -6186,10 +6235,14 @@ function FinanceModule({ user, addToast }) {
     // Backfill: garante que toda OS já finalizada tenha sua transação no Financeiro.
     // Caso o app tenha sido aberto antes da integração estar viva, preenchemos
     // retroativamente. syncOSToFinance é idempotente, então rodar é seguro.
+    // Lê os lançamentos UMA vez para o backfill inteiro (cada OS só olha os
+    // RECs com o próprio osId, então a lista não fica "velha" entre uma OS e
+    // outra; o número de REC novo é recalculado do storage em getNextNumber).
     const finalizedOS = DB.list("erp:os:").filter(
       (o) => ["finalizado", "concluido"].includes(o.status)
     );
-    finalizedOS.forEach(syncOSToFinance);
+    const financeAll = DB.list("erp:finance:");
+    finalizedOS.forEach((o) => syncOSToFinance(o, financeAll));
     // Materializa as despesas fixas recorrentes dos meses vencidos até hoje.
     // Idempotente: reabrir o Financeiro não duplica lançamentos.
     materializeRecurringExpenses();
@@ -17390,6 +17443,9 @@ export default function App() {
       return;
     }
 
+    // Antes de tudo: tira do aparelho a auditoria acumulada (fica no Supabase).
+    podarAuditoriaLocal();
+
     _bootPromise = ensureMemberLoaded().then(() => flushOutbox()).then(() => hydrateFromSupabase()).then(async (hydrated) => {
       // Inicialização: popula dados demo se for o primeiro acesso (sem usuários)
       await seedDatabase();
@@ -17535,6 +17591,18 @@ export default function App() {
       if (realtimeTimer) clearTimeout(realtimeTimer);
       realtimeTimer = setTimeout(() => { loadAllData(); }, 300);
     });
+    // Login que aproveitou o hydrate do boot: completa a sincronização agora,
+    // com o Dashboard já na tela e o canal Realtime abrindo (1 s de folga pra
+    // não disputar a primeira pintura). Sem limpeza do local — o boot já
+    // limpou — e chave que mudar no meio do caminho fica com a versão mais nova
+    // (ver _tocadas em src/supabase.js). Fora do cleanup de propósito: se o
+    // `user` mudar nesse 1 s, a sincronização ainda precisa acontecer.
+    if (_hydrateAposLogin) {
+      _hydrateAposLogin = false;
+      setTimeout(() => {
+        hydrateFromSupabase({ limparLocal: false }).then((ok) => { if (ok) loadAllData(); });
+      }, 1000);
+    }
     return () => {
       if (realtimeTimer) clearTimeout(realtimeTimer);
       unsubscribe();

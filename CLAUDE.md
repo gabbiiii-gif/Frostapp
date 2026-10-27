@@ -464,12 +464,14 @@ no detalhe da demanda no painel interno (`EscolaModule`).
 
 The app syncs its `window.storage` key-value data to a Supabase table `kv_store` (columns: `key`, `value`, `updated_at`). Requires env vars `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. If absent, Supabase is disabled and the app runs fully local.
 
-- `hydrateFromSupabase()` — called on app load; Supabase is source of truth, overwrites local data
+- `hydrateFromSupabase({ limparLocal })` — boot + login; Supabase is source of truth, overwrites local data. Returns `false` without touching local data when there is no Supabase session (RLS would return zero rows and the cleanup would wipe the cache). Skips `erp:audit:*` and `erp:autoBackup:*`. The login skips its own hydrate when the boot just hydrated for the same user/company/role (`hydrateRecenteDe`, 5 min) and runs a background `limparLocal: false` hydrate after the Dashboard opens. A key changed after the query left (Realtime event or local write) is never overwritten by the response (`_tocadas`, tested in `src/supabase.hydrate.test.js`).
 - `syncToSupabase(key, value)` — called on every `DB.set()` to keep remote in sync
 - `deleteFromSupabase(key)` — called on every `DB.delete()`
 - `uploadAllToSupabase()` — bulk upsert (used in backup/restore)
-- `subscribeToChanges(cb)` — Realtime listener; propagates changes from other devices/tabs
-- Keys prefixed with `erp:user:` are never synced (sensitive local-only data)
+- `subscribeToChanges(cb)` — Realtime listener; propagates changes from other devices/tabs. Ignores `erp:audit:*`: audit lives in Supabase (the audit panel fetches it on demand) and the boot prunes local audit to the newest 200 (`podarAuditoriaLocal`).
+- `erp:autoBackup:*` and `master:user:*` are never synced; `erp:user:*` syncs without secrets (`sanitizeForSync` strips password/session/2FA fields).
+- **`kv_store` RLS**: policies use `(select private.user_company_id())` / `(select private.user_role())` (InitPlan, evaluated once per query) with the per-role prefix rule inline. Never call a `SECURITY DEFINER` function per row in a policy on this table — that made each hydrate page take ~3 s in the DB (login ~18 s on a phone) until 2026-10-27. See `docs/wiki/decisions/011-carga-pos-login.md`.
+- **Don't re-save unchanged records in loops** (backfills, "self-heal" passes): every `DB.set` of an audited key writes an audit row, an upsert and a Realtime event on every connected device. The Financeiro backfill did this on every module open and produced 26k audit rows.
 
 ## Animation & Visual Components
 

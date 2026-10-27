@@ -1,9 +1,10 @@
 ---
 title: Financeiro
 type: module
-updated: 2026-09-23
+updated: 2026-10-27
 sources: []
 related:
+  - ../decisions/011-carga-pos-login.md
   - ../concepts/db-layer.md
   - ./process.md
   - ./dashboard.md
@@ -28,11 +29,18 @@ Schema da transação: `{id, numero, descricao, valor, tipo (receita|despesa), c
 
 ## Backfill OS → Finance
 
-Em todo `loadTransactions`:
-1. Lista OS com `status ∈ {finalizado, concluido}`
-2. Roda `syncOSToFinance(os)` (idempotente — line 982)
+Em todo `loadTransactions` (abertura do módulo e depois de cada salvar/excluir):
+1. Lista OS com `status ∈ {finalizado, concluido}` e lê `erp:finance:` **uma vez**
+2. Roda `syncOSToFinance(os, financeAll)` para cada uma (idempotente)
 
 Garante que app aberto antes da integração viva ainda popule transações retroativamente. **Não bypassar** — qualquer fluxo de finalização de OS deve produzir transação via `syncOSToFinance`.
+
+**Só grava o que mudou (2026-10-27).** `recAtualizadoPelaOS` (`src/utils.js`, testado) devolve `null`
+quando o REC já reflete a OS. Antes o backfill regravava os ~70 RECs a cada abertura, com `updatedAt`
+novo: 70 upserts + 70 auditorias + 70 eventos Realtime por abertura — 24,8 mil auditorias "finance update"
+de maio a outubro, o que deixava a carga pós-login lenta ([[../decisions/011-carga-pos-login]]).
+Regras: descrição/categoria sempre acompanham a OS; REC **pago** mantém valor e data; OS sem
+`dataConclusao` mantém a data já gravada (antes virava "agora" a cada abertura).
 
 ## Totais (núcleo do módulo)
 

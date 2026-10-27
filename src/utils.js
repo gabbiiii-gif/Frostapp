@@ -412,3 +412,26 @@ export function mesesAMaterializar(mesInicio, mesAtual, mesesGerados = []) {
   }
   return out;
 }
+
+// Lançamento REC ligado a uma OS: devolve o REC atualizado pela OS, ou null
+// quando ele já está em dia. O syncOSToFinance roda no backfill de TODA
+// abertura do Financeiro; gravando sem checar, ele regravava os ~70 RECs
+// idênticos a cada abertura (só com updatedAt novo) — 70 upserts, 70 linhas
+// de auditoria e 70 eventos Realtime nos outros aparelhos. Foi isso que encheu
+// o kv_store com 26 mil registros de auditoria.
+// Regras preservadas: descrição e categoria sempre acompanham a OS; REC "pago"
+// mantém valor e data (o admin pode ter ajustado juros/desconto/data); OS sem
+// data de conclusão mantém a data já gravada (antes virava "agora" a cada
+// abertura e o lançamento nunca envelhecia). Helper puro — testado em utils.test.js.
+export function recAtualizadoPelaOS(rec, { descricao, categoria, valor, data }) {
+  if (!rec) return null;
+  const pago = rec.status === "pago";
+  const alvo = {
+    descricao,
+    categoria,
+    valor: pago ? rec.valor : valor,
+    data: pago || !data ? rec.data : data,
+  };
+  const mudou = Object.keys(alvo).some((campo) => alvo[campo] !== rec[campo]);
+  return mudou ? { ...rec, ...alvo } : null;
+}
