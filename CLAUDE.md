@@ -16,7 +16,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `npm run lint` — ESLint em `src/` e `api/`
 - `npm run sb:login` — autentica o Supabase CLI (interativo, abre o browser). Necessário uma vez por máquina antes de qualquer deploy de Edge Function.
 - `npm run deploy:webhook` — deploy da `whatsapp-webhook` (project ref já embutido, `--no-verify-jwt`)
-- `npm run deploy:fn -- <nome>` — deploy de qualquer outra Edge Function
+- `npm run deploy:fn -- <nome>` — deploy de Edge Function que **exige JWT** (`verify_jwt=true`): `admin-create-user`, `admin-remove-user-mfa`, `first-login-otp-send`, `first-login-otp-verify`, `notify-os-created`, `notify-escola-event`, `frost-notify-approval`, `lembrete-teste`, `relatorio-nl`, `relatorio-whatsapp`, `send-push`, `groq-check`
+- `npm run deploy:fn:sem-jwt -- <nome>` — deploy de Edge Function que roda **sem JWT** (`verify_jwt=false`): `master-companies`, `master-login`, `lembrete-dispatch`, `pos-venda-dispatch`, `send-email`, `evolution-manage`, `demo-lead`, `migrate-login`, `frost-*` (exceto `frost-notify-approval`). ⚠️ Não há `supabase/config.toml`: publicar uma dessas com `deploy:fn` liga a verificação de JWT e quebra quem a chama (painel Master, pg_cron). Lista conferida no projeto em 2026-10-27.
+- `npm run backup:storage -- <pasta>` — baixa todos os arquivos do Storage (o `supabase db dump` não leva arquivos). Precisa de `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` no ambiente; ver `scripts/backup-storage.mjs`
 
 > O CLI do Supabase é devDependency do projeto (`supabase`), então não precisa de instalação global — `npm ci` já traz.
 > Os scripts de deploy usam `--use-api` (bundle no servidor): sem isso o CLI exige Docker Desktop rodando na máquina.

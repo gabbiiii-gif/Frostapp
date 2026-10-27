@@ -14,6 +14,8 @@
     "sb:login": "supabase login",
     "deploy:webhook": "supabase functions deploy whatsapp-webhook --project-ref rbwzhglsztmjvwrcydcy --no-verify-jwt --use-api",
     "deploy:fn": "supabase functions deploy --project-ref rbwzhglsztmjvwrcydcy --use-api",
+    "deploy:fn:sem-jwt": "supabase functions deploy --project-ref rbwzhglsztmjvwrcydcy --no-verify-jwt --use-api",
+    "backup:storage": "node scripts/backup-storage.mjs",
     "android:sync": "vite build && cap sync android",
     "android:open": "cap open android",
     "android:run": "vite build && cap sync android && cap run android",

@@ -46,6 +46,8 @@ escolher a data depois.
    ```
    (Pegar a connection string exata em **Connect → Session pooler** no dashboard.) Guardar os 3 arquivos
    fora do computador. O `data.sql` leva os usuários do `auth.users` com as senhas (hash) preservadas.
+   Os **arquivos** do Storage não vão no dump: `npm run backup:storage -- <pasta>` (script
+   `scripts/backup-storage.mjs`, com `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` no ambiente).
 3. **Valores dos segredos das Edge Functions** à mão — o dashboard não mostra o valor depois de salvo:
    `ANTHROPIC_API_KEY`, `GROQ_API_KEY`, `RESEND_API_KEY`, `EVOLUTION_APIKEY`, `EVOLUTION_GLOBAL_KEY`,
    `EVOLUTION_API_URL`, `INTERNAL_FUNCTION_SECRET`, `WEBHOOK_TOKEN`, `DISPATCH_KEY`, `DEBOUNCE_SECONDS`,
@@ -110,11 +112,9 @@ escolher a data depois.
 8. Recriar os segredos do Vault e os 2 jobs de cron com a URL nova.
 9. Reativar a publicação do Realtime nas 5 tabelas.
 10. Auth no dashboard: Site URL, Redirect URLs, templates, SMTP, MFA.
-11. Edge Functions: `npx supabase functions deploy --project-ref <novo-ref> --use-api` (todas) +
-    `npx supabase secrets set --project-ref <novo-ref> CHAVE=valor …`. Funções com `verify_jwt=false` no
-    projeto atual (`migrate-login`, `master-login`, `pos-venda-dispatch`, `whatsapp-webhook`, `send-email`,
-    `frost-*`, `lembrete-dispatch`, `master-companies`, `evolution-manage`, `demo-lead`) precisam do
-    `--no-verify-jwt`.
+11. Edge Functions: trocar o `project-ref` dos scripts `deploy:*` do `package.json` e publicar uma a uma
+    com `deploy:fn` ou `deploy:fn:sem-jwt`, conforme a lista do `CLAUDE.md` (não há `config.toml`:
+    o modo de JWT vem do comando). Depois, `npx supabase secrets set --project-ref <novo-ref> CHAVE=valor …`.
 12. Vercel: trocar as envs (app e `api/`), redeploy. Atualizar o `project-ref` dos scripts `deploy:*` do
     `package.json`.
 13. Evolution: webhook → URL nova da `whatsapp-webhook` (com o `WEBHOOK_TOKEN` novo, se mudou).

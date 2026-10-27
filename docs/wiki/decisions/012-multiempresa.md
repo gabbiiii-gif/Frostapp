@@ -82,8 +82,10 @@ Isolamento de leitura e escrita: **correto**. O problema é outro: chaves sem id
 
 - [ ] App novo publicado e em uso em **todos** os aparelhos (o PWA troca de versão na 2ª abertura). Conferir
       nos logs de borda: nenhum `kv_store?on_conflict=key` nas últimas 48 h.
-- [ ] Publicar as Edge Functions alteradas: `npm run deploy:webhook` e
-      `npm run deploy:fn -- master-companies` (e `lembrete-dispatch`, `lembrete-teste`).
+- [ ] Publicar as Edge Functions alteradas, cada uma com o modo de JWT que já tem no projeto:
+      `npm run deploy:webhook`, `npm run deploy:fn:sem-jwt -- master-companies`,
+      `npm run deploy:fn:sem-jwt -- lembrete-dispatch` e `npm run deploy:fn -- lembrete-teste`.
+      (Com `deploy:fn` o `master-companies` passaria a exigir JWT e o painel Master quebraria.)
 - [ ] **Fase 2:** trocar a chave primária para `(company_id, key)` (bloco no fim da migração de fase 0).
       Sem ela, a 2ª empresa ainda esbarra na PK antiga.
 - [ ] Assinar o plano **Pro** do Supabase (o Free não tem backup automático) — ver [[013-migracao-sao-paulo]].
