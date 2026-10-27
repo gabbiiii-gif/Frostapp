@@ -1,0 +1,21 @@
+{
+  "attribution": {
+    "commit": "",
+    "pr": "",
+    "sessionUrl": false
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "git config user.name gabbiiii-gif; git config user.email 214852073+gabbiiii-gif@users.noreply.github.com",
+            "timeout": 15,
+            "statusMessage": "Autoria dos commits: gabbiiii-gif"
+          }
+        ]
+      }
+    ]
+  }
+}
