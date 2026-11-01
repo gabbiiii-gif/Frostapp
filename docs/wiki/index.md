@@ -33,6 +33,7 @@ Sempre lido primeiro em qualquer query. Mantenha sub-200 linhas.
 - [Landing — scroll + 3D](concepts/landing-scroll-3d.md) — camadas z, floco atravessando cartão, data-dim, ScrollStack vanilla
 - [Modo Demonstração](concepts/demo-mode.md) — demo interativa da landing (?demo=1), seed local isolado, captura de lead
 - [Fechamento Mensal](modules/dashboard.md#fechamento-mensal) — mês encerrado vira `erp:fechamento:<AAAA-MM>`, consultável no Relatórios
+- [Design System](concepts/design-system.md) — tokens, DM Sans, ícones e componentes base extraídos para o DS publicado; achados de contraste e tokens duplicados
 
 ## Fluxos
 

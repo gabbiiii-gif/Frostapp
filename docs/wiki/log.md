@@ -370,3 +370,9 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - código: src/mobile/ (chunk lazy próprio), renderModulo e API_MOBILE no App.jsx, useEhCelular, ErroMobile + layout clássico
 - verificado: 440 testes (21 novos em src/mobile/dados.test.js), build, prints a 390px (claro/escuro, todos os fluxos), print 1366px pixel a pixel igual ao anterior, botão voltar
 - touched: modules/mobile.md (nova), index.md
+
+## [2026-11-01] ingest | Design System extraído do código
+- source: src/index.css, src/constants.js, src/App.jsx (primitivos base), src/FrostIcons.jsx, public/ (logos, fontes)
+- touched: index.md
+- new pages: concepts/design-system.md
+- artefato: Design System publicado (https://claude.ai/artifact/JbifYmfUkvzk9NKQxEMep6)
