@@ -3290,6 +3290,9 @@ function LoginScreen({ onLogin, theme, setTheme, onSwitchToMaster, onForgotPassw
       // diferente ou hydrate do boot velho/falho → espera o hydrate completo,
       // que também re-escopa o cache para o papel de quem entrou.
       _hydrateAposLogin = false;
+      // Fila de escritas que falharam sem sessão (expirada/projeto pausado):
+      // sobe antes do hydrate, para o servidor já devolver a versão nova.
+      await flushOutbox();
       if (hydrateRecenteDe(authResp.session?.user?.id, authResp.member?.company_id, authResp.member?.role)) {
         _hydrateAposLogin = true;
       } else {

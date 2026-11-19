@@ -69,3 +69,33 @@ describe('syncToSupabase', () => {
     expect(estado.conflitos).toEqual(['company_id,key']);
   });
 });
+
+// Sessão expirada (refresh token inválido, projeto pausado e restaurado): a
+// requisição sai como `anon`, que não tem GRANT no kv_store → HTTP 401
+// "permission denied". Isso não é RLS: a escrita tem que esperar o login.
+describe('escrita sem sessão (401)', () => {
+  const negado = (status) => ({ status, error: { code: '42501', message: 'permission denied for table kv_store' } });
+
+  it('401 fica na outbox; 403 (RLS de verdade) é descartado', async () => {
+    const sb = await carregar();
+    estado.respostas = [negado(401), negado(403)];
+    sb.syncToSupabase('erp:client:1', { nome: 'A' });
+    await new Promise((r) => setTimeout(r, 0));
+    sb.syncToSupabase('erp:client:2', { nome: 'B' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(sb.outboxHasKey('erp:client:1')).toBe(true);
+    expect(sb.outboxHasKey('erp:client:2')).toBe(false);
+  });
+
+  it('flushOutbox mantém na fila enquanto der 401 e esvazia quando a sessão volta', async () => {
+    const sb = await carregar();
+    estado.respostas = [negado(401)];
+    sb.syncToSupabase('erp:os:1', { status: 'aberto' });
+    await new Promise((r) => setTimeout(r, 0));
+    estado.respostas = [negado(401)];
+    await sb.flushOutbox();
+    expect(sb.outboxSize()).toBe(1);
+    await sb.flushOutbox(); // resposta padrão: sucesso
+    expect(sb.outboxSize()).toBe(0);
+  });
+});

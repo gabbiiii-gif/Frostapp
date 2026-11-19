@@ -162,6 +162,19 @@ function isPermissionError(error) {
   return /row-level security|permission denied/i.test(error.message || '');
 }
 
+// Erro de permissão que PODE ser descartado (não vai para a outbox). A exceção
+// é o HTTP 401: o PostgREST responde 401 quando a requisição foi como `anon` —
+// a sessão expirou ou sumiu (refresh token inválido, projeto pausado e
+// restaurado) mas o membro ainda está em cache. O `anon` não tem GRANT no
+// kv_store, então a gravação falha com "permission denied" — e antes era
+// descartada, perdendo o que o usuário fez até logar de novo. Com 401 a
+// escrita fica na fila e sobe no próximo login (flushOutbox).
+export function erroDescartavel(resp) {
+  if (!resp?.error) return false;
+  if (resp.status === 401) return false;
+  return isPermissionError(resp.error);
+}
+
 // ─── Auth: login com fallback para migração de PBKDF2 legado ────────────────
 // Fluxo: tenta signInWithPassword. Se 401, chama Edge Function migrate-login
 // que valida contra o hash PBKDF2 antigo e cria o user em auth.users. Depois retenta.
@@ -881,6 +894,9 @@ export async function hydrateFromSupabase({ limparLocal = true } = {}) {
         // Mudou (Realtime ou gravação local) depois que a consulta saiu: o
         // local é mais novo que a foto do servidor.
         if (mudouDepois(row.key)) return;
+        // Ainda na fila de envio: a versão local é a mais nova e vai subir no
+        // flush. Sobrescrever aqui mostraria o dado velho até o próximo boot.
+        if (outboxHasKey(row.key)) return;
         let value = row.value;
         // erp:user:* sobe SEM segredos (sanitizeForSync remove password,
         // sessionTokenHash, 2FA). Ao hidratar, preserva esses campos da cópia
@@ -1017,12 +1033,12 @@ export async function flushOutbox() {
     if (!canWriteKey(e.key)) continue;
     try {
       if (e.op === 'del') {
-        const { error } = await supabase.from('kv_store').delete().eq('key', e.key).eq('company_id', companyId);
-        if (error && !isPermissionError(error)) remaining.push(e);
+        const resp = await supabase.from('kv_store').delete().eq('key', e.key).eq('company_id', companyId);
+        if (resp.error && !erroDescartavel(resp)) remaining.push(e);
       } else {
         const safeValue = sanitizeForSync(e.key, e.value);
-        const { error } = await upsertKv({ key: e.key, value: safeValue, company_id: companyId, updated_at: new Date().toISOString() });
-        if (error && !isPermissionError(error)) remaining.push(e);
+        const resp = await upsertKv({ key: e.key, value: safeValue, company_id: companyId, updated_at: new Date().toISOString() });
+        if (resp.error && !erroDescartavel(resp)) remaining.push(e);
       }
     } catch { remaining.push(e); }
   }
@@ -1052,11 +1068,12 @@ export function syncToSupabase(key, value) {
   }
   const safeValue = sanitizeForSync(key, value);
   upsertKv({ key, value: safeValue, company_id: companyId, updated_at: new Date().toISOString() })
-    .then(({ error }) => {
-      if (error) {
-        console.warn('Sync error:', key, error.message);
+    .then((resp) => {
+      if (resp.error) {
+        console.warn('Sync error:', key, resp.error.message);
         // Erro de RLS/permissão não some em retry → descarta (não vira poison-pill).
-        if (!isPermissionError(error)) enqueueOutbox('set', key, value);
+        // Sem sessão (401) não é RLS: fica na fila para depois do login.
+        if (!erroDescartavel(resp)) enqueueOutbox('set', key, value);
       }
     }, () => enqueueOutbox('set', key, value)); // rejeição (rede) → fila
 }
@@ -1078,10 +1095,10 @@ export function deleteFromSupabase(key) {
     .delete()
     .eq('key', key)
     .eq('company_id', companyId)
-    .then(({ error }) => {
-      if (error) {
-        console.warn('Delete sync error:', key, error.message);
-        if (!isPermissionError(error)) enqueueOutbox('del', key);
+    .then((resp) => {
+      if (resp.error) {
+        console.warn('Delete sync error:', key, resp.error.message);
+        if (!erroDescartavel(resp)) enqueueOutbox('del', key);
       }
     }, () => enqueueOutbox('del', key));
 }

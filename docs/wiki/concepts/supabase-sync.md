@@ -1,7 +1,7 @@
 ---
 title: Supabase Sync (auth, kv_store, RLS, Realtime, Storage)
 type: concept
-updated: 2026-10-27
+updated: 2026-11-19
 sources: []
 related:
   - ./db-layer.md
@@ -202,6 +202,26 @@ dessa tabela — ver [[../decisions/011-carga-pos-login]] e `supabase/migrations
   cada admin/gerente, sem limpeza.
 - **Escopo do channel = companyId**: troca de empresa → unsub + nova `subscribeToChanges`.
 - **`isSensitive` é por chave inteira; `sanitizeForSync` é por campo dentro do valor.** Não confundir.
+
+## Escrita sem sessão (401) e projeto pausado
+
+Incidente de 2026-11-19: o projeto Supabase ficou **pausado de 31/10 a 19/11** (nenhuma escrita em
+`kv_store` nesse período; os logs só existem a partir da restauração, com 3 reinícios do Postgres em
+~30 s). Na volta, o refresh token guardado no aparelho não existia mais, mas o membro seguia em cache
+— então o app gravava como `anon`. O `anon` **não tem GRANT** no `kv_store` (de propósito), e o
+PostgREST responde **HTTP 401 "permission denied for table kv_store"**.
+
+Antes, esse erro caía em `isPermissionError` e a escrita era **descartada**. Agora:
+
+- `erroDescartavel(resp)` (`src/supabase.js`) só descarta erro de permissão com status ≠ 401. O 401
+  vai para a outbox (sync, delete e `flushOutbox`). Teste em `src/supabase.sync.test.js`.
+- O login roda `flushOutbox()` **antes** do hydrate (`LoginScreen` em `src/App.jsx`).
+- O hydrate não sobrescreve chave que ainda está na outbox (a versão local é a mais nova).
+
+Sintomas no console desse cenário: `kv_store?on_conflict=… 401`, `auth/v1/token 500` (Postgres
+reiniciando — "terminating connection due to administrator command") e `migrate-login 401`. Este
+último é só o fallback de login legado: todos os usuários já estão em `auth.users` sem hash PBKDF2,
+então ele sempre responde `invalid_password` quando a senha do Supabase Auth não confere.
 
 ## Lacunas
 

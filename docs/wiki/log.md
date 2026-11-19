@@ -370,3 +370,8 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - código: src/mobile/ (chunk lazy próprio), renderModulo e API_MOBILE no App.jsx, useEhCelular, ErroMobile + layout clássico
 - verificado: 440 testes (21 novos em src/mobile/dados.test.js), build, prints a 390px (claro/escuro, todos os fluxos), print 1366px pixel a pixel igual ao anterior, botão voltar
 - touched: modules/mobile.md (nova), index.md
+
+## [2026-11-19] incidente | Projeto Supabase pausado + escritas sem sessão descartadas
+- causa: projeto pausado de 31/10 a 19/11; ao restaurar, sessão do aparelho inválida → gravações como `anon` (401) eram descartadas
+- código: `erroDescartavel` em src/supabase.js; flushOutbox antes do hydrate no login; hydrate respeita a outbox
+- touched: concepts/supabase-sync.md
