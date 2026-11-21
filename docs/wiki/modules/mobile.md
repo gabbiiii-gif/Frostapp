@@ -1,7 +1,7 @@
 ---
 title: FrostERP Mobile (casca do ERP no celular)
 type: module
-updated: 2026-10-27
+updated: 2026-11-21
 sources:
   - Handoff do Claude Design "FrostERP Mobile" (FrostERP Mobile.dc.html + chat), 2026-10-27
 related:
@@ -35,7 +35,8 @@ e atendente.
 
 ## Estrutura
 
-- **Topo**: menu, logo/nome da empresa, tema, sino (notificações do App), avatar → Configurações.
+- **Topo**: menu, nome da empresa, tema, sino (notificações do App), avatar → Configurações.
+- **Logo da empresa na bolinha do perfil** (2026-11-21, pedido do Gabriel): a logo pequena ao lado do nome (topo e cabeçalho do menu) ficava ilegível. Agora `AvatarPerfil` (`src/mobile/MobileApp.jsx`) mostra `erp:company:<id>.logoUrl` na bolinha do topo e no rodapé do menu para todo integrante da empresa — 42px, fundo branco, logo sem folga interna (`.fm-avatar-logo` em `mobile.css`). Sem logo, ou logo quebrada, volta para a inicial do nome.
 - **Barra inferior**: Início, OS, Clientes, Financeiro + "Mais". A bolha (`.fm-pill`) desliza
   até a aba ativa; "Mais" acende com o menu aberto e nas telas que só existem no menu. Abas sem
   permissão somem e a grade se ajusta.

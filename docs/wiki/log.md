@@ -375,3 +375,7 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - causa: projeto pausado de 31/10 a 19/11; ao restaurar, sessão do aparelho inválida → gravações como `anon` (401) eram descartadas
 - código: `erroDescartavel` em src/supabase.js; flushOutbox antes do hydrate no login; hydrate respeita a outbox
 - touched: concepts/supabase-sync.md
+
+## [2026-11-21] mudança | Mobile: logo da empresa na bolinha do perfil
+- sai a logo pequena do topo e do cabeçalho do menu; entra na bolinha do perfil (topo + rodapé do menu)
+- touched: modules/mobile.md

@@ -112,6 +112,23 @@ function usePilhaVoltar(irParaInicio, estaNoInicio) {
   return { abrir, fechar };
 }
 
+// Bolinha do perfil (topo e rodapé do menu). Com logo cadastrada na empresa,
+// todo integrante (admin, gerente, atendente) vê a logo da empresa no lugar da
+// inicial do nome — pedido do Gabriel em 2026-11-21: a logo pequena ao lado do
+// nome ficava ilegível. Logo quebrada (URL fora do ar) volta para a inicial.
+function AvatarPerfil({ logoUrl, nome, onClick, rotulo, style }) {
+  // Guarda QUAL url falhou: se a empresa trocar a logo, a nova é tentada de novo.
+  const [urlFalhou, setUrlFalhou] = useState(null);
+  const comLogo = !!logoUrl && urlFalhou !== logoUrl;
+  const conteudo = comLogo
+    ? <img src={logoUrl} alt="" onError={() => setUrlFalhou(logoUrl)} />
+    : iniciais(nome).slice(0, 1);
+  const classe = `fm-avatar${comLogo ? " fm-avatar-logo" : ""}`;
+  return onClick
+    ? <button type="button" className={classe} style={style} onClick={onClick} aria-label={rotulo}>{conteudo}</button>
+    : <span className={classe} style={{ cursor: "default", ...style }} aria-label={comLogo ? rotulo : undefined}>{conteudo}</span>;
+}
+
 export default function MobileApp({
   user, data, db, addToast, reloadData, theme, setTheme, navItems,
   notifications, dismissNotif, pendingProposals, aiPendingCount, onLogout, renderModulo, api, demo, onLayoutClassico,
@@ -254,8 +271,6 @@ export default function MobileApp({
           <button type="button" className="fm-iconbtn" style={{ marginLeft: -10, color: "var(--t1)" }} onClick={abrirDrawer} aria-label="Abrir menu">
             <Icone nome="menu" size={22} />
           </button>
-          <img src={empresa?.logoUrl || "/frosterp-snowflake.svg"} alt="" style={{ width: 26, height: 26, objectFit: "contain" }}
-            onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/frosterp-snowflake.svg"; }} />
           <div className="grow" style={{ lineHeight: 1.15 }}>
             <div className="ell" style={{ fontWeight: 700, fontSize: 15 }}>{nomeEmpresa}</div>
             <div className="ell" style={{ fontSize: 11.5, color: "var(--t3)" }}>{user?.nome} · {ROTULO_PAPEL[user?.role] || user?.role}</div>
@@ -267,13 +282,9 @@ export default function MobileApp({
             <Icone nome="sino" size={21} />
             {nNotif > 0 && <span className="fm-dot">{nNotif > 9 ? "9+" : nNotif}</span>}
           </button>
-          {podeTela("config") ? (
-            <button type="button" className="fm-avatar" style={{ marginRight: -4 }} onClick={() => navegar("config")} aria-label="Perfil e configurações">
-              {iniciais(user?.nome).slice(0, 1)}
-            </button>
-          ) : (
-            <span className="fm-avatar" style={{ marginRight: -4 }}>{iniciais(user?.nome).slice(0, 1)}</span>
-          )}
+          <AvatarPerfil logoUrl={empresa?.logoUrl} nome={user?.nome} style={{ marginRight: -4 }}
+            rotulo={podeTela("config") ? "Perfil e configurações" : nomeEmpresa}
+            onClick={podeTela("config") ? () => navegar("config") : undefined} />
         </header>
 
         {/* ─── Conteúdo ─── */}
@@ -315,8 +326,6 @@ export default function MobileApp({
           <div className="fm-drawer">
             <div className="fm-drawer-panel">
               <div className="row" style={{ gap: 10, padding: "6px 16px 14px", borderBottom: "1px solid var(--b1)" }}>
-                <img src={empresa?.logoUrl || "/frosterp-snowflake.svg"} alt="" style={{ width: 30, height: 30, objectFit: "contain" }}
-                  onError={(e) => { e.currentTarget.onerror = null; e.currentTarget.src = "/frosterp-snowflake.svg"; }} />
                 <div className="grow" style={{ lineHeight: 1.15 }}>
                   <div className="ell" style={{ fontWeight: 700, fontSize: 15 }}>{nomeEmpresa}</div>
                   <div style={{ fontSize: 11.5, color: "var(--t3)" }}>Gestão integrada</div>
@@ -350,7 +359,7 @@ export default function MobileApp({
                 })}
               </div>
               <div className="row" style={{ gap: 10, padding: "10px 16px 0", borderTop: "1px solid var(--b1)" }}>
-                <span className="fm-avatar" style={{ cursor: "default" }}>{iniciais(user?.nome).slice(0, 1)}</span>
+                <AvatarPerfil logoUrl={empresa?.logoUrl} nome={user?.nome} rotulo={nomeEmpresa} />
                 <div className="grow" style={{ lineHeight: 1.15 }}>
                   <div className="ell" style={{ fontSize: 13.5, fontWeight: 600 }}>{user?.nome}</div>
                   <div style={{ fontSize: 11.5, color: "var(--t3)" }}>{ROTULO_PAPEL[user?.role] || user?.role}</div>
