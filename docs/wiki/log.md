@@ -379,3 +379,8 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 ## [2026-11-21] mudança | Mobile: logo da empresa na bolinha do perfil
 - sai a logo pequena do topo e do cabeçalho do menu; entra na bolinha do perfil (topo + rodapé do menu)
 - touched: modules/mobile.md
+
+## [2026-11-21] mudança | Upload da logo com recorte/SVG + auditoria legível no celular
+- código: src/lib/logo.js (+ teste), LogoPicker e CompanyAuditPanel em src/App.jsx, logo de erp:config na casca mobile
+- dependência nova: imagetracerjs 1.2.6 (Unlicense), import dinâmico
+- touched: modules/settings.md

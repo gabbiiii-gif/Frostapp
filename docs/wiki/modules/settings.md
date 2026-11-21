@@ -1,7 +1,7 @@
 ---
 title: Configurações (SettingsModule)
 type: module
-updated: 2026-05-10
+updated: 2026-11-21
 sources: []
 related:
   - ./schedule.md
@@ -41,7 +41,7 @@ Schema: `{nomeEmpresa/razaoSocial, cnpj, telefone, email, endereco, logoUrl, pix
 | `CalendarFeedPanel` | 9843 | Gera/regenera/desativa token iCal — ver [Schedule](./schedule.md) |
 | `CompanyAuditPanel` | 9931 | Lê audit log (entries de `recordAudit`) |
 | `AutoBackupPanel` | 10021 | Configura `ensureAutoBackup` (singleton `erp:autoBackupMeta`) |
-| `LogoPicker` | 3326 | Upload/seleção de logo (Supabase Storage) |
+| `LogoPicker` | grep | Upload da logo (Configurações e Master): recorta margem vazia, reduz para até 512px (PNG), e converte opcionalmente para SVG com comparação lado a lado — lógica em `src/lib/logo.js` |
 
 ## Calendar Feed
 
@@ -76,3 +76,15 @@ Recebe `theme` + `setTheme` do App pai — toggle dark/light também aqui (além
 - [a expandir] `UserManagement` — fluxo completo de criar usuário com TOTP/2FA
 - [a expandir] Schema do `erp:autoBackupMeta`
 - [a expandir] Audit log entry shape (`recordAudit` em App.jsx:521)
+
+## Logo e auditoria no celular (2026-11-21)
+
+- **Logo**: o campo de texto "URL ou data URL" virou o `LogoPicker` (imagem, URL ou colar). `processarLogo` corta a
+  margem branca/transparente e grava PNG de até 512px (WebP/JPEG só acima de 280KB). "Converter para SVG" usa
+  `imagetracerjs` (carregado só nesse clique), ampliando a imagem para 900px antes de traçar — traçar a imagem pequena
+  direto dava contorno serrilhado. O usuário vê as duas versões e escolhe; logo com foto/degradê costuma piorar em SVG.
+  A logo de `erp:config` vale primeiro em todo lugar (documentos, menu do desktop, bolinha do perfil no celular); a do
+  cadastro Master (`erp:company`) fica de reserva. Só grava ao tocar em "Salvar Configurações".
+- **Auditoria** (`CompanyAuditPanel`): no celular cada registro é um cartão em 3 linhas (ação + tipo + data / resumo
+  inteiro / quem fez); a partir de `sm` volta a ser uma linha. Os resumos sempre estiveram completos no banco — só o
+  layout cortava com "…".

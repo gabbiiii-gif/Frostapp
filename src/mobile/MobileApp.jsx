@@ -171,6 +171,15 @@ export default function MobileApp({
   }, [reloadData]);
 
   const empresa = useMemo(() => (user?.companyId ? db.get("erp:company:" + user.companyId) : null), [db, user]);
+  // Logo: a de Configurações (erp:config, editável pelo admin) vale primeiro —
+  // mesma ordem dos documentos (_docHeader); a do cadastro da empresa no
+  // painel Master fica de reserva. Relê ao fechar o "modo completo" (é por lá
+  // que se troca a logo no celular).
+  const logoEmpresa = useMemo(
+    () => (db.get("erp:config") || {}).logoUrl || empresa?.logoUrl || "",
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [db, empresa, completo, versao],
+  );
 
   // ─── Navegação ───
   const navegar = useCallback((id) => {
@@ -282,7 +291,7 @@ export default function MobileApp({
             <Icone nome="sino" size={21} />
             {nNotif > 0 && <span className="fm-dot">{nNotif > 9 ? "9+" : nNotif}</span>}
           </button>
-          <AvatarPerfil logoUrl={empresa?.logoUrl} nome={user?.nome} style={{ marginRight: -4 }}
+          <AvatarPerfil logoUrl={logoEmpresa} nome={user?.nome} style={{ marginRight: -4 }}
             rotulo={podeTela("config") ? "Perfil e configurações" : nomeEmpresa}
             onClick={podeTela("config") ? () => navegar("config") : undefined} />
         </header>
@@ -359,7 +368,7 @@ export default function MobileApp({
                 })}
               </div>
               <div className="row" style={{ gap: 10, padding: "10px 16px 0", borderTop: "1px solid var(--b1)" }}>
-                <AvatarPerfil logoUrl={empresa?.logoUrl} nome={user?.nome} rotulo={nomeEmpresa} />
+                <AvatarPerfil logoUrl={logoEmpresa} nome={user?.nome} rotulo={nomeEmpresa} />
                 <div className="grow" style={{ lineHeight: 1.15 }}>
                   <div className="ell" style={{ fontSize: 13.5, fontWeight: 600 }}>{user?.nome}</div>
                   <div style={{ fontSize: 11.5, color: "var(--t3)" }}>{ROTULO_PAPEL[user?.role] || user?.role}</div>

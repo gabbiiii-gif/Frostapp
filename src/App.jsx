@@ -5342,80 +5342,40 @@ function MasterApp({ master, onLogout, addToast, theme, setTheme }) {
   );
 }
 
-// LogoPicker — componente unificado pra escolher logo da empresa.
-// Suporta: upload de arquivo (com compressão), URL externa, colar do clipboard,
-// e drag-drop. Resultado é sempre uma string (data URL ou http URL) salva em logoUrl.
-// Limite de 300KB no arquivo final pra não inchar localStorage/Supabase.
+// LogoPicker — escolhe a logo da empresa (Configurações e painel Master).
+// Arquivo, URL, colar ou arrastar. O arquivo passa por processarLogo
+// (src/lib/logo.js): recorta a margem vazia, reduz para até 512px e grava PNG.
+// Depois o usuário pode converter para SVG (vetorizarLogo) e comparar as duas
+// versões lado a lado antes de trocar — logo de cor chapada fica nítida em
+// qualquer tamanho; foto/degradê costuma piorar, então a escolha é dele.
+// Resultado é sempre uma string (data URL ou http URL) gravada em logoUrl.
 function LogoPicker({ value, onChange, addToast }) {
   const [mode, setMode] = useState("file"); // file | url
   const [urlInput, setUrlInput] = useState("");
   const [dragOver, setDragOver] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(""); // "" | "processando" | "vetorizando"
+  const [info, setInfo] = useState(null); // { formato, largura, altura, cortouMargem, sugerirVetor }
+  const [candidatoSvg, setCandidatoSvg] = useState(null); // { dataUrl, bytes }
+  const [dimPreview, setDimPreview] = useState(null);
   const fileInputRef = useRef(null);
-
-  // Comprime imagem via canvas — mantém aspecto, reduz pra max 256px e qualidade JPEG 0.85
-  // Retorna data URL. Aceita PNG transparente preservando.
-  const compressImage = useCallback(async (file) => {
-    if (file.size > 5 * 1024 * 1024) {
-      throw new Error("Arquivo > 5MB. Escolha imagem menor.");
-    }
-    const dataUrl = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(file);
-    });
-    const img = await new Promise((resolve, reject) => {
-      const i = new Image();
-      i.onload = () => resolve(i);
-      i.onerror = reject;
-      i.src = dataUrl;
-    });
-    const MAX = 256;
-    let w = img.width;
-    let h = img.height;
-    if (w > MAX || h > MAX) {
-      const ratio = Math.min(MAX / w, MAX / h);
-      w = Math.round(w * ratio);
-      h = Math.round(h * ratio);
-    }
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(img, 0, 0, w, h);
-    // PNG preserva transparência; outros formatos vão pra JPEG (menor)
-    const isPng = file.type === "image/png";
-    const out = canvas.toDataURL(isPng ? "image/png" : "image/jpeg", 0.85);
-    // Hard limit: 300KB no resultado final
-    if (out.length > 300 * 1024 * 1.4) {
-      // Tenta de novo em JPEG menor
-      const fallback = canvas.toDataURL("image/jpeg", 0.7);
-      if (fallback.length > 300 * 1024 * 1.4) {
-        throw new Error("Imagem muito grande mesmo após compressão. Use logo até 256x256.");
-      }
-      return fallback;
-    }
-    return out;
-  }, []);
 
   const handleFile = useCallback(async (file) => {
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      addToast?.("Apenas arquivos de imagem.", "error");
-      return;
-    }
-    setBusy(true);
+    setBusy("processando");
+    setCandidatoSvg(null);
     try {
-      const compressed = await compressImage(file);
-      onChange(compressed);
-      addToast?.("Logo carregada.", "success");
+      const { processarLogo } = await import("./lib/logo.js");
+      const r = await processarLogo(file);
+      onChange(r.dataUrl);
+      setInfo(r);
+      addToast?.(r.cortouMargem ? "Logo carregada — margem vazia removida." : "Logo carregada.", "success");
     } catch (err) {
       addToast?.(err.message || "Falha ao processar imagem.", "error");
     } finally {
-      setBusy(false);
+      setBusy("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
-  }, [compressImage, onChange, addToast]);
+  }, [onChange, addToast]);
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
@@ -5431,41 +5391,69 @@ function LogoPicker({ value, onChange, addToast }) {
         for (const type of item.types) {
           if (type.startsWith("image/")) {
             const blob = await item.getType(type);
-            const file = new File([blob], "clipboard.png", { type });
-            handleFile(file);
+            handleFile(new File([blob], "clipboard.png", { type }));
             return;
           }
         }
       }
-      addToast?.("Nenhuma imagem no clipboard.", "info");
+      addToast?.("Nenhuma imagem na área de transferência.", "info");
     } catch {
-      addToast?.("Permissão de clipboard negada.", "error");
+      addToast?.("Permissão para colar negada pelo navegador.", "error");
     }
   }, [handleFile, addToast]);
 
   const applyUrl = useCallback(() => {
     const u = urlInput.trim();
     if (!u) return;
-    if (!/^https?:\/\//i.test(u)) {
+    if (!/^https?:\/\//i.test(u) && !u.startsWith("/")) {
       addToast?.("URL deve começar com http:// ou https://", "error");
       return;
     }
     onChange(u);
+    setInfo(null);
+    setCandidatoSvg(null);
     setUrlInput("");
     addToast?.("URL aplicada.", "success");
   }, [urlInput, onChange, addToast]);
 
+  // Só dá para vetorizar imagem embutida (data URL raster): URL externa
+  // esbarra em CORS no canvas.
+  const podeVetorizar = typeof value === "string" && /^data:image\/(png|jpeg|webp)/.test(value);
+  const ehSvg = typeof value === "string" && (value.startsWith("data:image/svg") || /\.svg($|\?)/i.test(value));
+
+  const vetorizar = useCallback(async () => {
+    setBusy("vetorizando");
+    try {
+      const { vetorizarLogo } = await import("./lib/logo.js");
+      setCandidatoSvg(await vetorizarLogo(value));
+    } catch (err) {
+      addToast?.(err.message || "Não foi possível converter para SVG.", "error");
+    } finally {
+      setBusy("");
+    }
+  }, [value, addToast]);
+
+  const kb = (dataUrl) => {
+    if (!dataUrl?.startsWith("data:")) return null;
+    const i = dataUrl.indexOf(",");
+    const corpo = dataUrl.slice(i + 1);
+    const bytes = /;base64,/.test(dataUrl) ? corpo.length * 0.75 : decodeURIComponent(corpo).length;
+    return Math.max(1, Math.round(bytes / 1024));
+  };
+  const formatoAtual = info?.formato || (ehSvg ? "SVG" : value?.startsWith("data:image/") ? value.slice(11, value.indexOf(";")).toUpperCase().replace("JPEG", "JPG") : "URL");
+  const dims = info ? `${info.largura}×${info.altura}` : dimPreview;
+
   return (
     <div className="col-span-2 space-y-2">
-      {/* Tabs */}
+      {/* Abas */}
       <div className="flex gap-1 bg-gray-900/40 border border-gray-700 rounded-lg p-1">
-        <button type="button" onClick={() => setMode("file")} className={`flex-1 text-xs py-1.5 rounded-md transition ${mode === "file" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"}`}>
-          📁 Arquivo
+        <button type="button" onClick={() => setMode("file")} className={`flex-1 text-xs py-2 rounded-md transition ${mode === "file" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"}`}>
+          📁 Imagem
         </button>
-        <button type="button" onClick={() => setMode("url")} className={`flex-1 text-xs py-1.5 rounded-md transition ${mode === "url" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"}`}>
+        <button type="button" onClick={() => setMode("url")} className={`flex-1 text-xs py-2 rounded-md transition ${mode === "url" ? "bg-blue-600 text-white" : "text-gray-300 hover:bg-gray-700"}`}>
           🔗 URL
         </button>
-        <button type="button" onClick={handlePaste} className="flex-1 text-xs py-1.5 rounded-md text-gray-300 hover:bg-gray-700 transition" title="Colar imagem do clipboard">
+        <button type="button" onClick={handlePaste} className="flex-1 text-xs py-2 rounded-md text-gray-300 hover:bg-gray-700 transition" title="Colar imagem da área de transferência">
           📋 Colar
         </button>
       </div>
@@ -5475,20 +5463,20 @@ function LogoPicker({ value, onChange, addToast }) {
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition ${dragOver ? "border-blue-500 bg-blue-500/10" : "border-gray-600 hover:border-gray-500 bg-gray-700/30"}`}
+          onClick={() => !busy && fileInputRef.current?.click()}
+          className={`border-2 border-dashed rounded-lg p-5 text-center cursor-pointer transition ${dragOver ? "border-blue-500 bg-blue-500/10" : "border-gray-600 hover:border-gray-500 bg-gray-700/30"}`}
         >
           <input
             ref={fileInputRef}
             type="file"
-            accept="image/png,image/jpeg,image/webp,image/svg+xml,image/gif"
+            accept="image/*"
             className="hidden"
             onChange={(e) => handleFile(e.target.files?.[0])}
           />
-          <p className="text-xs text-gray-300">
-            {busy ? "⏳ Processando..." : "📤 Clique ou arraste a logo aqui"}
+          <p className="text-sm text-gray-200">
+            {busy === "processando" ? "⏳ Otimizando a imagem..." : "📤 Toque para escolher a logo"}
           </p>
-          <p className="text-[10px] text-gray-500 mt-1">PNG, JPG, WEBP, SVG ou GIF • máx 5MB • redimensionada para 256px</p>
+          <p className="text-[11px] text-gray-500 mt-1">PNG, JPG, WEBP ou SVG · até 8MB · a margem vazia é cortada sozinha</p>
         </div>
       )}
 
@@ -5499,7 +5487,7 @@ function LogoPicker({ value, onChange, addToast }) {
             value={urlInput}
             onChange={(e) => setUrlInput(e.target.value)}
             placeholder="https://..."
-            className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
+            className="flex-1 min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
             onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); applyUrl(); } }}
           />
           <button type="button" onClick={applyUrl} className="px-3 py-2 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg">
@@ -5508,22 +5496,69 @@ function LogoPicker({ value, onChange, addToast }) {
         </div>
       )}
 
-      {/* Preview + remover */}
-      {value && (
-        <div className="flex items-center gap-3 bg-gray-900/40 border border-gray-700 rounded-lg p-3">
-          <img
-            src={value}
-            alt="preview"
-            className="w-14 h-14 rounded-lg object-cover bg-gray-700"
-            onError={(e) => { e.target.style.opacity = "0.3"; }}
-          />
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-gray-300">Logo atual</p>
-            <p className="text-[10px] text-gray-500 truncate">{value.startsWith("data:") ? `Imagem incorporada (${Math.round(value.length / 1024)}KB)` : value}</p>
+      {/* Logo atual: prévia grande em fundo branco (como sai no documento) */}
+      {value && !candidatoSvg && (
+        <div className="bg-gray-900/40 border border-gray-700 rounded-lg p-3 space-y-2">
+          <div className="bg-white rounded-lg h-24 flex items-center justify-center p-2">
+            <img
+              src={value}
+              alt="Prévia da logo"
+              className="max-h-full max-w-full object-contain"
+              onLoad={(e) => setDimPreview(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)}
+              onError={(e) => { e.currentTarget.style.opacity = "0.3"; }}
+            />
           </div>
-          <button type="button" onClick={() => onChange("")} className="text-xs px-2 py-1 rounded-md bg-red-600/20 hover:bg-red-600/40 text-red-300 transition">
-            Remover
-          </button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[11px] text-gray-400 flex-1 min-w-0">
+              {formatoAtual}{dims ? ` · ${dims}px` : ""}{kb(value) ? ` · ${kb(value)}KB` : ""}
+              {info?.cortouMargem ? " · margem removida" : ""}
+            </span>
+            <button type="button" onClick={() => { onChange(""); setInfo(null); }} className="text-xs px-2.5 py-1.5 rounded-md bg-red-600/20 hover:bg-red-600/40 text-red-300 transition">
+              Remover
+            </button>
+          </div>
+          {podeVetorizar && (
+            <div className="border-t border-gray-700 pt-2 space-y-1.5">
+              {info?.sugerirVetor && (
+                <p className="text-[11px] text-amber-300">Imagem pequena: pode sair borrada na impressão. Vale testar a versão SVG.</p>
+              )}
+              <button type="button" onClick={vetorizar} disabled={!!busy}
+                className="w-full text-xs py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-100 transition disabled:opacity-60">
+                {busy === "vetorizando" ? "⏳ Convertendo..." : "✨ Converter para SVG (nítida em qualquer tamanho)"}
+              </button>
+              <p className="text-[10px] text-gray-500">Funciona melhor em logo de cores chapadas. Foto ou degradê: mantenha a imagem.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Comparação antes de trocar */}
+      {value && candidatoSvg && (
+        <div className="bg-gray-900/40 border border-gray-700 rounded-lg p-3 space-y-2">
+          <p className="text-xs text-gray-300">Compare e escolha:</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <div className="bg-white rounded-lg h-24 flex items-center justify-center p-2">
+                <img src={value} alt="Atual" className="max-h-full max-w-full object-contain" />
+              </div>
+              <p className="text-[11px] text-gray-400 text-center mt-1">Atual · {formatoAtual}{kb(value) ? ` · ${kb(value)}KB` : ""}</p>
+            </div>
+            <div>
+              <div className="bg-white rounded-lg h-24 flex items-center justify-center p-2">
+                <img src={candidatoSvg.dataUrl} alt="SVG" className="max-h-full max-w-full object-contain" />
+              </div>
+              <p className="text-[11px] text-gray-400 text-center mt-1">SVG · {Math.max(1, Math.round(candidatoSvg.bytes / 1024))}KB</p>
+            </div>
+          </div>
+          <div className="flex gap-2">
+            <button type="button" onClick={() => setCandidatoSvg(null)} className="flex-1 text-xs py-2 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-100">
+              Manter atual
+            </button>
+            <button type="button" onClick={() => { onChange(candidatoSvg.dataUrl); setInfo({ formato: "SVG" }); setCandidatoSvg(null); addToast?.("Logo trocada pela versão SVG.", "success"); }}
+              className="flex-1 text-xs py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white">
+              Usar SVG
+            </button>
+          </div>
         </div>
       )}
     </div>
@@ -13763,43 +13798,59 @@ function CompanyAuditPanel() {
     });
   }, [entries, filterAction, filterEntity, search]);
 
-  const actionColor = {
-    create: "text-green-400",
-    update: "text-blue-400",
-    delete: "text-red-400",
+  // Rótulos e cores. No celular a linha única espremia resumo, usuário e data
+  // (texto cortado com "…"): agora cada registro é um cartão em 3 linhas —
+  // ação + tipo + data / resumo inteiro (quebra linha) / quem fez. A partir de
+  // `sm` volta a ser uma linha só, com o resumo ocupando o espaço que sobra.
+  const actionStyle = {
+    create: "bg-green-500/15 text-green-300",
+    update: "bg-blue-500/15 text-blue-300",
+    delete: "bg-red-500/15 text-red-300",
   };
   const actionLabel = { create: "criou", update: "alterou", delete: "excluiu" };
+  const entityLabel = {
+    os: "OS", client: "Cliente", employee: "Funcionário", finance: "Financeiro", user: "Usuário",
+    ponto: "Ponto", ocorrencia: "Ocorrência", escola: "Escola", relatorio: "Relatório",
+  };
+  const fmtData = (ts) => {
+    const d = new Date(ts);
+    if (isNaN(d)) return "";
+    return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "2-digit" }) + " " +
+      d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  };
 
   return (
-    <div className="bg-gray-800 border border-gray-700 rounded-xl p-6">
-      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+    <div className="bg-gray-800 border border-gray-700 rounded-xl p-4 sm:p-6">
+      <div className="mb-4 space-y-3">
         <div>
           <h3 className="text-lg font-semibold text-white">Auditoria da Empresa</h3>
           <p className="text-gray-400 text-sm mt-0.5">Quem alterou o quê (OS, clientes, funcionários, finanças, usuários).</p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
           <input
             type="text"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Buscar..."
-            className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white w-48"
+            className="col-span-2 sm:w-56 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white"
           />
-          <select value={filterAction} onChange={(e) => setFilterAction(e.target.value)} className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white">
+          <select value={filterAction} onChange={(e) => setFilterAction(e.target.value)} className="min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white">
             <option value="all">Toda ação</option>
             <option value="create">Criou</option>
             <option value="update">Alterou</option>
             <option value="delete">Excluiu</option>
           </select>
-          <select value={filterEntity} onChange={(e) => setFilterEntity(e.target.value)} className="bg-gray-700 border border-gray-600 rounded-lg px-3 py-1.5 text-sm text-white">
+          <select value={filterEntity} onChange={(e) => setFilterEntity(e.target.value)} className="min-w-0 bg-gray-700 border border-gray-600 rounded-lg px-3 py-2 text-sm text-white">
             <option value="all">Toda entidade</option>
             <option value="os">OS</option>
             <option value="client">Clientes</option>
             <option value="employee">Funcionários</option>
             <option value="finance">Financeiro</option>
             <option value="user">Usuários</option>
+            <option value="ponto">Ponto</option>
+            <option value="escola">Escola</option>
           </select>
-          <button onClick={() => setReload((r) => r + 1)} className="px-3 py-1.5 text-xs rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200">
+          <button onClick={() => setReload((r) => r + 1)} className="col-span-2 sm:col-span-1 px-3 py-2 text-sm rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200">
             Atualizar
           </button>
         </div>
@@ -13807,15 +13858,26 @@ function CompanyAuditPanel() {
       {filtered.length === 0 ? (
         <p className="text-sm text-gray-400 py-6 text-center">Nenhum registro de auditoria.</p>
       ) : (
-        <div className="space-y-1.5 max-h-96 overflow-y-auto">
+        <div className="space-y-2 max-h-[70vh] sm:max-h-96 overflow-y-auto pr-1">
           {filtered.slice(0, 200).map((e) => (
-            <div key={e.id} className="bg-gray-700/50 border border-gray-700 rounded-lg px-3 py-2 text-sm flex items-center gap-3">
-              <span className={`text-xs font-bold whitespace-nowrap ${actionColor[e.action] || "text-gray-300"}`}>
-                {actionLabel[e.action] || e.action}
-              </span>
-              <span className="text-gray-300 truncate flex-1" title={e.summary}>{e.summary || "(sem resumo)"}</span>
-              <span className="text-xs text-gray-400 whitespace-nowrap">{e.userNome}</span>
-              <span className="text-[10px] text-gray-500 whitespace-nowrap">{new Date(e.ts).toLocaleString("pt-BR")}</span>
+            <div key={e.id} className="bg-gray-700/50 border border-gray-700 rounded-lg px-3 py-2.5 text-sm sm:flex sm:items-center sm:gap-3">
+              {/* Linha 1 (celular): ação + tipo + data */}
+              <div className="flex items-center gap-2 sm:contents">
+                <span className={`text-[11px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full whitespace-nowrap ${actionStyle[e.action] || "bg-gray-600/40 text-gray-300"}`}>
+                  {actionLabel[e.action] || e.action}
+                </span>
+                <span className="text-[11px] text-gray-400 whitespace-nowrap sm:order-first sm:hidden">{entityLabel[e.entity] || e.entity}</span>
+                <span className="ml-auto text-[11px] text-gray-500 whitespace-nowrap sm:order-last">{fmtData(e.ts)}</span>
+              </div>
+              {/* Linha 2: resumo inteiro (quebra linha no celular) */}
+              <p className="mt-1.5 sm:mt-0 text-gray-100 break-words leading-snug sm:flex-1 sm:min-w-0 sm:truncate" title={e.summary}>
+                <span className="hidden sm:inline text-gray-400">{entityLabel[e.entity] || e.entity} · </span>
+                {e.summary || "(sem resumo)"}
+              </p>
+              {/* Linha 3: quem fez */}
+              <p className="mt-1 sm:mt-0 text-xs text-gray-400 sm:whitespace-nowrap">
+                <span className="sm:hidden">por </span>{e.userNome}
+              </p>
             </div>
           ))}
         </div>
@@ -15002,20 +15064,9 @@ function SettingsModule({ user, addToast, reloadData, theme, setTheme }) {
 
           {/* ─── Logo da Empresa (centralizada nos documentos PDF) ───────────── */}
           <div className="border-t border-gray-700 pt-4">
-            <label className="block text-sm font-medium text-gray-300 mb-1.5">Logo da Empresa (URL ou data URL)</label>
-            <input name="logoUrl"
-              type="text"
-              value={config.logoUrl}
-              onChange={(e) => setConfig({ ...config, logoUrl: e.target.value })}
-              placeholder="https://...  ou  /logo.svg  ou  data:image/png;base64,..."
-              className="w-full bg-gray-700 border border-gray-600 rounded-lg px-4 py-2.5 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500 transition"
-            />
-            <p className="text-xs text-gray-500 mt-1">Aparece centralizada no topo do Orçamento, OS e Recibo.</p>
-            {config.logoUrl ? (
-              <div className="mt-2 inline-block bg-white p-2 rounded-lg">
-                <img src={config.logoUrl} alt="Preview da logo" className="max-h-16 max-w-[160px] object-contain" />
-              </div>
-            ) : null}
+            <label className="block text-sm font-medium text-gray-300 mb-1.5">Logo da Empresa</label>
+            <p className="text-xs text-gray-500 mb-2">Aparece no topo do Orçamento, OS e Recibo, no menu e na bolinha do perfil no celular. Depois de escolher, toque em <strong className="text-gray-300">Salvar Configurações</strong> no fim da página.</p>
+            <LogoPicker value={config.logoUrl} onChange={(v) => setConfig((c) => ({ ...c, logoUrl: v }))} addToast={addToast} />
           </div>
 
           {/* ─── PIX (Orçamento + OS) ────────────────────────────────────────── */}
@@ -18625,7 +18676,8 @@ export default function App() {
         {(() => {
           const activeCompany = user?.companyId ? DB.get("erp:company:" + user.companyId) : null;
           const companyName = activeCompany?.nome || "FROSTErp";
-          const companyLogo = activeCompany?.logoUrl;
+          // Logo de Configurações primeiro (mesma ordem dos documentos), depois a do cadastro Master.
+          const companyLogo = (DB.get("erp:config") || {}).logoUrl || activeCompany?.logoUrl;
           // Logo expandida: ocupa quase toda largura da sidebar (w-64), height alto, sem moldura.
           // Logos retangulares (a maioria) ficam grandes e legíveis.
           // Colapsada: só ícone quadrado pequeno (sem nome).

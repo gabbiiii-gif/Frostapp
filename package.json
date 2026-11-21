@@ -43,6 +43,7 @@
     "@supabase/supabase-js": "^2.99.1",
     "@vladmandic/face-api": "^1.7.15",
     "html2pdf.js": "^0.14.0",
+    "imagetracerjs": "^1.2.6",
     "leaflet": "^1.9.4",
     "motion": "^12.36.0",
     "ogl": "^1.0.11",
