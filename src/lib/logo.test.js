@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { limitesConteudo, recorteComFolga, dimensoesAlvo, recomendarVetor, bytesDataUrl } from './logo.js';
+import { limitesConteudo, recorteComFolga, dimensoesAlvo, recomendarVetor, bytesDataUrl, tamanhoGirado, tamanhoRecorte } from './logo.js';
 
 // Monta um RGBA w×h preenchido com `fundo` e um retângulo de `cor`.
 function imagem(w, h, fundo, ret, cor = [20, 60, 200, 255]) {
@@ -59,5 +59,17 @@ describe('recomendarVetor / bytesDataUrl', () => {
   it('estima bytes de base64 e de SVG em texto', () => {
     expect(bytesDataUrl('data:image/png;base64,QUJD')).toBe(3);
     expect(bytesDataUrl('data:image/svg+xml;charset=utf-8,%3Csvg%3E')).toBe(5);
+  });
+});
+
+describe('enquadramento', () => {
+  it('giro de 90° troca largura e altura; 0° mantém', () => {
+    expect(tamanhoGirado(300, 100, 90)).toEqual({ w: 100, h: 300 });
+    expect(tamanhoGirado(300, 100, 0)).toEqual({ w: 300, h: 100 });
+    expect(tamanhoGirado(300, 100, 180)).toEqual({ w: 300, h: 100 });
+  });
+  it('recorte grande é limitado a 1024px; pequeno fica como está', () => {
+    expect(tamanhoRecorte({ width: 2048, height: 2048 })).toEqual({ w: 1024, h: 1024, escala: 0.5 });
+    expect(tamanhoRecorte({ width: 400, height: 200 })).toEqual({ w: 400, h: 200, escala: 1 });
   });
 });

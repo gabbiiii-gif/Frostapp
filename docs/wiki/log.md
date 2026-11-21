@@ -384,3 +384,9 @@ Tipos: `ingest` | `query` | `lint` | `bootstrap`.
 - código: src/lib/logo.js (+ teste), LogoPicker e CompanyAuditPanel em src/App.jsx, logo de erp:config na casca mobile
 - dependência nova: imagetracerjs 1.2.6 (Unlicense), import dinâmico
 - touched: modules/settings.md
+
+## [2026-11-21] mudança | Logo: câmera/galeria + enquadramento tipo WhatsApp
+- código: src/EnquadrarImagem.jsx (novo), LogoPicker (App.jsx), escolherImagemNativa (platform.js), recortarImagem/tamanhoGirado/tamanhoRecorte (lib/logo.js + testes)
+- dependência nova: react-easy-crop 6.2.5 (MIT), lazy
+- touched: modules/settings.md
+

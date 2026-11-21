@@ -88,3 +88,11 @@ Recebe `theme` + `setTheme` do App pai — toggle dark/light também aqui (além
 - **Auditoria** (`CompanyAuditPanel`): no celular cada registro é um cartão em 3 linhas (ação + tipo + data / resumo
   inteiro / quem fez); a partir de `sm` volta a ser uma linha. Os resumos sempre estiveram completos no banco — só o
   layout cortava com "…".
+- **Enquadrar (tipo WhatsApp)** — 2026-11-21: o `LogoPicker` mostra **Câmera** e **Galeria** (no APK via
+  `escolherImagemNativa` em `src/platform.js`, plugin Camera; no navegador `<input type=file>`, com `capture` na
+  câmera). Escolhida a foto, abre `src/EnquadrarImagem.jsx` (lazy, `react-easy-crop`, portal no `<body>`): arrastar,
+  pinça/barra de zoom (0,4×–5×, dá para diminuir uma logo larga dentro do quadrado — a sobra fica transparente), girar
+  90° e formato Quadrado / Retângulo 3:2 / Largo 2:1. OK → `recortarImagem` → `processarLogo(..., { recortarMargem:
+  false })` (a moldura é do usuário, não recorta de novo). SVG pula o enquadramento. Botão "✂️ Enquadrar" refaz em
+  cima da logo atual.
+

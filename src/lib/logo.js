@@ -75,6 +75,22 @@ export function recomendarVetor(larguraDesenho, alturaDesenho) {
   return Math.max(larguraDesenho, alturaDesenho) < 300;
 }
 
+// Caixa que contém a imagem girada `graus` (para o canvas do recorte).
+export function tamanhoGirado(w, h, graus) {
+  const r = (graus * Math.PI) / 180;
+  return {
+    w: Math.round(Math.abs(Math.cos(r) * w) + Math.abs(Math.sin(r) * h)),
+    h: Math.round(Math.abs(Math.sin(r) * w) + Math.abs(Math.cos(r) * h)),
+  };
+}
+
+// Tamanho de saída do enquadramento: a área escolhida, limitada a `max` no
+// lado maior (o processarLogo reduz de novo para 512).
+export function tamanhoRecorte(area, max = 1024) {
+  const s = Math.min(1, max / Math.max(area.width, area.height));
+  return { w: Math.max(1, Math.round(area.width * s)), h: Math.max(1, Math.round(area.height * s)), escala: s };
+}
+
 // Tamanho aproximado em bytes de um data URL (para o limite e para a tela).
 export function bytesDataUrl(dataUrl) {
   if (!dataUrl) return 0;
@@ -111,7 +127,9 @@ function canvasDe(w, h) {
 }
 
 // Arquivo → { dataUrl, largura, altura, cortouMargem, sugerirVetor, formato }
-export async function processarLogo(file) {
+// `recortarMargem: false` quando a imagem veio do enquadramento manual — o
+// usuário já escolheu a moldura e cortar de novo desfaria o quadrado dele.
+export async function processarLogo(file, { recortarMargem = true } = {}) {
   if (!file || !file.type?.startsWith("image/")) throw new Error("Escolha um arquivo de imagem.");
   if (file.size > 8 * 1024 * 1024) throw new Error("Arquivo acima de 8MB. Escolha uma imagem menor.");
   const original = await lerArquivo(file);
@@ -131,7 +149,7 @@ export async function processarLogo(file) {
 
   // 1. Recorta a margem vazia
   let corte = { x: 0, y: 0, w: w0, h: h0 };
-  const lim = limitesConteudo(ctx.getImageData(0, 0, w0, h0).data, w0, h0);
+  const lim = recortarMargem ? limitesConteudo(ctx.getImageData(0, 0, w0, h0).data, w0, h0) : null;
   if (lim) corte = recorteComFolga(lim, w0, h0);
   const cortouMargem = corte.w < w0 * 0.97 || corte.h < h0 * 0.97;
 
@@ -185,4 +203,27 @@ export async function vetorizarLogo(dataUrl) {
   const bytes = bytesDataUrl(svgDataUrl);
   if (bytes > LIMITE_SVG) throw new Error("A logo tem detalhe demais para virar SVG leve. Mantenha a versão PNG.");
   return { dataUrl: svgDataUrl, bytes };
+}
+
+// Enquadramento (tela tipo WhatsApp): aplica giro + área escolhida no
+// react-easy-crop e devolve um File PNG. A área pode passar da imagem (zoom
+// abaixo de 1 para caber uma logo larga num quadrado): a sobra fica
+// transparente.
+export async function recortarImagem(src, area, graus = 0) {
+  const img = await carregarImagem(src);
+  const giro = tamanhoGirado(img.naturalWidth, img.naturalHeight, graus);
+  const girada = canvasDe(giro.w, giro.h);
+  const g = girada.getContext("2d");
+  g.translate(giro.w / 2, giro.h / 2);
+  g.rotate((graus * Math.PI) / 180);
+  g.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+
+  const t = tamanhoRecorte(area);
+  const saida = canvasDe(t.w, t.h);
+  const c = saida.getContext("2d");
+  c.imageSmoothingQuality = "high";
+  c.drawImage(girada, -area.x * t.escala, -area.y * t.escala, giro.w * t.escala, giro.h * t.escala);
+  const blob = await new Promise((resolve) => saida.toBlob(resolve, "image/png"));
+  if (!blob) throw new Error("Não foi possível recortar a imagem.");
+  return new File([blob], "logo.png", { type: "image/png" });
 }

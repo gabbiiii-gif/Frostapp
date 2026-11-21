@@ -147,6 +147,8 @@ const RelatoriosModule = comSuspense(lazy(() => import("./modules/RelatoriosModu
 // FrostERP Mobile: casca do ERP no celular (< 768px), em chunk próprio — o
 // desktop nunca baixa. useEhCelular é minúsculo e decide qual layout mostrar.
 const MobileApp = lazy(() => import("./mobile/MobileApp.jsx"));
+// Tela de enquadrar a logo (tipo WhatsApp) — só baixa quando alguém troca a logo.
+const EnquadrarImagem = lazy(() => import("./EnquadrarImagem.jsx"));
 import { useEhCelular } from "./mobile/useEhCelular.js";
 import ErroMobile from "./mobile/ErroMobile.jsx";
 // Permissões de módulo por usuário — regra pura, testada em permissoes.test.js.
@@ -5357,15 +5359,19 @@ function LogoPicker({ value, onChange, addToast }) {
   const [info, setInfo] = useState(null); // { formato, largura, altura, cortouMargem, sugerirVetor }
   const [candidatoSvg, setCandidatoSvg] = useState(null); // { dataUrl, bytes }
   const [dimPreview, setDimPreview] = useState(null);
-  const fileInputRef = useRef(null);
+  const [enquadrando, setEnquadrando] = useState(null); // data URL aberta na tela de enquadrar
+  const galeriaRef = useRef(null);
+  const cameraRef = useRef(null);
 
-  const handleFile = useCallback(async (file) => {
+  // Grava o arquivo já enquadrado (ou SVG, que não passa pelo enquadramento).
+  // Depois do enquadramento manual não recorta margem: a moldura é do usuário.
+  const handleFile = useCallback(async (file, { manual = false } = {}) => {
     if (!file) return;
     setBusy("processando");
     setCandidatoSvg(null);
     try {
       const { processarLogo } = await import("./lib/logo.js");
-      const r = await processarLogo(file);
+      const r = await processarLogo(file, { recortarMargem: !manual });
       onChange(r.dataUrl);
       setInfo(r);
       addToast?.(r.cortouMargem ? "Logo carregada — margem vazia removida." : "Logo carregada.", "success");
@@ -5373,16 +5379,47 @@ function LogoPicker({ value, onChange, addToast }) {
       addToast?.(err.message || "Falha ao processar imagem.", "error");
     } finally {
       setBusy("");
-      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   }, [onChange, addToast]);
+
+  // Fluxo do WhatsApp: escolheu a foto → abre o enquadramento. SVG é vetor e
+  // vai direto (recortar viraria imagem comum).
+  const abrirEnquadramento = useCallback(async (file) => {
+    if (!file) return;
+    if (!file.type?.startsWith("image/")) { addToast?.("Escolha um arquivo de imagem.", "error"); return; }
+    if (file.type === "image/svg+xml") { handleFile(file); return; }
+    if (file.size > 15 * 1024 * 1024) { addToast?.("Imagem acima de 15MB.", "error"); return; }
+    const url = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    }).catch(() => null);
+    if (url) setEnquadrando(url); else addToast?.("Não foi possível abrir a imagem.", "error");
+  }, [handleFile, addToast]);
+
+  // Câmera / Galeria: no APK usa o plugin nativo (mesmo seletor do sistema);
+  // no navegador, <input type=file> — com `capture` a câmera abre direto.
+  const escolher = useCallback(async (origem) => {
+    if (isNative()) {
+      try {
+        const { escolherImagemNativa } = await import("./platform.js");
+        const url = await escolherImagemNativa(origem);
+        if (url) setEnquadrando(url);
+      } catch (e) {
+        addToast?.(e.message || "Não foi possível abrir a " + (origem === "camera" ? "câmera." : "galeria."), "error");
+      }
+      return;
+    }
+    (origem === "camera" ? cameraRef : galeriaRef).current?.click();
+  }, [addToast]);
 
   const handleDrop = useCallback((e) => {
     e.preventDefault();
     setDragOver(false);
     const file = e.dataTransfer.files?.[0];
-    if (file) handleFile(file);
-  }, [handleFile]);
+    if (file) abrirEnquadramento(file);
+  }, [abrirEnquadramento]);
 
   const handlePaste = useCallback(async () => {
     try {
@@ -5391,7 +5428,7 @@ function LogoPicker({ value, onChange, addToast }) {
         for (const type of item.types) {
           if (type.startsWith("image/")) {
             const blob = await item.getType(type);
-            handleFile(new File([blob], "clipboard.png", { type }));
+            abrirEnquadramento(new File([blob], "clipboard.png", { type }));
             return;
           }
         }
@@ -5400,7 +5437,7 @@ function LogoPicker({ value, onChange, addToast }) {
     } catch {
       addToast?.("Permissão para colar negada pelo navegador.", "error");
     }
-  }, [handleFile, addToast]);
+  }, [abrirEnquadramento, addToast]);
 
   const applyUrl = useCallback(() => {
     const u = urlInput.trim();
@@ -5463,20 +5500,26 @@ function LogoPicker({ value, onChange, addToast }) {
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
-          onClick={() => !busy && fileInputRef.current?.click()}
-          className={`border-2 border-dashed rounded-lg p-5 text-center cursor-pointer transition ${dragOver ? "border-blue-500 bg-blue-500/10" : "border-gray-600 hover:border-gray-500 bg-gray-700/30"}`}
+          className={`border-2 border-dashed rounded-lg p-3 transition ${dragOver ? "border-blue-500 bg-blue-500/10" : "border-gray-600 bg-gray-700/30"}`}
         >
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={(e) => handleFile(e.target.files?.[0])}
-          />
-          <p className="text-sm text-gray-200">
-            {busy === "processando" ? "⏳ Otimizando a imagem..." : "📤 Toque para escolher a logo"}
+          {/* Inputs escondidos (navegador). `capture` abre a câmera direto no celular. */}
+          <input ref={galeriaRef} type="file" accept="image/*" className="hidden"
+            onChange={(e) => { abrirEnquadramento(e.target.files?.[0]); e.target.value = ""; }} />
+          <input ref={cameraRef} type="file" accept="image/*" capture="environment" className="hidden"
+            onChange={(e) => { abrirEnquadramento(e.target.files?.[0]); e.target.value = ""; }} />
+          <div className="grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => escolher("camera")} disabled={!!busy}
+              className="flex flex-col items-center gap-1 py-3 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-100 disabled:opacity-60">
+              <span className="text-2xl" aria-hidden>📷</span><span className="text-sm">Câmera</span>
+            </button>
+            <button type="button" onClick={() => escolher("galeria")} disabled={!!busy}
+              className="flex flex-col items-center gap-1 py-3 rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-100 disabled:opacity-60">
+              <span className="text-2xl" aria-hidden>🖼️</span><span className="text-sm">Galeria</span>
+            </button>
+          </div>
+          <p className="text-[11px] text-gray-500 mt-2 text-center">
+            {busy === "processando" ? "⏳ Otimizando a imagem..." : "Depois de escolher, você enquadra a imagem. No computador, pode arrastar o arquivo aqui."}
           </p>
-          <p className="text-[11px] text-gray-500 mt-1">PNG, JPG, WEBP ou SVG · até 8MB · a margem vazia é cortada sozinha</p>
         </div>
       )}
 
@@ -5513,6 +5556,11 @@ function LogoPicker({ value, onChange, addToast }) {
               {formatoAtual}{dims ? ` · ${dims}px` : ""}{kb(value) ? ` · ${kb(value)}KB` : ""}
               {info?.cortouMargem ? " · margem removida" : ""}
             </span>
+            {podeVetorizar && (
+              <button type="button" onClick={() => setEnquadrando(value)} className="text-xs px-2.5 py-1.5 rounded-md bg-gray-700 hover:bg-gray-600 text-gray-100 transition">
+                ✂️ Enquadrar
+              </button>
+            )}
             <button type="button" onClick={() => { onChange(""); setInfo(null); }} className="text-xs px-2.5 py-1.5 rounded-md bg-red-600/20 hover:bg-red-600/40 text-red-300 transition">
               Remover
             </button>
@@ -5560,6 +5608,16 @@ function LogoPicker({ value, onChange, addToast }) {
             </button>
           </div>
         </div>
+      )}
+
+      {enquadrando && (
+        <Suspense fallback={<div className="fixed inset-0 z-[9999] bg-black" />}>
+          <EnquadrarImagem
+            src={enquadrando}
+            onCancelar={() => setEnquadrando(null)}
+            onConfirmar={(file) => { setEnquadrando(null); handleFile(file, { manual: true }); }}
+          />
+        </Suspense>
       )}
     </div>
   );

@@ -45,6 +45,27 @@ export async function takePhoto({ quality = 80, allowEditing = false } = {}) {
   return photo.dataUrl;
 }
 
+// Escolhe uma imagem pela câmera ou pela galeria no APK (plugin Camera), como
+// o WhatsApp. Retorna data URL ou null se o usuário cancelar. No web quem faz
+// isso é <input type=file> (com `capture` para a câmera) — ver LogoPicker.
+export async function escolherImagemNativa(origem = 'galeria') {
+  if (!isNative()) throw new Error('escolherImagemNativa: só no app nativo.');
+  const { Camera, CameraResultType, CameraSource } = await import('@capacitor/camera');
+  try {
+    const foto = await Camera.getPhoto({
+      quality: 92,
+      allowEditing: false, // o enquadramento é feito no próprio app (EnquadrarImagem)
+      resultType: CameraResultType.DataUrl,
+      source: origem === 'camera' ? CameraSource.Camera : CameraSource.Photos,
+    });
+    return foto.dataUrl || null;
+  } catch (e) {
+    // Cancelar no seletor nativo vira exceção — não é erro para o usuário.
+    if (/cancel/i.test(e?.message || '')) return null;
+    throw e;
+  }
+}
+
 // Compartilhar OS/orçamento via WhatsApp/email nativo.
 export async function shareNative({ title, text, url, dialogTitle = 'Compartilhar' }) {
   if (!isNative()) {
