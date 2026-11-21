@@ -1,15 +1,15 @@
 {
-  "attribution": {
-    "commit": "",
-    "pr": "",
-    "sessionUrl": false
+  "attribution": { "commit": "", "pr": "", "sessionUrl": false },
+  "permissions": {
+    "allow": [
+      "mcp__claude-code-remote__add_repo",
+      "mcp__claude-code-remote__register_repo_root"
+    ]
   },
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
+  "hooks": { ...como já está... }
+}
+{
+          "type": "command",
             "command": "git config user.name gabbiiii-gif; git config user.email 214852073+gabbiiii-gif@users.noreply.github.com",
             "timeout": 15,
             "statusMessage": "Autoria dos commits: gabbiiii-gif"
